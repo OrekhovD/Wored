@@ -1,0 +1,4 @@
+interface:
+  display_name: "Provider Router"
+  short_description: "Multi-provider routing and fallback policy design"
+  default_prompt: "Use $provider-router to define provider capability tables, routing matrices, and fallback chains for multi-provider AI orchestration."

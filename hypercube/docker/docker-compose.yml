@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  db-init:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: python scripts/db_init.py
+    env_file:
+      - ../.env
+    volumes:
+      - ../data:/app/data
+
+volumes:
+  data:

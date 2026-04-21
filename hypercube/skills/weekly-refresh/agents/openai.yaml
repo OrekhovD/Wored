@@ -1,0 +1,4 @@
+interface:
+  display_name: "Weekly Refresh"
+  short_description: "Weekly provider and runtime refresh workflow"
+  default_prompt: "Use $weekly-refresh to update provider registries, changelogs, deprecation notes, and weekly refresh evidence."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Token Quota Guard"
+  short_description: "Token accounting, quotas, and premium gating"
+  default_prompt: "Use $token-quota-guard to define token usage storage, quota policies, and audit flows for multi-provider AI requests."

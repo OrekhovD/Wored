@@ -1,0 +1,83 @@
+codex_profile:
+  model: gpt-5.4
+  reasoning_effort: high
+  work_mode: agentic
+  context_strategy:
+    load_full_repo: true
+    load_docs_first: true
+    preserve_architecture_files: true
+    preserve_env_registry: true
+    preserve_test_matrix: true
+
+  execution_policy:
+    allow_read_repo: true
+    allow_write_repo: true
+    allow_run_tests: true
+    allow_docker_compose: true
+    allow_local_http_checks: true
+    allow_generate_docs: true
+    forbid_prod_deploy: true
+    forbid_secret_echo: true
+    forbid_destructive_delete_without_backup: true
+
+  development_protocol:
+    require_plan_before_codegen: true
+    require_rfc_before_core_architecture: true
+    require_tests_after_each_batch: true
+    require_docs_update_after_behavior_change: true
+    require_full_file_output_for_critical_files: true
+    require_explicit_assumptions: true
+
+  quality_gates:
+    lint_must_pass: true
+    typecheck_must_pass: true
+    unit_tests_must_pass: true
+    integration_tests_must_pass: true
+    docker_smoke_test_must_pass: true
+    docs_review_after_green_tests: true
+
+  documentation_policy:
+    target_audience:
+      - weak_models
+      - junior_developers
+      - future_you
+    style:
+      - explicit
+      - step_by_step
+      - copy_paste_ready
+      - no_implicit_steps
+      - rollback_included
+      - troubleshooting_included
+
+  routing_defaults:
+    execution_modes:
+      - free_only
+      - balanced
+      - premium
+    default_mode: free_only
+    provider_order_is_configurable: true
+    fallback_on:
+      - timeout
+      - quota_exceeded
+      - rate_limit
+      - invalid_response
+      - provider_unavailable
+      - policy_rejection
+
+  accounting_defaults:
+    persist_request_id: true
+    persist_provider_model: true
+    persist_input_tokens: true
+    persist_output_tokens: true
+    persist_latency_ms: true
+    persist_status: true
+    persist_cost_estimate: true
+
+  weekly_refresh:
+    enabled: true
+    schedule: "every Monday 09:00 Asia/Bangkok"
+    outputs:
+      - CHANGELOG_WEEKLY.md
+      - docs/KNOWN_LIMITS.md
+      - docs/PROVIDER_DIFF.md
+      - docs/DEPRECATIONS.md

@@ -1,0 +1,121 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+env.bak/
+runtime/
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# mkdocs
+/site/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+.env.development
+*.env
+
+# Secrets and keys
+docs/kluch.txt
+docs/keys.txt
+docs/secrets.txt
+credentials.json
+
+# Logs
+*.log
+logs/
+
+# Data
+data/
+*.db
+*.db-journal
+
+# Secrets
+secrets/
+credentials.json
+private.key
+cert.pem
+
+# Local settings
+settings.json
+config.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Coverage reports
+.coverage
+htmlcov/
+.tox/
+
+# Documentation
+docs/_build/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Docker
+.dockerenv
+.dockerinit
+
+# Processed files
+*.bak
+*.backup
+*.original

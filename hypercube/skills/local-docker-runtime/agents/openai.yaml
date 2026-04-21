@@ -1,0 +1,4 @@
+interface:
+  display_name: "Local Docker Runtime"
+  short_description: "Reproducible Docker Compose local runtime setup"
+  default_prompt: "Use $local-docker-runtime to define Docker Compose services, healthchecks, scripts, and local recovery procedures."

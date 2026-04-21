@@ -1,0 +1,167 @@
+# Provider Registry Configuration
+# This file defines all AI providers, their models, costs, and routing policies.
+# The routing engine reads this file to build candidate chains and validate providers.
+
+version: "1.0"
+updated_at: "2026-04-21"
+
+providers:
+  dashscope:
+    display_name: "DashScope (Qwen Cloud)"
+    base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    env_key: "DASHSCOPE_API_KEY"
+    enabled: true
+    health_check_path: "/models"
+    timeout_seconds: 30
+    retry_count: 2
+    retry_delay_ms: 1000
+    models:
+      qwen-plus:
+        display_name: "Qwen Plus"
+        status: "active"
+        is_premium: false
+        supports_streaming: true
+        supports_system_prompt: true
+        max_tokens: 8192
+        cost:
+          input_per_1k: 0.0002
+          output_per_1k: 0.0006
+        tags: ["balanced", "analysis"]
+      qwen-turbo:
+        display_name: "Qwen Turbo"
+        status: "active"
+        is_premium: false
+        supports_streaming: true
+        supports_system_prompt: true
+        max_tokens: 8192
+        cost:
+          input_per_1k: 0.0001
+          output_per_1k: 0.0003
+        tags: ["free", "fast", "fallback"]
+
+  nvapi:
+    display_name: "NVIDIA nvapi (MiniMax)"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    env_key: "NVAPI_API_KEY"
+    enabled: true
+    health_check_path: "/models"
+    timeout_seconds: 45
+    retry_count: 1
+    retry_delay_ms: 2000
+    models:
+      ai-minimax/minimax-m2.7:
+        display_name: "MiniMax M2.7"
+        status: "active"
+        is_premium: false
+        supports_streaming: true
+        supports_system_prompt: true
+        max_tokens: 4096
+        cost:
+          input_per_1k: 0.00015
+          output_per_1k: 0.0006
+        tags: ["balanced", "reliable"]
+
+  zhipu:
+    display_name: "Zhipu AI (GLM-5)"
+    base_url: "https://open.bigmodel.cn/api/paas/v4"
+    env_key: "GLM5_API_KEY"
+    enabled: true
+    health_check_path: "/models"
+    timeout_seconds: 60
+    retry_count: 1
+    retry_delay_ms: 3000
+    models:
+      glm-5:
+        display_name: "GLM-5"
+        status: "active"
+        is_premium: true
+        supports_streaming: true
+        supports_system_prompt: true
+        max_tokens: 4096
+        cost:
+          input_per_1k: 0.0001
+          output_per_1k: 0.0005
+        tags: ["premium", "best_quality"]
+
+  ai_studio:
+    display_name: "Baidu AI Studio"
+    base_url: "https://qianfan.baidubce.com/v2"
+    env_key: "AI_STUDIO_API_KEY"
+    enabled: true
+    health_check_path: "/models"
+    timeout_seconds: 30
+    retry_count: 1
+    retry_delay_ms: 1500
+    models:
+      ernie-bot-turbo:
+        display_name: "ERNIE Bot Turbo"
+        status: "active"
+        is_premium: false
+        supports_streaming: false
+        supports_system_prompt: true
+        max_tokens: 2048
+        cost:
+          input_per_1k: 0.0001
+          output_per_1k: 0.0004
+        tags: ["free", "fallback"]
+
+# Routing Policies
+# Each mode defines an ordered chain of model IDs to try.
+# The routing engine will attempt models in order, falling back on failure.
+
+routing_policies:
+  free_only:
+    description: "Use only free or low-cost models"
+    candidate_chain:
+      - qwen-turbo
+      - ernie-bot-turbo
+      - qwen-plus
+      - ai-minimax/minimax-m2.7
+    exclude_premium: true
+    max_fallbacks: 3
+
+  balanced:
+    description: "Balance between quality and cost"
+    candidate_chain:
+      - glm-5
+      - qwen-plus
+      - ai-minimax/minimax-m2.7
+      - qwen-turbo
+      - ernie-bot-turbo
+    exclude_premium: false
+    max_fallbacks: 4
+
+  premium:
+    description: "Best quality, cost is secondary"
+    candidate_chain:
+      - glm-5
+      - qwen-plus
+      - ai-minimax/minimax-m2.7
+      - qwen-turbo
+      - ernie-bot-turbo
+    exclude_premium: false
+    max_fallbacks: 4
+
+# Premium Unlock Policy
+premium_unlock:
+  requires_mode: "premium"
+  requires_quota_above_pct: 10.0
+  requires_healthy_provider: true
+
+# Fallback Reason Codes
+fallback_reasons:
+  timeout: "Provider did not respond within timeout"
+  quota_exceeded: "Token quota exhausted"
+  rate_limit: "Provider rate limit reached"
+  invalid_response: "Provider returned malformed response"
+  provider_unavailable: "Provider is offline or unreachable"
+  policy_rejection: "Model excluded by routing policy"
+  health_degraded: "Provider health check failed"
+  manual_switch: "User requested model switch"
+
+# Health Check Configuration
+health_check:
+  interval_seconds: 300
+  timeout_seconds: 15
+  consecutive_failures_for_degraded: 3
+  consecutive_successes_for_recovery: 2

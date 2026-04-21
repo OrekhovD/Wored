@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Orchestrator"
+  short_description: "Layered tests for routing, quotas, and bot flows"
+  default_prompt: "Use $test-orchestrator to create the validation matrix, fixtures, smoke tests, and regression checks for the AI gateway."

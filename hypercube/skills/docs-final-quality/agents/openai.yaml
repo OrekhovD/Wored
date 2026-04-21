@@ -1,0 +1,4 @@
+interface:
+  display_name: "Docs Final Quality"
+  short_description: "Deterministic setup, ops, and architecture docs"
+  default_prompt: "Use $docs-final-quality to produce explicit setup, architecture, testing, troubleshooting, and operations documentation."

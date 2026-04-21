@@ -1,0 +1,9 @@
+-r requirements.txt
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-cov==6.0.0
+black==24.10.0
+ruff==0.9.4
+mypy==1.14.1
+types-pyyaml==6.0.12.20241230
+respx==0.22.0

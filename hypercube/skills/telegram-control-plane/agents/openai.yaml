@@ -1,0 +1,4 @@
+interface:
+  display_name: "Telegram Control Plane"
+  short_description: "Telegram command surface and handler boundaries"
+  default_prompt: "Use $telegram-control-plane to design Telegram commands, handler boundaries, and admin-safe operational flows."
