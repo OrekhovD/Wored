@@ -1,0 +1,58 @@
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: htx_trading_bot_postgres
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - '5432:5432'
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    container_name: htx_trading_bot_redis
+    ports:
+      - '6379:6379'
+    restart: unless-stopped
+
+  collector:
+    build: ./collector
+    container_name: htx_trading_bot_collector
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - .env
+    volumes:
+      - ./collector:/app
+    command: python main.py
+    restart: unless-stopped
+
+  chatbot:
+    build: ./chatbot
+    container_name: htx_trading_bot_chatbot
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - .env
+    volumes:
+      - ./chatbot:/app
+    command: python main.py
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

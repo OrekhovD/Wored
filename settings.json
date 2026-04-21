@@ -1,0 +1,40 @@
+{
+    "permissions": {
+        "allow": [
+            "Bash(*)",
+            "read_file(*)",
+            "write_file(*)",
+            "edit(*)",
+            "run_shell_command(*)",
+            "grep_search(*)",
+            "glob(*)",
+            "list_directory(*)",
+            "web_fetch(*)",
+            "agent(*)",
+            "skill(*)",
+            "todo_write(*)",
+            "ask_user_question(*)",
+            "save_memory(*)",
+            "exit_plan_mode(*)"
+        ]
+    },
+    "language": "ru",
+    "outputPreferences": {
+        "showLineNumbers": true,
+        "showFullPath": true,
+        "truncateLongLines": false
+    },
+    "security": {
+        "confirmUnsafeCommands": true,
+        "sandboxMode": false
+    },
+    "workspace": {
+        "excludePatterns": [
+            "node_modules/**",
+            ".git/**",
+            "*.log",
+            "dist/**",
+            "build/**"
+        ]
+    }
+}
