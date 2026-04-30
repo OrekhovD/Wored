@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+<main class="auth-layout">
+  <section class="panel auth-panel">
+    <div class="panel-kicker">Authentication</div>
+    <h2>Вход в WORED Web UI</h2>
+    <p class="auth-copy">
+      Эта сессия защищает браузерный доступ к alert history, AI journal drill-down и admin actions.
+    </p>
+    <form method="post" action="/login" class="auth-form">
+      <input type="hidden" name="next" value="{{ next_target }}">
+      <label class="field">
+        <span>Username</span>
+        <input type="text" name="username" value="{{ admin_username }}" autocomplete="username" required>
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit" class="primary-button">Open control room</button>
+    </form>
+  </section>
+</main>
+{% endblock %}

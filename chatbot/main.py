@@ -14,6 +14,7 @@ from handlers.chat import router as chat_router
 from handlers.alerts import router as alerts_router
 from handlers.analytics import router as analytics_router
 from handlers.portfolio import router as portfolio_router
+from handlers.predictions import router as predictions_router
 from handlers.settings import router as settings_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -42,7 +43,7 @@ async def alert_listener(bot: Bot):
 
 async def main():
     token = os.getenv("TELEGRAM_TOKEN")
-    if not token or token.startswith("8686265741"):
+    if not token or "replace_with_bot_token" in token:
         log.warning("Please update TELEGRAM_TOKEN in .env. Bot may fail to start.")
 
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -55,6 +56,7 @@ async def main():
     dp.include_router(alerts_router)
     dp.include_router(analytics_router)
     dp.include_router(portfolio_router)
+    dp.include_router(predictions_router)
     dp.include_router(settings_router)
     dp.include_router(chat_router) # should be last since it catches messages
 

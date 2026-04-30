@@ -1,58 +1,68 @@
+from __future__ import annotations
+
+import asyncio
 import json
 import logging
-import asyncio
 
 log = logging.getLogger(__name__)
 
-CLASSIFY_PROMPT = """Ты — диспетчер сообщений для крипто-бота (быстрый и точный аналитик намерений).
-Определи намерение пользователя из следующих вариантов:
-- "price": запрос текущей стоимости или изменения цены монеты (пример: "сколько стоит btc", "цена биткоина")
-- "analysis": просьба сделать прогноз или анализировать перспективы одной монеты (пример: "что думаешь про btc", "шортить эфир?")
-- "comparison": просьба сравнить два актива (пример: "сравни btc и eth", "что лучше взять, солану или эфир")
-- "simple": простой вопрос по криптовалютам и терминам (пример: "что такое халвинг", "зачем нужен defi")
-- "chat": все остальное, приветствие, шутки, вопросы не по теме (пример: "привет", "как дела")
+CLASSIFY_PROMPT = """Ты — диспетчер сообщений для крипто-бота.
+Определи намерение пользователя и верни JSON со схемой:
+{"intent":"price|analysis|deep_analysis|comparison|simple|chat","tickers":["btcusdt"]}.
 
-Проанализируй запрос и верни ответ строго в формате JSON, без маркдауна и внешних тэгов.
-Ключи JSON:
-- "intent": тип намерения (price, analysis, comparison, simple, chat)
-- "tickers": массив тикеров крипты из запроса, переведенных в нижний регистр с 'usdt' на конце (например: ["btcusdt"], ["btcusdt", "ethusdt"]). Если тикеры не упоминаются, верни [].
+Правила:
+- "price": запрос текущей цены или изменения цены монеты
+- "analysis": прогноз или анализ одной монеты
+- "deep_analysis": подробный глубокий разбор, стратегия, пошаговый анализ
+- "comparison": сравнение двух активов
+- "simple": простой вопрос по криптовалюте и терминам
+- "chat": все остальное
+
+Тикеры верни в нижнем регистре с суффиксом usdt. Если тикеров нет, верни [].
 
 Запрос пользователя: {message}"""
 
+
 async def classify(message: str) -> dict:
-    """Classify user intent using the fast worker model (glm-4-flash)."""
+    from ai.models import MODELS, WORKER_MODEL_CHAIN
     from ai.router import get_client
-    from ai.models import MODELS
-    
-    cfg = MODELS["worker"]
-    client = get_client("worker")
-    
-    try:
-        response = await asyncio.wait_for(
-            client.chat.completions.create(
-                model=cfg.model_id,
-                messages=[{"role": "user", "content": CLASSIFY_PROMPT.format(message=message)}],
-                max_tokens=150,
-                temperature=0.1,
-            ),
-            timeout=10.0
-        )
-        content = response.choices[0].message.content.strip()
-        if content.startswith("```"):
-            lines = content.splitlines()
-            if lines[0].startswith("```"): lines = lines[1:]
-            if lines[-1].startswith("```"): lines = lines[:-1]
-            content = "".join(lines)
-            
-        data = json.loads(content)
-        # legacy fallback
-        if "ticker" in data and isinstance(data["ticker"], str):
-            data["tickers"] = [data["ticker"]]
-            
-        if "tickers" not in data:
-            data["tickers"] = []
-            
-        return data
-    except Exception as e:
-        log.warning(f"Classification failed: {e}. Falling back to 'analysis' default.")
-        return {"intent": "analysis", "tickers": ["btcusdt"]}
+
+    for tier in WORKER_MODEL_CHAIN:
+        cfg = MODELS[tier]
+        client = get_client(tier)
+        if client is None:
+            continue
+
+        try:
+            request_kwargs = {
+                "model": cfg.model_id,
+                "messages": [{"role": "user", "content": CLASSIFY_PROMPT.format(message=message)}],
+                "max_tokens": 150,
+                "temperature": 0.1,
+            }
+            if "dashscope-intl.aliyuncs.com" in cfg.endpoint:
+                request_kwargs["extra_body"] = {"enable_thinking": False}
+            response = await asyncio.wait_for(
+                client.chat.completions.create(**request_kwargs),
+                timeout=cfg.timeout,
+            )
+            content = (response.choices[0].message.content or "").strip()
+            if content.startswith("```"):
+                lines = content.splitlines()
+                if lines and lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                content = "\n".join(lines).strip()
+
+            data = json.loads(content)
+            if "ticker" in data and isinstance(data["ticker"], str):
+                data["tickers"] = [data["ticker"]]
+            if "tickers" not in data:
+                data["tickers"] = []
+            return data
+        except Exception as exc:
+            log.warning("Classification failed on %s: %s. Trying next worker model...", cfg.model_id, exc)
+
+    log.warning("Classification failed across worker chain. Falling back to default analysis intent.")
+    return {"intent": "analysis", "tickers": ["btcusdt"]}

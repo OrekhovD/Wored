@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="hero">
+  <div class="hero-copy">
+    <div class="eyebrow">WORED Local Control Room</div>
+    <h1>Браузерная панель для бота, рынка и AI-контекста</h1>
+    <p>
+      Глубокий просмотр свечей, объёмов, индикаторов, AI journal и spike-alert событий
+      без прыжков между Telegram, логами и SQL-консолью.
+    </p>
+  </div>
+  <div class="hero-meta">
+    <div class="metric-stack">
+      <div class="metric-card">
+        <span class="metric-label">Активный символ</span>
+        <span id="activeSymbolMetric" class="metric-value">{{ default_symbol | upper }}</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Источник графика</span>
+        <span class="metric-value">HTX REST + локальные сигналы</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Контур</span>
+        <span class="metric-value">Redis + Postgres + FastAPI</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="dashboard">
+  <section class="panel panel-chart">
+    <div class="panel-header">
+      <div>
+        <div class="panel-kicker">Market Studio</div>
+        <h2>Свечи, объём и моментум</h2>
+      </div>
+      <div class="toolbar">
+        <label class="field">
+          <span>Символ</span>
+          <select id="symbolSelect">
+            {% for symbol in watchlist %}
+            <option value="{{ symbol }}" {% if symbol == default_symbol %}selected{% endif %}>{{ symbol | upper }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="period-picker" id="periodPicker">
+          <button data-period="5min">5m</button>
+          <button data-period="15min">15m</button>
+          <button data-period="60min" class="is-active">1h</button>
+          <button data-period="4hour">4h</button>
+          <button data-period="1day">1d</button>
+        </div>
+        <button id="autoRefreshButton" class="ghost-button is-active">Автообновление</button>
+      </div>
+    </div>
+
+    <div class="chart-stack">
+      <div class="chart-card">
+        <div class="chart-title-row">
+          <span>Price + SMA20/SMA50</span>
+          <span id="priceStamp" class="subtle"></span>
+        </div>
+        <div id="priceChart" class="chart-frame chart-main"></div>
+      </div>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="chart-title-row">
+            <span>Volume</span>
+            <span class="subtle">текущее окно</span>
+          </div>
+          <div id="volumeChart" class="chart-frame chart-small"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title-row">
+            <span>RSI 14</span>
+            <span class="subtle">30 / 70 зоны</span>
+          </div>
+          <div id="rsiChart" class="chart-frame chart-small"></div>
+        </div>
+        <div class="chart-card chart-card-wide">
+          <div class="chart-title-row">
+            <span>MACD</span>
+            <span class="subtle">линия, сигнал, histogram</span>
+          </div>
+          <div id="macdChart" class="chart-frame chart-small"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="side-column">
+    {% if can_admin %}
+    <section class="panel">
+      <div class="panel-kicker">Admin Actions</div>
+      <h2>Операционные действия</h2>
+      <div class="action-grid">
+        <form method="post" action="/admin/actions/refresh-cache" class="action-card">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="next" value="{{ current_path }}">
+          <div class="action-title">Warm Redis cache</div>
+          <div class="action-copy">Принудительно подтянуть текущий watchlist из HTX REST в `ticker:*`.</div>
+          <button type="submit" class="ghost-button">Обновить кэш</button>
+        </form>
+        <form method="post" action="/admin/actions/journal-snapshot" class="action-card">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="next" value="/journal">
+          <div class="action-title">Record AI snapshot</div>
+          <div class="action-copy">Создать внеплановую запись `ai_journal` по текущему watchlist.</div>
+          <button type="submit" class="ghost-button">Снять snapshot</button>
+        </form>
+        <form method="post" action="/admin/actions/clear-acknowledged-alerts" class="action-card">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="next" value="/alerts">
+          <div class="action-title">Clear acknowledged alerts</div>
+          <div class="action-copy">Удалить из истории алерты, которые уже отмечены как acknowledged.</div>
+          <button type="submit" class="ghost-button">Очистить acknowledged</button>
+        </form>
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="panel">
+      <div class="section-header">
+        <div>
+          <div class="panel-kicker">Prediction Lab</div>
+          <h2>Hourly model showdown</h2>
+        </div>
+        <a class="section-link" href="/predictions">Open</a>
+      </div>
+      <div class="action-card">
+        <div class="action-title">Launch a forecast request</div>
+        <div class="action-copy">
+          Compare every configured model on the same symbol and horizon, then track real market accuracy hour by hour.
+        </div>
+        <a class="ghost-button link-button" href="/predictions">Go to predictions</a>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-kicker">Runtime Pulse</div>
+      <h2>Состояние системы</h2>
+      <div id="healthGrid" class="pill-grid"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-kicker">Watchlist</div>
+      <h2>Горячий кэш Redis</h2>
+      <div id="watchlistGrid" class="watchlist-grid"></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-header">
+        <div>
+          <div class="panel-kicker">Spike Alerts</div>
+          <h2>Последние события</h2>
+        </div>
+        <a class="section-link" href="/alerts">View all</a>
+      </div>
+      <div id="alertsList" class="event-list"></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-header">
+        <div>
+          <div class="panel-kicker">AI Journal</div>
+          <h2>Снимки контекста</h2>
+        </div>
+        <a class="section-link" href="/journal">Drill down</a>
+      </div>
+      <div id="journalList" class="journal-list"></div>
+    </section>
+  </aside>
+</main>
+
+<script>
+  window.WORED_BOOT = {
+    watchlist: {{ watchlist | tojson }},
+    defaultSymbol: {{ default_symbol | tojson }}
+  };
+</script>
+<script type="module" src="/static/app.js"></script>
+{% endblock %}

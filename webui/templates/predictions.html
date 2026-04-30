@@ -1,0 +1,384 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <div class="eyebrow">Prediction Lab</div>
+    <h1>Hourly multi-model crypto forecasts</h1>
+    <p class="page-copy">
+      Choose a symbol and horizon, generate hourly price paths from every configured model, and track how each one performs
+      against the real market as the hours close.
+    </p>
+  </div>
+  <div class="stats-grid prediction-stats">
+    <div class="metric-card">
+      <span class="metric-label">Available symbols</span>
+      <span class="metric-value">{{ watchlist | length }}</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Forecast horizons</span>
+      <span class="metric-value">{{ prediction_horizons | join(", ") }}h</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Model slots</span>
+      <span class="metric-value">{{ model_statuses | length }}</span>
+    </div>
+  </div>
+</header>
+
+<section class="panel prediction-form-panel">
+  <div class="section-header">
+    <div>
+      <div class="panel-kicker">New Prediction</div>
+      <h2>Launch a model-vs-model forecast request</h2>
+    </div>
+    <div class="subtle">Every model predicts each hour from the same base price.</div>
+  </div>
+
+  <form method="post" action="/predictions" class="prediction-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field">
+      <span>Symbol</span>
+      <select name="symbol">
+        {% for symbol in watchlist %}
+        <option value="{{ symbol }}" {% if symbol == default_symbol %}selected{% endif %}>{{ symbol | upper }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Horizon</span>
+      <select name="horizon_hours">
+        {% for horizon in prediction_horizons %}
+        <option value="{{ horizon }}" {% if horizon == 4 %}selected{% endif %}>{{ horizon }} hour{% if horizon != 1 %}s{% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <button type="submit" class="primary-button">Generate forecast</button>
+  </form>
+
+  <div class="model-status-grid">
+    {% for item in model_statuses %}
+    <div class="model-status {% if item.available %}is-ready{% else %}is-missing{% endif %}">
+      <div class="status-pill-row">
+        <strong>{{ item.name }}</strong>
+        <span class="table-pill {% if item.available %}table-pill-ok{% else %}table-pill-warn{% endif %}">
+          {% if item.available %}ready{% else %}offline{% endif %}
+        </span>
+      </div>
+      <div class="subtle mono">{{ item.model_id }}</div>
+      {% if item.reason %}
+      <div class="model-status-copy">{{ item.reason }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="prediction-layout">
+  <aside class="panel prediction-sidebar">
+    <div class="section-header">
+      <div>
+        <div class="panel-kicker">Forecast History</div>
+        <h2>Saved requests</h2>
+      </div>
+    </div>
+
+    <div class="request-list">
+      {% if prediction_requests %}
+        {% for item in prediction_requests %}
+        <a href="/predictions/{{ item.id }}" class="request-link {% if selected_request and selected_request.id == item.id %}is-selected{% endif %}">
+          <div class="status-pill-row">
+            <strong>{{ item.symbol | upper }}</strong>
+            <span class="table-pill {% if item.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
+              {{ item.status }}
+            </span>
+          </div>
+          <div class="request-meta">
+            <span>{{ item.horizon_hours }}h horizon</span>
+            <span>base ${{ "%.2f"|format(item.base_price) }}</span>
+          </div>
+          <div class="request-meta">
+            <span>{{ item.completed_models }} ok / {{ item.failed_models }} fail</span>
+            <span>{{ item.evaluated_points }}/{{ item.total_points }} evaluated</span>
+          </div>
+          {% if item.avg_accuracy is not none %}
+          <div class="request-score">Avg success {{ "%.1f"|format(item.avg_accuracy) }}% / miss {{ "%.1f"|format(item.avg_failure) }}%</div>
+          {% endif %}
+          <div class="subtle">{{ item.created_at_display or item.created_at }}</div>
+        </a>
+        {% endfor %}
+      {% else %}
+      <div class="placeholder">No prediction requests yet. Start with the form above.</div>
+      {% endif %}
+    </div>
+
+    <div class="pager">
+      {% if page > 1 %}
+      <a class="ghost-button link-button" href="/predictions?page={{ page - 1 }}">Previous</a>
+      {% endif %}
+      {% if has_next_page %}
+      <a class="ghost-button link-button" href="/predictions?page={{ page + 1 }}">Next</a>
+      {% endif %}
+    </div>
+  </aside>
+
+  <div class="panel prediction-detail">
+    {% if selected_request %}
+    <div class="section-header">
+      <div>
+        <div class="panel-kicker">Request #{{ selected_request.id }}</div>
+        <h2>{{ selected_request.symbol | upper }} over {{ selected_request.horizon_hours }} hour{% if selected_request.horizon_hours != 1 %}s{% endif %}</h2>
+      </div>
+      <div class="detail-metrics">
+        <span class="table-pill {% if selected_request.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
+          {{ selected_request.status }}
+        </span>
+        <span class="subtle">Base ${{ "%.2f"|format(selected_request.base_price) }}</span>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="metric-card">
+        <span class="metric-label">Created</span>
+        <span class="metric-value">{{ selected_request.created_at_display or selected_request.created_at }}</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Models</span>
+        <span class="metric-value">{{ selected_request.completed_models }} ok / {{ selected_request.failed_models }} fail</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Evaluation</span>
+        <span class="metric-value">{{ selected_request.evaluated_points }}/{{ selected_request.total_points }}</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Average success</span>
+        <span class="metric-value">
+          {% if selected_request.avg_accuracy is not none %}
+          {{ "%.1f"|format(selected_request.avg_accuracy) }}% / miss {{ "%.1f"|format(selected_request.avg_failure) }}%
+          {% else %}
+          pending
+          {% endif %}
+        </span>
+      </div>
+    </div>
+
+    {% if selected_request.comparison_rows %}
+    <section class="detail-block comparison-section">
+      <div class="section-header">
+        <div>
+          <div class="panel-kicker">Comparison Matrix</div>
+          <h3>Real market versus every model by hour</h3>
+        </div>
+        {% if selected_request.top_model %}
+        <div class="detail-metrics">
+          <span class="table-pill table-pill-ok">Leader {{ selected_request.top_model.short_name }}</span>
+          <span class="score-badge">{{ "%.1f"|format(selected_request.top_model.avg_accuracy) }}%</span>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="table-wrap">
+        <table class="data-table comparison-table">
+          <thead>
+            <tr>
+              <th>Hour</th>
+              <th>Target</th>
+              <th>Real result</th>
+              {% for model in selected_request.comparison_models %}
+              <th class="comparison-model-head">
+                <div class="comparison-head">
+                  <strong>{{ model.short_name }}</strong>
+                  {% if model.role_name %}
+                  <div class="subtle">{{ model.role_name }}</div>
+                  {% endif %}
+                  <div class="comparison-head-meta">
+                    <span class="table-pill {% if model.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
+                      {{ model.status }}
+                    </span>
+                    {% if model.avg_accuracy is not none %}
+                    <span class="subtle">avg hit {{ "%.1f"|format(model.avg_accuracy) }}% / miss {{ "%.1f"|format(model.avg_failure) }}%</span>
+                    {% endif %}
+                  </div>
+                </div>
+              </th>
+              {% endfor %}
+              <th>Best</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in selected_request.comparison_rows %}
+            <tr>
+              <td><strong>+{{ row.forecast_hour }}h</strong></td>
+              <td class="mono">{{ row.target_time_display or row.target_time or "pending" }}</td>
+              <td>
+                <div class="comparison-actual">
+                  {% if row.actual_price is not none %}
+                  <strong>${{ "%.2f"|format(row.actual_price) }}</strong>
+                  <span class="{% if row.actual_change_pct is not none and row.actual_change_pct > 0 %}delta-up{% elif row.actual_change_pct is not none and row.actual_change_pct < 0 %}delta-down{% endif %}">
+                    {% if row.actual_change_pct is not none %}
+                    {{ "%+.2f"|format(row.actual_change_pct) }}%
+                    {% else %}
+                    flat
+                    {% endif %}
+                  </span>
+                  <span class="subtle">{{ row.evaluated_at_display or "evaluated" }}</span>
+                  {% else %}
+                  <span class="subtle">Waiting for hourly close</span>
+                  {% endif %}
+                </div>
+              </td>
+              {% for cell in row.model_cells %}
+              <td class="comparison-cell {% if cell.is_best %}is-best{% elif cell.cell_state == 'failed' %}is-failed{% endif %}">
+                <div class="comparison-stack">
+                  {% if cell.point %}
+                  <div class="comparison-price">${{ "%.2f"|format(cell.point.predicted_price) }}</div>
+                  <div class="{% if cell.point.predicted_change_pct > 0 %}delta-up{% elif cell.point.predicted_change_pct < 0 %}delta-down{% endif %}">
+                    {{ "%+.2f"|format(cell.point.predicted_change_pct) }}%
+                  </div>
+                  {% if cell.point.accuracy_score is not none %}
+                  <span class="score-badge">{{ "%.1f"|format(cell.point.accuracy_score) }}%</span>
+                  <span class="subtle">miss {{ "%.1f"|format(cell.point.failure_score) }}%</span>
+                  <span class="subtle">{% if cell.point.direction_match %}direction ok{% else %}direction miss{% endif %}</span>
+                  {% else %}
+                  <span class="subtle">success pending</span>
+                  {% endif %}
+                  {% elif cell.cell_state == "failed" %}
+                  <span class="subtle">model failed</span>
+                  {% else %}
+                  <span class="subtle">no forecast yet</span>
+                  {% endif %}
+                </div>
+              </td>
+              {% endfor %}
+              <td>
+                <div class="comparison-best">
+                  {% if row.best_accuracy is not none %}
+                  <strong>{{ row.best_models | join(", ") }}</strong>
+                  <span class="score-badge">{{ "%.1f"|format(row.best_accuracy) }}%</span>
+                  {% else %}
+                  <span class="subtle">pending</span>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    <div class="prediction-model-list">
+      {% for model in selected_request.models %}
+      <article class="prediction-model-card">
+        <div class="status-pill-row">
+          <div>
+            <h3>{{ model.model_name }}</h3>
+            <div class="subtle mono">{{ model.model_id }}</div>
+          </div>
+          <div class="detail-metrics">
+            <span class="table-pill {% if model.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
+              {{ model.status }}
+            </span>
+            {% if model.avg_accuracy is not none %}
+            <span class="score-badge">{{ "%.1f"|format(model.avg_accuracy) }}%</span>
+            <span class="subtle">miss {{ "%.1f"|format(model.avg_failure) }}%</span>
+            {% endif %}
+          </div>
+        </div>
+
+        {% if model.summary %}
+        <p class="model-summary">{{ model.summary }}</p>
+        {% endif %}
+        {% if model.error_message %}
+        <p class="model-error">{{ model.error_message }}</p>
+        {% endif %}
+
+        {% if model.points %}
+        <div class="table-wrap">
+          <table class="data-table forecast-table">
+            <thead>
+              <tr>
+                <th>Hour</th>
+                <th>Target</th>
+                <th>Predicted price</th>
+                <th>Predicted change</th>
+                <th>Actual price</th>
+                <th>Actual change</th>
+                <th>Success</th>
+                <th>Miss</th>
+                <th>Direction</th>
+                <th>Verdict</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for point in model.points %}
+              <tr>
+                <td>{{ point.forecast_hour }}</td>
+                <td class="mono">{{ point.target_time_display or point.target_time }}</td>
+                <td>${{ "%.2f"|format(point.predicted_price) }}</td>
+                <td class="{% if point.predicted_change_pct > 0 %}delta-up{% elif point.predicted_change_pct < 0 %}delta-down{% endif %}">
+                  {{ "%+.2f"|format(point.predicted_change_pct) }}%
+                </td>
+                <td>
+                  {% if point.actual_price is not none %}
+                  ${{ "%.2f"|format(point.actual_price) }}
+                  {% else %}
+                  <span class="subtle">pending</span>
+                  {% endif %}
+                </td>
+                <td class="{% if point.actual_change_pct is not none and point.actual_change_pct > 0 %}delta-up{% elif point.actual_change_pct is not none and point.actual_change_pct < 0 %}delta-down{% endif %}">
+                  {% if point.actual_change_pct is not none %}
+                  {{ "%+.2f"|format(point.actual_change_pct) }}%
+                  {% else %}
+                  <span class="subtle">pending</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if point.accuracy_score is not none %}
+                  <span class="score-badge">{{ "%.1f"|format(point.accuracy_score) }}%</span>
+                  {% else %}
+                  <span class="subtle">pending</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if point.failure_score is not none %}
+                  <span class="subtle">{{ "%.1f"|format(point.failure_score) }}%</span>
+                  {% else %}
+                  <span class="subtle">pending</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if point.direction_match is sameas true %}
+                  <span class="table-pill table-pill-ok">hit</span>
+                  {% elif point.direction_match is sameas false %}
+                  <span class="table-pill table-pill-warn">miss</span>
+                  {% else %}
+                  <span class="subtle">pending</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if point.verdict %}
+                  <div>{{ point.verdict }}</div>
+                  {% endif %}
+                  {% if point.rationale %}
+                  <div class="subtle">{{ point.rationale }}</div>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="placeholder">No prediction selected yet.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

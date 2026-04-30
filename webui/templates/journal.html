@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <div class="eyebrow">AI Journal</div>
+    <h1>Drill-down по AI snapshots</h1>
+    <p class="page-copy">Выбери запись слева и разверни её контекст, индикаторы и сырой JSON снимка.</p>
+  </div>
+  <form method="get" action="/journal" class="toolbar filter-toolbar">
+    <label class="field">
+      <span>Фильтр по символу</span>
+      <input type="text" name="symbol" value="{{ selected_symbol }}" placeholder="btcusdt">
+    </label>
+    <button type="submit" class="ghost-button">Применить</button>
+  </form>
+</header>
+
+<main class="journal-layout">
+  <section class="panel journal-sidebar">
+    <div class="section-header">
+      <div>
+        <div class="panel-kicker">Entries</div>
+        <h2>Последние snapshots</h2>
+      </div>
+      <div class="pager">
+        {% if page > 1 %}
+        <a class="ghost-button link-button" href="/journal?page={{ page - 1 }}{% if selected_symbol %}&symbol={{ selected_symbol }}{% endif %}">Previous</a>
+        {% endif %}
+        {% if has_next_page %}
+        <a class="ghost-button link-button" href="/journal?page={{ page + 1 }}{% if selected_symbol %}&symbol={{ selected_symbol }}{% endif %}">Next</a>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="journal-entry-list">
+      {% for entry in entries %}
+      <a class="journal-entry-link {% if selected_entry and entry.id == selected_entry.id %}is-selected{% endif %}" href="/journal/{{ entry.id }}?page={{ page }}{% if selected_symbol %}&symbol={{ selected_symbol }}{% endif %}">
+        <div class="watch-card-header">
+          <span class="journal-symbol">#{{ entry.id }}</span>
+          <span class="subtle">{{ entry.timestamp }}</span>
+        </div>
+        <div class="journal-metrics">
+          <span>{{ entry.symbols | length }} symbol(s)</span>
+          <span>{{ entry.market_context[:56] ~ ('...' if entry.market_context|length > 56 else '') }}</span>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel journal-detail">
+    {% if selected_entry %}
+    <div class="panel-kicker">Selected Entry</div>
+    <h2>AI journal entry #{{ selected_entry.id }}</h2>
+    <div class="journal-topline">
+      <span class="subtle">{{ selected_entry.timestamp }}</span>
+      <span class="table-pill table-pill-ok">{{ selected_entry.symbols | length }} symbol(s)</span>
+    </div>
+
+    <div class="detail-grid">
+      {% for item in selected_entry.symbols %}
+      <article class="journal-card">
+        <div class="journal-topline">
+          <span class="journal-symbol">{{ item.symbol | upper }}</span>
+          <span class="{% if item.change_pct >= 0 %}delta-up{% else %}delta-down{% endif %}">{{ "%.2f"|format(item.change_pct) }}%</span>
+        </div>
+        <div class="journal-metrics">
+          <span>Price {{ "%.2f"|format(item.price) }}</span>
+          <span>Vol {{ "%.2f"|format(item.volume) }}</span>
+          <span>RSI {{ "%.2f"|format(item.indicators.rsi_14 or 0) }}</span>
+          <span>MACD Hist {{ "%.4f"|format(item.indicators.macd_hist or 0) }}</span>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+
+    <section class="detail-block">
+      <h3>Market context</h3>
+      <p class="journal-context">{{ selected_entry.market_context or "Snapshot without explicit operator note." }}</p>
+    </section>
+
+    <section class="detail-block">
+      <h3>Snapshot JSON</h3>
+      <pre class="code-block">{{ snapshot_pretty }}</pre>
+    </section>
+
+    <section class="detail-block">
+      <h3>Indicators JSON</h3>
+      <pre class="code-block">{{ indicators_pretty }}</pre>
+    </section>
+    {% else %}
+    <div class="placeholder">AI journal пока пуст для выбранного фильтра.</div>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

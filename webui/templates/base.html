@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page_title or "WORED Web UI" }}</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <div class="hero-grid"></div>
+
+    <nav class="topbar">
+      <a class="brand" href="/">WORED Control Room</a>
+      <div class="topbar-links">
+        <a class="{% if current_path == '/' %}is-current{% endif %}" href="/">Dashboard</a>
+        <a class="{% if current_path == '/alerts' %}is-current{% endif %}" href="/alerts">Alerts</a>
+        <a class="{% if current_path.startswith('/predictions') %}is-current{% endif %}" href="/predictions">Predictions</a>
+        <a class="{% if current_path.startswith('/journal') %}is-current{% endif %}" href="/journal">AI Journal</a>
+      </div>
+      <div class="topbar-auth">
+        {% if auth_enabled %}
+          {% if authenticated %}
+            <span class="auth-pill auth-ok">Signed in as {{ admin_username }}</span>
+            <form method="post" action="/logout" class="inline-form">
+              <button type="submit" class="ghost-button">Logout</button>
+            </form>
+          {% else %}
+            <span class="auth-pill auth-warn">Auth required</span>
+            <a class="ghost-button link-button" href="/login">Login</a>
+          {% endif %}
+        {% else %}
+          <span class="auth-pill auth-warn">Local mode, auth disabled</span>
+        {% endif %}
+      </div>
+    </nav>
+
+    {% if flash %}
+      <div class="flash flash-{{ flash.level }}">{{ flash.message }}</div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+
+    <footer class="footer">
+      <div>WORED browser control surface for local operations.</div>
+      <div class="attribution">
+        {{ chart_notice }}
+        <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

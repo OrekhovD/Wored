@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block content %}
+<header class="page-header">
+  <div>
+    <div class="eyebrow">Alert History</div>
+    <h1>История market alerts</h1>
+    <p class="page-copy">Полный журнал spike/drop событий с возможностью ack/reopen прямо из браузера.</p>
+  </div>
+  <form method="get" action="/alerts" class="toolbar filter-toolbar">
+    <label class="field">
+      <span>Фильтр по символу</span>
+      <input type="text" name="symbol" value="{{ selected_symbol }}" placeholder="btcusdt">
+    </label>
+    <button type="submit" class="ghost-button">Применить</button>
+  </form>
+</header>
+
+<section class="stats-grid">
+  <div class="metric-card"><span class="metric-label">Всего</span><span class="metric-value">{{ counts.total }}</span></div>
+  <div class="metric-card"><span class="metric-label">Open</span><span class="metric-value">{{ counts.open }}</span></div>
+  <div class="metric-card"><span class="metric-label">Acknowledged</span><span class="metric-value">{{ counts.acknowledged }}</span></div>
+</section>
+
+<section class="panel">
+  <div class="section-header">
+    <div>
+      <div class="panel-kicker">Alert Table</div>
+      <h2>Последние записи</h2>
+    </div>
+    <div class="pager">
+      {% if page > 1 %}
+      <a class="ghost-button link-button" href="/alerts?page={{ page - 1 }}{% if selected_symbol %}&symbol={{ selected_symbol }}{% endif %}">Previous</a>
+      {% endif %}
+      {% if has_next_page %}
+      <a class="ghost-button link-button" href="/alerts?page={{ page + 1 }}{% if selected_symbol %}&symbol={{ selected_symbol }}{% endif %}">Next</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if alerts %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Symbol</th>
+          <th>Threshold</th>
+          <th>Status</th>
+          <th>Timestamp</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for alert in alerts %}
+        <tr>
+          <td>#{{ alert.id }}</td>
+          <td class="mono">{{ alert.symbol | upper }}</td>
+          <td class="{% if alert.threshold >= 0 %}delta-up{% else %}delta-down{% endif %}">{{ "%.2f"|format(alert.threshold) }}%</td>
+          <td>
+            {% if alert.triggered %}
+            <span class="table-pill table-pill-ok">acknowledged</span>
+            {% else %}
+            <span class="table-pill table-pill-warn">open</span>
+            {% endif %}
+          </td>
+          <td>{{ alert.timestamp }}</td>
+          <td>
+            {% if can_admin %}
+            <form method="post" action="/admin/alerts/{{ alert.id }}/toggle" class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="next" value="{{ current_path }}?page={{ page }}{% if selected_symbol %}&symbol={{ selected_symbol }}{% endif %}">
+              <button type="submit" class="ghost-button compact-button">{% if alert.triggered %}Reopen{% else %}Acknowledge{% endif %}</button>
+            </form>
+            {% else %}
+            <span class="subtle">read only</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="placeholder">Под выбранный фильтр alert history пока пуст.</div>
+  {% endif %}
+</section>
+{% endblock %}
