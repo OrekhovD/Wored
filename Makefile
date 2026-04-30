@@ -1,3 +1,7 @@
+setup:
+	cp .env.example .env || copy .env.example .env
+	python scripts/generate_secrets.py
+
 build:
 	docker-compose build
 

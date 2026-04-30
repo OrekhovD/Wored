@@ -23,6 +23,21 @@ const dom = {
   volumeChart: document.getElementById("volumeChart"),
   rsiChart: document.getElementById("rsiChart"),
   macdChart: document.getElementById("macdChart"),
+  cockpitSymbol: document.getElementById("cockpitSymbol"),
+  cockpitPrice: document.getElementById("cockpitPrice"),
+  cockpitDelta: document.getElementById("cockpitDelta"),
+  cockpitRsi: document.getElementById("cockpitRsi"),
+  cockpitMacd: document.getElementById("cockpitMacd"),
+  cockpitSma20: document.getElementById("cockpitSma20"),
+  cockpitSma50: document.getElementById("cockpitSma50"),
+  cockpitTrend: document.getElementById("cockpitTrend"),
+  cockpitFeed: document.getElementById("cockpitFeed"),
+  pulseRedis: document.getElementById("pulseRedis"),
+  pulsePg: document.getElementById("pulsePg"),
+  pulseFeed: document.getElementById("pulseFeed"),
+  pulseAlerts: document.getElementById("pulseAlerts"),
+  pulseJournal: document.getElementById("pulseJournal"),
+  pulseRefresh: document.getElementById("pulseRefresh"),
 };
 
 const formatMoney = new Intl.NumberFormat("en-US", {
@@ -186,6 +201,20 @@ function renderHealth(health) {
     <div class="status-pill"><span>Collector feed</span><strong class="${collectorState}">${health.collector_feed ? "fresh" : "stale"}</strong></div>
     <div class="status-pill"><span>Last journal age</span><strong>${health.last_journal_age_minutes ?? "n/a"} min</strong></div>
   `;
+
+  // Operational Pulse
+  function setPulse(el, ok, label) {
+    if (!el) return;
+    el.textContent = label;
+    el.className = "pulse-value " + (ok ? "is-ok" : "is-warn");
+  }
+  setPulse(dom.pulseRedis, health.redis, health.redis ? "OK" : "offline");
+  setPulse(dom.pulsePg, health.postgres, health.postgres ? "OK" : "offline");
+  const feedLabel = health.collector_feed ? (health.last_journal_age_minutes != null ? `fresh ${Math.round(health.last_journal_age_minutes)}m` : "fresh") : "stale";
+  setPulse(dom.pulseFeed, health.collector_feed, feedLabel);
+  if (dom.pulseJournal) {
+    dom.pulseJournal.textContent = health.last_journal_age_minutes != null ? `${Math.round(health.last_journal_age_minutes)}m ago` : "—";
+  }
 }
 
 function renderWatchlist(items) {
@@ -296,6 +325,65 @@ function renderCandles(payload) {
   macdSignalSeries.setData(payload.macd.signal);
   fitAllCharts();
   dom.priceStamp.textContent = `HTX ${payload.period} • ${new Date(payload.fetched_at).toLocaleTimeString()}`;
+
+  // Update Market Focus cockpit
+  renderCockpit(payload);
+}
+
+function renderCockpit(payload) {
+  const candles = payload.candles;
+  if (!candles || !candles.length) return;
+
+  const last = candles[candles.length - 1];
+  const price = last.close;
+
+  if (dom.cockpitSymbol) dom.cockpitSymbol.textContent = state.symbol.toUpperCase();
+  if (dom.cockpitPrice) dom.cockpitPrice.textContent = formatMoney.format(price);
+
+  // Delta from first candle to last
+  const first = candles[0];
+  const changePct = first.close ? ((price - first.close) / first.close * 100) : 0;
+  if (dom.cockpitDelta) {
+    dom.cockpitDelta.textContent = `${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}% / window`;
+    dom.cockpitDelta.className = "cockpit-delta " + (changePct >= 0 ? "delta-up" : "delta-down");
+  }
+
+  // RSI
+  const rsiPoints = payload.rsi14;
+  const latestRsi = rsiPoints?.length ? rsiPoints[rsiPoints.length - 1].value : null;
+  if (dom.cockpitRsi) dom.cockpitRsi.textContent = latestRsi != null ? latestRsi.toFixed(1) : "—";
+
+  // MACD
+  const macdHist = payload.macd?.histogram;
+  const latestHist = macdHist?.length ? macdHist[macdHist.length - 1].value : null;
+  if (dom.cockpitMacd) {
+    if (latestHist != null) {
+      const label = latestHist > 0 ? "Bullish" : latestHist < 0 ? "Bearish" : "Neutral";
+      dom.cockpitMacd.textContent = label;
+      dom.cockpitMacd.className = latestHist > 0 ? "trend-bull" : latestHist < 0 ? "trend-bear" : "";
+    } else {
+      dom.cockpitMacd.textContent = "—";
+    }
+  }
+
+  // SMA
+  const sma20 = payload.sma20;
+  const sma50 = payload.sma50;
+  const latestSma20 = sma20?.length ? sma20[sma20.length - 1].value : null;
+  const latestSma50 = sma50?.length ? sma50[sma50.length - 1].value : null;
+  if (dom.cockpitSma20) dom.cockpitSma20.textContent = latestSma20 != null ? formatMoney.format(latestSma20) : "—";
+  if (dom.cockpitSma50) dom.cockpitSma50.textContent = latestSma50 != null ? formatMoney.format(latestSma50) : "—";
+
+  // Trend
+  if (dom.cockpitTrend && latestSma20 != null && latestSma50 != null) {
+    const trendUp = latestSma20 > latestSma50;
+    dom.cockpitTrend.innerHTML = `Trend: <strong class="${trendUp ? "trend-bull" : "trend-bear"}">${trendUp ? "SMA20 > SMA50" : "SMA20 < SMA50"}</strong>`;
+  }
+
+  // Feed timestamp
+  if (dom.cockpitFeed) {
+    dom.cockpitFeed.textContent = `Feed: ${new Date(payload.fetched_at).toLocaleTimeString()}`;
+  }
 }
 
 async function refreshOverview() {
@@ -307,6 +395,11 @@ async function refreshOverview() {
 async function refreshAlerts() {
   const payload = await fetchJson(`/api/alerts?symbol=${encodeURIComponent(state.symbol)}&limit=10`);
   renderAlerts(payload.items);
+  // Update pulse alert count
+  if (dom.pulseAlerts && payload.counts) {
+    dom.pulseAlerts.textContent = payload.counts.open ?? 0;
+    dom.pulseAlerts.className = "pulse-value" + (payload.counts.open > 0 ? " is-warn" : "");
+  }
 }
 
 async function refreshJournal() {
@@ -320,7 +413,8 @@ async function refreshCandles() {
 }
 
 async function refreshAllDetails() {
-  dom.activeSymbolMetric.textContent = state.symbol.toUpperCase();
+  if (dom.activeSymbolMetric) dom.activeSymbolMetric.textContent = state.symbol.toUpperCase();
+  if (dom.cockpitSymbol) dom.cockpitSymbol.textContent = state.symbol.toUpperCase();
   await Promise.all([refreshCandles(), refreshAlerts(), refreshJournal()]);
 }
 
@@ -343,6 +437,12 @@ function mountInteractions() {
   dom.autoRefreshButton.addEventListener("click", () => {
     state.autoRefresh = !state.autoRefresh;
     dom.autoRefreshButton.classList.toggle("is-active", state.autoRefresh);
+    // Update pulse indicator
+    if (dom.pulseRefresh) {
+      dom.pulseRefresh.innerHTML = state.autoRefresh
+        ? '<span class="pulse-indicator"></span>ON'
+        : '<span class="pulse-indicator is-off"></span>OFF';
+    }
   });
 }
 

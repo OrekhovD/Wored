@@ -110,7 +110,11 @@
         </a>
         {% endfor %}
       {% else %}
-      <div class="placeholder">No prediction requests yet. Start with the form above.</div>
+      <div class="empty-state">
+        <div class="empty-state-icon">🔮</div>
+        <div class="empty-state-title">No forecasts yet</div>
+        <div class="empty-state-copy">Generate a forecast to compare model predictions against real market data.</div>
+      </div>
       {% endif %}
     </div>
 
@@ -241,6 +245,11 @@
                   <span class="score-badge">{{ "%.1f"|format(cell.point.accuracy_score) }}%</span>
                   <span class="subtle">miss {{ "%.1f"|format(cell.point.failure_score) }}%</span>
                   <span class="subtle">{% if cell.point.direction_match %}direction ok{% else %}direction miss{% endif %}</span>
+                  {% if cell.point.predicted_change_pct is not none and row.actual_change_pct is not none %}
+                  <span class="subtle" style="margin-top: 4px; font-size: 0.78rem;">
+                    Gap: {{ "%+.2f"|format(cell.point.predicted_change_pct - row.actual_change_pct) }}%
+                  </span>
+                  {% endif %}
                   {% else %}
                   <span class="subtle">success pending</span>
                   {% endif %}
@@ -377,7 +386,11 @@
       {% endfor %}
     </div>
     {% else %}
-    <div class="placeholder">No prediction selected yet.</div>
+    <div class="empty-state">
+      <div class="empty-state-icon">📊</div>
+      <div class="empty-state-title">No prediction selected</div>
+      <div class="empty-state-copy">Select a saved forecast from the list or generate a new one above.</div>
+    </div>
     {% endif %}
   </div>
 </section>

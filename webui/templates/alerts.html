@@ -3,9 +3,9 @@
 {% block content %}
 <header class="page-header">
   <div>
-    <div class="eyebrow">Alert History</div>
-    <h1>История market alerts</h1>
-    <p class="page-copy">Полный журнал spike/drop событий с возможностью ack/reopen прямо из браузера.</p>
+    <div class="eyebrow">Alert Triage</div>
+    <h1>Market alert events</h1>
+    <p class="page-copy">Spike/drop события с возможностью acknowledge/reopen. Severity выводится из порогового значения.</p>
   </div>
   <form method="get" action="/alerts" class="toolbar filter-toolbar">
     <label class="field">
@@ -16,10 +16,19 @@
   </form>
 </header>
 
-<section class="stats-grid">
-  <div class="metric-card"><span class="metric-label">Всего</span><span class="metric-value">{{ counts.total }}</span></div>
-  <div class="metric-card"><span class="metric-label">Open</span><span class="metric-value">{{ counts.open }}</span></div>
-  <div class="metric-card"><span class="metric-label">Acknowledged</span><span class="metric-value">{{ counts.acknowledged }}</span></div>
+<section class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+  <div class="metric-card">
+    <span class="metric-label">Всего</span>
+    <span class="metric-value">{{ counts.total }}</span>
+  </div>
+  <div class="metric-card" style="border-left: 3px solid var(--accent);">
+    <span class="metric-label">Open</span>
+    <span class="metric-value status-warn">{{ counts.open }}</span>
+  </div>
+  <div class="metric-card" style="border-left: 3px solid var(--bull);">
+    <span class="metric-label">Acknowledged</span>
+    <span class="metric-value status-ok">{{ counts.acknowledged }}</span>
+  </div>
 </section>
 
 <section class="panel">
@@ -46,6 +55,7 @@
           <th>ID</th>
           <th>Symbol</th>
           <th>Threshold</th>
+          <th>Severity</th>
           <th>Status</th>
           <th>Timestamp</th>
           <th>Action</th>
@@ -53,10 +63,25 @@
       </thead>
       <tbody>
         {% for alert in alerts %}
-        <tr>
+        {% set abs_thresh = alert.threshold | abs %}
+        {% if abs_thresh >= 5.0 %}
+          {% set sev_class = "severity-critical" %}
+          {% set sev_label = "CRITICAL" %}
+        {% elif abs_thresh >= 3.0 %}
+          {% set sev_class = "severity-high" %}
+          {% set sev_label = "HIGH" %}
+        {% elif abs_thresh >= 1.5 %}
+          {% set sev_class = "severity-medium" %}
+          {% set sev_label = "MEDIUM" %}
+        {% else %}
+          {% set sev_class = "severity-low" %}
+          {% set sev_label = "LOW" %}
+        {% endif %}
+        <tr class="{{ sev_class }}">
           <td>#{{ alert.id }}</td>
           <td class="mono">{{ alert.symbol | upper }}</td>
           <td class="{% if alert.threshold >= 0 %}delta-up{% else %}delta-down{% endif %}">{{ "%.2f"|format(alert.threshold) }}%</td>
+          <td><span class="table-pill {% if sev_label == 'CRITICAL' %}table-pill-warn{% elif sev_label == 'HIGH' %}table-pill-warn{% else %}table-pill-ok{% endif %}">{{ sev_label }}</span></td>
           <td>
             {% if alert.triggered %}
             <span class="table-pill table-pill-ok">acknowledged</span>
@@ -82,7 +107,11 @@
     </table>
   </div>
   {% else %}
-  <div class="placeholder">Под выбранный фильтр alert history пока пуст.</div>
+  <div class="empty-state">
+    <div class="empty-state-icon">📡</div>
+    <div class="empty-state-title">Нет алертов</div>
+    <div class="empty-state-copy">Под выбранный фильтр alert history пока пуст. Алерты появятся при spike/drop событиях от collector.</div>
+  </div>
   {% endif %}
 </section>
 {% endblock %}

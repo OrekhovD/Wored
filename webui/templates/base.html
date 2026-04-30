@@ -12,12 +12,17 @@
     <div class="hero-grid"></div>
 
     <nav class="topbar">
-      <a class="brand" href="/">WORED Control Room</a>
+      <a class="brand" href="/">WORED</a>
       <div class="topbar-links">
         <a class="{% if current_path == '/' %}is-current{% endif %}" href="/">Dashboard</a>
-        <a class="{% if current_path == '/alerts' %}is-current{% endif %}" href="/alerts">Alerts</a>
+        <a class="{% if current_path == '/alerts' %}is-current{% endif %}" href="/alerts">Alerts<span id="navAlertBadge"></span></a>
         <a class="{% if current_path.startswith('/predictions') %}is-current{% endif %}" href="/predictions">Predictions</a>
         <a class="{% if current_path.startswith('/journal') %}is-current{% endif %}" href="/journal">AI Journal</a>
+      </div>
+      <div class="topbar-health" id="topbarHealth">
+        <span class="health-dot is-idle" id="healthRedis">Redis</span>
+        <span class="health-dot is-idle" id="healthPostgres">PG</span>
+        <span class="health-dot is-idle" id="healthCollector">Feed</span>
       </div>
       <div class="topbar-auth">
         {% if auth_enabled %}
@@ -31,7 +36,7 @@
             <a class="ghost-button link-button" href="/login">Login</a>
           {% endif %}
         {% else %}
-          <span class="auth-pill auth-warn">Local mode, auth disabled</span>
+          <span class="auth-pill auth-warn">Local mode</span>
         {% endif %}
       </div>
     </nav>
@@ -50,5 +55,62 @@
       </div>
     </footer>
   </div>
+
+  <div id="globalToast" class="toast"></div>
+
+  <script>
+  (function() {
+    async function refreshGlobalHealth() {
+      try {
+        const r = await fetch("/api/health");
+        if (!r.ok) return;
+        const h = await r.json();
+
+        const dots = {
+          healthRedis: h.redis,
+          healthPostgres: h.postgres,
+          healthCollector: h.collector_feed,
+        };
+        for (const [id, ok] of Object.entries(dots)) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          el.className = "health-dot " + (ok ? "is-ok" : "is-warn");
+        }
+      } catch (_) {}
+    }
+
+    async function refreshAlertBadge() {
+      try {
+        const r = await fetch("/api/alerts?limit=1");
+        if (!r.ok) return;
+        const data = await r.json();
+        const badge = document.getElementById("navAlertBadge");
+        if (!badge) return;
+        const openCount = data.counts?.open ?? 0;
+        if (openCount > 0) {
+          badge.className = "nav-badge";
+          badge.textContent = openCount;
+        } else {
+          badge.className = "";
+          badge.textContent = "";
+        }
+      } catch (_) {}
+    }
+
+    refreshGlobalHealth();
+    refreshAlertBadge();
+    setInterval(refreshGlobalHealth, 15000);
+    setInterval(refreshAlertBadge, 30000);
+  })();
+
+  window.WORED_TOAST = function(message, level) {
+    const toast = document.getElementById("globalToast");
+    if (!toast) return;
+    toast.textContent = message;
+    toast.className = "toast is-visible" + (level === "ok" ? " toast-ok" : level === "bad" ? " toast-bad" : "");
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => { toast.className = "toast"; }, 3000);
+  };
+  </script>
 </body>
 </html>

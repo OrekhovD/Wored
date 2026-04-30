@@ -100,6 +100,7 @@ curl http://localhost:8080/api/health
 - [Конфигурация](docs/04-configuration.md)
 - [Эксплуатация и проверка](docs/05-operations.md)
 - [Сильные и слабые стороны, технический аудит](docs/06-audit.md)
+- [Безопасность](docs/07-security.md)
 
 ## Вариант веб-интерфейса
 

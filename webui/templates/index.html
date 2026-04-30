@@ -1,32 +1,29 @@
 {% extends "base.html" %}
 
 {% block content %}
-<header class="hero">
-  <div class="hero-copy">
-    <div class="eyebrow">WORED Local Control Room</div>
-    <h1>Браузерная панель для бота, рынка и AI-контекста</h1>
-    <p>
-      Глубокий просмотр свечей, объёмов, индикаторов, AI journal и spike-alert событий
-      без прыжков между Telegram, логами и SQL-консолью.
-    </p>
-  </div>
-  <div class="hero-meta">
-    <div class="metric-stack">
-      <div class="metric-card">
-        <span class="metric-label">Активный символ</span>
-        <span id="activeSymbolMetric" class="metric-value">{{ default_symbol | upper }}</span>
-      </div>
-      <div class="metric-card">
-        <span class="metric-label">Источник графика</span>
-        <span class="metric-value">HTX REST + локальные сигналы</span>
-      </div>
-      <div class="metric-card">
-        <span class="metric-label">Контур</span>
-        <span class="metric-value">Redis + Postgres + FastAPI</span>
-      </div>
+<div class="cockpit" id="marketCockpit">
+  <div class="cockpit-main">
+    <div class="cockpit-symbol" id="cockpitSymbol">{{ default_symbol | upper }}</div>
+    <div class="cockpit-price" id="cockpitPrice">—</div>
+    <div class="cockpit-delta" id="cockpitDelta">—</div>
+    <div class="cockpit-indicators" id="cockpitIndicators">
+      <span>RSI <strong id="cockpitRsi">—</strong></span>
+      <span>MACD <strong id="cockpitMacd">—</strong></span>
+      <span>SMA20 <strong id="cockpitSma20">—</strong></span>
+      <span>SMA50 <strong id="cockpitSma50">—</strong></span>
+      <span id="cockpitTrend"></span>
+      <span id="cockpitFeed" class="subtle"></span>
     </div>
   </div>
-</header>
+  <div class="op-pulse" id="opPulse">
+    <div class="op-pulse-item"><span class="pulse-label">Redis</span><span class="pulse-value is-idle" id="pulseRedis">…</span></div>
+    <div class="op-pulse-item"><span class="pulse-label">Postgres</span><span class="pulse-value is-idle" id="pulsePg">…</span></div>
+    <div class="op-pulse-item"><span class="pulse-label">Collector</span><span class="pulse-value is-idle" id="pulseFeed">…</span></div>
+    <div class="op-pulse-item"><span class="pulse-label">Open alerts</span><span class="pulse-value" id="pulseAlerts">—</span></div>
+    <div class="op-pulse-item"><span class="pulse-label">Last journal</span><span class="pulse-value" id="pulseJournal">—</span></div>
+    <div class="op-pulse-item"><span class="pulse-label">Auto-refresh</span><span class="pulse-value" id="pulseRefresh"><span class="pulse-indicator"></span>ON</span></div>
+  </div>
+</div>
 
 <main class="dashboard">
   <section class="panel panel-chart">

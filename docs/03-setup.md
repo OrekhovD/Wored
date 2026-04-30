@@ -33,6 +33,7 @@ PowerShell:
 ```powershell
 Set-Location D:\WORED
 Copy-Item .env.example .env
+python scripts/generate_secrets.py
 notepad .env
 ```
 

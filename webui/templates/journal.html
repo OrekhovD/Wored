@@ -81,16 +81,24 @@
     </section>
 
     <section class="detail-block">
-      <h3>Snapshot JSON</h3>
-      <pre class="code-block">{{ snapshot_pretty }}</pre>
+      <button class="collapsible-toggle" onclick="this.classList.toggle('is-open'); this.nextElementSibling.classList.toggle('is-open');">Snapshot JSON</button>
+      <div class="collapsible-body">
+        <pre class="code-block">{{ snapshot_pretty }}</pre>
+      </div>
     </section>
 
     <section class="detail-block">
-      <h3>Indicators JSON</h3>
-      <pre class="code-block">{{ indicators_pretty }}</pre>
+      <button class="collapsible-toggle" onclick="this.classList.toggle('is-open'); this.nextElementSibling.classList.toggle('is-open');">Indicators JSON</button>
+      <div class="collapsible-body">
+        <pre class="code-block">{{ indicators_pretty }}</pre>
+      </div>
     </section>
     {% else %}
-    <div class="placeholder">AI journal пока пуст для выбранного фильтра.</div>
+    <div class="empty-state">
+      <div class="empty-state-icon">📓</div>
+      <div class="empty-state-title">Нет записей</div>
+      <div class="empty-state-copy">AI journal пока пуст. Снимки создаются автоматически по расписанию или вручную через admin action.</div>
+    </div>
     {% endif %}
   </section>
 </main>
