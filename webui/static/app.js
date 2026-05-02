@@ -38,6 +38,7 @@ const dom = {
   pulseAlerts: document.getElementById("pulseAlerts"),
   pulseJournal: document.getElementById("pulseJournal"),
   pulseRefresh: document.getElementById("pulseRefresh"),
+  topbarAlerts: document.getElementById("topbarAlerts"),
 };
 
 const formatMoney = new Intl.NumberFormat("en-US", {
@@ -399,6 +400,10 @@ async function refreshAlerts() {
   if (dom.pulseAlerts && payload.counts) {
     dom.pulseAlerts.textContent = payload.counts.open ?? 0;
     dom.pulseAlerts.className = "pulse-value" + (payload.counts.open > 0 ? " is-warn" : "");
+  }
+  if (dom.topbarAlerts && payload.counts) {
+    dom.topbarAlerts.textContent = `Alerts ${payload.counts.open ?? 0}`;
+    dom.topbarAlerts.className = "health-dot " + (payload.counts.open > 0 ? "is-warn" : "is-ok");
   }
 }
 

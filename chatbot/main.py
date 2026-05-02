@@ -24,15 +24,15 @@ async def alert_listener(bot: Bot):
     """Subscribes to Redis pub/sub to push alerts to Admin."""
     import json
     from storage.redis_client import get_redis
-    
+
     admin_id = int(os.getenv("TELEGRAM_ADMIN_ID", "0"))
     if not admin_id:
         return
-        
+
     r = get_redis()
     pubsub = r.pubsub()
     await pubsub.subscribe("market_alerts")
-    
+
     async for message in pubsub.listen():
         if message["type"] == "message":
             data = json.loads(message["data"])
@@ -58,6 +58,9 @@ async def main():
     dp.include_router(portfolio_router)
     dp.include_router(predictions_router)
     dp.include_router(settings_router)
+    if os.getenv("HERMES_CHATBOT_GATEWAY_ENABLED", "false").lower() in {"1", "true", "yes"}:
+        from handlers.hermes_admin import router as hermes_admin_router
+        dp.include_router(hermes_admin_router)
     dp.include_router(chat_router) # should be last since it catches messages
 
     log.info("Chatbot started polling")
