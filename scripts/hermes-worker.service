@@ -1,0 +1,15 @@
+[Unit]
+Description=Hermes Task Worker for WORED
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/d/WORED
+ExecStart=/home/hermes/.hermes/hermes-agent/venv/bin/python scripts/hermes_task_worker.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/mnt/d/WORED/logs/hermes_task_worker_systemd.log
+StandardError=append:/mnt/d/WORED/logs/hermes_task_worker_systemd.log
+
+[Install]
+WantedBy=default.target
