@@ -1,0 +1,352 @@
+Да, теперь картина точная. Путь /mnt/d/WORED рабочий. Hermes ошибся, когда сказал, что /mnt/d не смонтирован. Проект открыт правильно: PWD=/mnt/d/WORED, git root=/mnt/d/WORED, Docker-контур живой, Hermes binary установлен на host: /home/hermes/.local/bin/hermes.
+
+Но проблема реально серьёзная: в chatbot уже внедрены chatbot/handlers/hermes_admin.py и chatbot/services/hermes_bridge.py, а hermes_bridge.py вызывает subprocess.run(["hermes", ...]) внутри Docker-контейнера. В контейнере hermes почти наверняка отсутствует, потому что Hermes стоит на WSL host, а не внутри образа chatbot. Поэтому Telegram-бот не может напрямую выполнять Hermes-команды.
+
+Диагноз
+1. /mnt/d/WORED исправен
+
+Вот подтверждение:
+
+=== PWD ===
+/mnt/d/WORED
+
+=== GIT ROOT ===
+/mnt/d/WORED
+
+Значит cwd: /mnt/d/WORED в ~/.hermes/config.yaml менять нельзя.
+
+2. Docker живой
+
+Все 5 сервисов подняты:
+
+chatbot   Up
+collector Up
+postgres  Up healthy
+redis     Up
+webui     Up healthy
+
+Контур WORED не умер.
+
+3. Hermes стоит на host, а не в контейнере
+which hermes
+/home/hermes/.local/bin/hermes
+Hermes Agent v0.12.0
+
+Это host-установка. Chatbot-контейнер её не видит.
+
+4. Внедрён неправильный bridge
+
+В chatbot/services/hermes_bridge.py есть:
+
+import subprocess
+cmd = ["hermes", "quick", command_name] + args
+result = subprocess.run(...)
+
+Это архитектурно неправильно для Docker runtime: контейнер пытается вызвать host CLI.
+
+5. chatbot/main.py уже подключил Hermes router
+from handlers.hermes_admin import router as hermes_admin_router
+dp.include_router(hermes_admin_router)
+
+То есть Telegram admin-текст действительно перехватывается до обычного chat handler, но дальше упирается в несуществующий hermes внутри контейнера.
+
+6. Репозиторий сильно загрязнён
+
+git status показывает много изменённых и новых файлов: WebUI, Dockerfile, chatbot/main.py, новые Hermes docs/scripts, scratch-файлы, desktop.ini, странные файлы " 2", mv и т.д.. Делать git reset --hard нельзя, но нужен управляемый restore.
+
+Правильное решение
+
+Не пытаться запускать hermes из chatbot-контейнера.
+
+Нужна схема:
+
+Telegram / RACHELLO
+→ chatbot container
+→ Redis queue hermes:tasks
+→ host listener на WSL
+→ hermes/scripts в /mnt/d/WORED
+→ Redis result
+→ chatbot отправляет ответ в Telegram
+
+Почему Redis: он уже есть в docker-compose и доступен и контейнеру, и host через localhost:6379.
+
+ТЗ для Hermes: FIX RACHELLO Hermes Bridge через Redis
+
+Скопируй Hermes полностью.
+
+Задача: FIX RACHELLO Hermes Bridge через Redis queue.
+
+Контекст:
+- /mnt/d/WORED существует и является правильным project cwd.
+- Не менять cwd в ~/.hermes/config.yaml.
+- Docker runtime живой: chatbot, collector, postgres, redis, webui подняты.
+- Hermes CLI установлен на WSL host: /home/hermes/.local/bin/hermes.
+- Chatbot работает внутри Docker container и НЕ видит host binary hermes.
+- Текущий chatbot/services/hermes_bridge.py ошибочно вызывает subprocess.run(["hermes", ...]) внутри container.
+- Нужно заменить прямой subprocess-вызов на Redis task queue.
+
+Цель:
+Сделать так, чтобы RACHELLO:
+1. Кнопки и обычные slash-команды криптобота обрабатывал как раньше.
+2. Обычный текст от admin отправлял в Hermes bridge.
+3. /task от admin отправлял в Hermes bridge.
+4. Hermes-команды выполнялись на WSL host listener, а не внутри Docker container.
+5. Ответ возвращался в Telegram через chatbot.
+
+Активный runtime path:
+- chatbot/handlers/hermes_admin.py
+- chatbot/services/hermes_bridge.py
+- chatbot/main.py
+- scripts/hermes_task_worker.py
+- docs/hermes/playbooks/rachello-hermes-bridge.md
+
+Не трогать:
+- collector/*
+- webui/*
+- docker-compose.yml
+- .env
+- postgres volumes
+- redis volumes
+- chatbot/loader.py
+- chatbot/context/*
+- chatbot/ui/*
+
+Ограничения:
+- не запускать второй Telegram polling;
+- не использовать xurl-polling;
+- не вызывать host hermes напрямую из Docker container;
+- не давать shell passthrough;
+- не выполнять произвольные команды из Telegram;
+- только whitelist intents;
+- admin only через TELEGRAM_ADMIN_ID;
+- секреты маскировать;
+- stdout limit 3500 chars;
+- errors без traceback в Telegram;
+- live/destructive команды запрещены.
+
+PLAN:
+1. Сделать backup текущих файлов:
+   - chatbot/handlers/hermes_admin.py
+   - chatbot/services/hermes_bridge.py
+   - chatbot/main.py
+   - ~/.hermes/config.yaml
+2. Проверить ~/.hermes/config.yaml на дубли risk-position/brief и исправить только если есть дубли.
+3. Переписать chatbot/services/hermes_bridge.py:
+   - убрать subprocess.run(["hermes", ...]);
+   - реализовать Redis enqueue/wait-result;
+   - task key: hermes:task:<task_id>;
+   - queue: hermes:tasks;
+   - result key: hermes:result:<task_id>;
+   - timeout: 60s;
+   - return pending/timeout/error безопасно.
+4. Оставить chatbot/handlers/hermes_admin.py как router admin text -> bridge, но проверить:
+   - slash crypto commands не перехватываются;
+   - /task и /hermes_* перехватываются;
+   - callback buttons не трогаются.
+5. Создать scripts/hermes_task_worker.py на host:
+   - читает Redis queue;
+   - выполняет только whitelist-команды;
+   - работает из cwd /mnt/d/WORED;
+   - вызывает local scripts или hermes quick только на host;
+   - пишет результат в Redis result key;
+   - не печатает секреты;
+   - логирует в logs/hermes_task_worker.log.
+6. Добавить playbook docs/hermes/playbooks/rachello-hermes-bridge.md.
+7. Протестировать без Telegram через Redis.
+8. Перезапустить chatbot.
+9. Запустить worker на host.
+10. Проверить Telegram.
+
+FILES:
+- chatbot/services/hermes_bridge.py
+- chatbot/handlers/hermes_admin.py
+- scripts/hermes_task_worker.py
+- docs/hermes/playbooks/rachello-hermes-bridge.md
+- возможно ~/.hermes/config.yaml только для удаления дублей, без смены cwd
+
+RISK:
+- Средний: chatbot уже изменён, можно сломать Telegram routing.
+- Главный риск: двойной polling запрещён, поэтому worker НЕ должен читать Telegram.
+- Worker работает только с Redis.
+- Риск shell injection закрыть whitelist-командами.
+
+ROLLBACK:
+1. Остановить worker:
+   pkill -f scripts/hermes_task_worker.py || true
+2. Вернуть backup:
+   cp <backup>/hermes_bridge.py chatbot/services/hermes_bridge.py
+   cp <backup>/hermes_admin.py chatbot/handlers/hermes_admin.py
+   cp <backup>/main.py chatbot/main.py
+3. Перезапустить chatbot:
+   docker compose up -d --build chatbot
+
+WHITELIST COMMANDS:
+- help
+- status
+- git-status
+- webui-check
+- runtime-snapshot
+- brief
+- risk-position
+- signal-explainer
+
+Intent mapping:
+- "статус", "проверь систему", "/task статус" -> status
+- "git", "что изменено" -> git-status
+- "проверь webui", "веб" -> webui-check
+- "snapshot", "снэпшот" -> runtime-snapshot
+- "brief", "сводка" -> brief
+- "риск", "risk" -> risk-position
+- "signal", "сигнал", "анализ btc" -> signal-explainer
+- unknown -> help/rejected
+
+Implementation details:
+
+chatbot/services/hermes_bridge.py:
+- использовать storage.redis_client.get_redis()
+- создать task:
+  {
+    "task_id": "...",
+    "created_at": "...",
+    "user_id": ...,
+    "intent": "...",
+    "command": "...",
+    "args": [],
+    "source": "telegram_admin"
+  }
+- await redis.lpush("hermes:tasks", json)
+- ждать result key hermes:result:<task_id> до 60s
+- если timeout:
+  вернуть Status: PENDING/TIMEOUT, "worker did not respond"
+- не использовать subprocess.
+
+scripts/hermes_task_worker.py:
+- подключаться к Redis:
+  REDIS_URL env или redis://localhost:6379/0
+- brpop("hermes:tasks", timeout=5)
+- validate command in whitelist
+- execute predefined commands:
+  status:
+    docker compose ps
+  git-status:
+    git status --short && git diff --stat
+  webui-check:
+    bash scripts/webui_check.sh или scripts/smoke_webui.sh если webui_check отсутствует
+  runtime-snapshot:
+    bash scripts/runtime_snapshot.sh
+  brief:
+    python scripts/intelligence_brief.py --mode hourly --symbols BTCUSDT,ETHUSDT --format markdown
+  risk-position:
+    python scripts/risk_position.py --balance 1000 --risk-pct 1 --entry 62000 --stop 61000 --take 65000
+  signal-explainer:
+    python scripts/signal_explainer.py --symbol BTCUSDT --period 60min --lookback-days 7 --format markdown
+  help:
+    вывести список команд
+- cwd всегда /mnt/d/WORED
+- timeout subprocess 90s
+- output limit 3500 chars
+- mask secrets:
+  nvapi-[A-Za-z0-9_-]+
+  Bearer ...
+  API_KEY=...
+  TOKEN=...
+  SECRET=...
+  PASSWORD=...
+- write result:
+  redis.setex("hermes:result:<task_id>", 600, json)
+
+TESTS:
+
+До patch:
+1. cd /mnt/d/WORED
+2. git status --short
+3. git diff --stat
+4. grep -nA15 -B5 "risk-position:" ~/.hermes/config.yaml || true
+5. grep -nA15 -B5 "brief:" ~/.hermes/config.yaml || true
+
+Unit/smoke:
+1. python -m py_compile chatbot/services/hermes_bridge.py
+2. python -m py_compile chatbot/handlers/hermes_admin.py
+3. python -m py_compile scripts/hermes_task_worker.py
+
+Redis worker dry test:
+1. docker compose ps redis
+2. python scripts/hermes_task_worker.py --once --test-task status
+   Ожидается JSON/result без секретов.
+
+Manual queue test:
+1. В одном терминале:
+   cd /mnt/d/WORED
+   python scripts/hermes_task_worker.py --once
+2. Во втором:
+   python - <<'PY'
+import json, time, redis
+r = redis.from_url("redis://localhost:6379/0", decode_responses=True)
+task_id = "manual_test_" + str(int(time.time()))
+task = {"task_id": task_id, "command": "git-status", "intent": "git", "args": []}
+r.lpush("hermes:tasks", json.dumps(task, ensure_ascii=False))
+for _ in range(30):
+    data = r.get("hermes:result:" + task_id)
+    if data:
+        print(data)
+        break
+    time.sleep(1)
+else:
+    raise SystemExit("NO RESULT")
+PY
+
+Docker chatbot:
+1. docker compose up -d --build chatbot
+2. docker compose logs chatbot --tail=120
+Ожидается:
+- no traceback
+- no import error
+- hermes_admin router included
+
+Telegram tests:
+1. /start -> crypto bot, не Hermes.
+2. Нажать кнопку "Рынок" -> crypto bot.
+3. /market -> crypto bot.
+4. От admin обычный текст: "проверь webui" -> #HERMES_TASK...
+5. От admin: "/task статус" -> #HERMES_TASK...
+6. От admin: "/task cat ~/.hermes/.env" -> REJECTED/unknown command, не shell.
+7. От non-admin: "/task статус" -> не выполняется Hermes.
+
+Security tests:
+1. docker compose logs chatbot --tail=300 | grep -Ei "nvapi-|Bearer|TOKEN=|SECRET=|PASSWORD=" && exit 1 || echo OK
+2. grep -RniE "subprocess.run\\(\\[\"hermes\"" chatbot && exit 1 || echo OK
+3. ps aux | grep -i "xurl.*poll\\|telegram.*poll" | grep -v grep && echo "BAD second polling" || echo OK
+
+REPORT:
+- подтвердить /mnt/d/WORED не менялся;
+- подтвердить ~/.hermes/config.yaml cwd остался /mnt/d/WORED;
+- подтвердить прямой subprocess hermes из chatbot удалён;
+- подтвердить Redis queue работает;
+- подтвердить worker выполняет команды на host;
+- подтвердить Telegram admin text возвращает #HERMES_TASK;
+- подтвердить кнопки/slash crypto bot не сломаны;
+- подтвердить секреты не выводились.
+Важное замечание по текущему git status
+
+Перед этим патчем я бы не разрешал Hermes делать глобальный restore. Там слишком много изменений:
+
+webui/static/app.js
+webui/static/styles.css
+webui/templates/base.html
+chatbot/main.py
+Dockerfile
+.env.example
+Makefile
+scripts/*
+docs/hermes/*
+
+Сейчас безопаснее точечно исправить bridge, а не откатывать всё. Глобальный откат можно делать только после отдельного списка “оставить/удалить”.
+
+Коротко: в чём именно проблема
+RACHELLO уже начал перехватывать admin-text.
+Но обработчик ведёт в hermes_bridge.py.
+А hermes_bridge.py пытается вызвать "hermes" через subprocess внутри Docker container.
+В контейнере hermes нет.
+Поэтому Telegram-режим Hermes не работает.
+
+Правильный фикс: не subprocess в контейнере, а Redis queue + host worker.

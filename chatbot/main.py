@@ -42,7 +42,7 @@ async def alert_listener(bot: Bot):
                 log.error(f"Push alert failed: {e}")
 
 async def main():
-    token = os.getenv("TELEGRAM_TOKEN")
+    token = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
     if not token or "replace_with_bot_token" in token:
         log.warning("Please update TELEGRAM_TOKEN in .env. Bot may fail to start.")
 
@@ -65,6 +65,21 @@ async def main():
 
     log.info("Chatbot started polling")
     asyncio.create_task(alert_listener(bot))
+    
+    # Configure the system Menu Button to open WORED WebApp Dashboard
+    from aiogram.types import MenuButtonWebApp, WebAppInfo
+    webui_url = os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8081/dashboard"
+    try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="Command Deck",
+                web_app=WebAppInfo(url=webui_url)
+            )
+        )
+        log.info("System Menu Button configured to open WORED WebApp Dashboard")
+    except Exception as e:
+        log.error(f"Failed to set WORED chat menu button: {e}")
+
     await dp.start_polling(bot)
 
 if __name__ == '__main__':

@@ -1,0 +1,38 @@
+# =============================================================================
+# OMNIROUTE INTEGRATION (via AI-GATEWAY)
+# =============================================================================
+model:
+  default: kr/claude-opus-4.7
+  provider: ai-gateway
+  reasoning:
+    enabled: true
+    model: kr/claude-opus-4.7
+
+ai-gateway:
+  base_url: https://terms-shakira-mason-nancy.trycloudflare.com/v1
+
+safety:
+  no_secret_printing: true
+  require_plan_before_patch: true
+  forbid_destructive_commands: true
+
+quick_commands:
+  ps:
+    type: exec
+    command: docker compose ps
+
+  health:
+    type: exec
+    command: curl -fsS http://localhost:8080/ >/dev/null && echo "webui OK" || echo "webui FAIL"
+
+  logs-chatbot:
+    type: exec
+    command: docker compose logs chatbot --tail=120
+
+  logs-webui:
+    type: exec
+    command: docker compose logs webui --tail=120
+
+  omniroute-models:
+    type: exec
+    command: 'curl -s -H "Authorization: Bearer $AI_GATEWAY_API_KEY" $AI_GATEWAY_BASE_URL/models | jq -r ".data[].id"'

@@ -1,0 +1,24 @@
+Стоп. Не меняй cwd в ~/.hermes/config.yaml.
+
+Твой вывод ошибочный: /mnt/d существует, WORED находится в /mnt/d/WORED. Я только сейчас выполнил ls /mnt/d и вижу папку WORED.
+
+Проблема не в отсутствии /mnt/d, а в том, что текущий shell после перезапуска WSL открылся в /mnt/c/Users/dolum.
+
+Нужно:
+1. Не заменять /mnt/d/WORED на /home/hermes/WORED.
+2. Проверить cd /mnt/d/WORED && pwd && git status --short.
+3. Проверить, что ~/.hermes/config.yaml содержит cwd: /mnt/d/WORED.
+4. Проверить, запускается ли hermes из /mnt/d/WORED.
+5. Проверить docker compose ps из /mnt/d/WORED.
+6. Не делать find /home/hermes для поиска копии проекта.
+7. Не патчить config.yaml до подтверждения фактического pwd и git root.
+
+Выполни:
+cd /mnt/d/WORED
+pwd
+git rev-parse --show-toplevel
+git status --short
+docker compose ps
+which hermes
+hermes --version || true
+grep -nE "cwd:|working_dir:|/mnt/d/WORED|/mnt/c/Users/dolum" ~/.hermes/config.yaml ~/.hermes/SOUL.md 2>/dev/null

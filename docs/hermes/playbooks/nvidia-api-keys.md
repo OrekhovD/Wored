@@ -2,101 +2,132 @@
 
 ## Цель
 
-Добавить в Hermes/WORED поддержку NVIDIA API-ключей формата `nvapi-*` без изменения основной модели Hermes и runtime WORED.
+Поддерживать пул NVIDIA API ключей формата `nvapi-*` для Hermes/WORED без вывода секретов в терминал, логи, Telegram или git.
 
 ## Где хранятся ключи
 
-Только в:
+Основной runtime path для Hermes в WSL:
 
-```
-~/.hermes/.env
-```
-
-Права:
 ```bash
-chmod 700 ~/.hermes
-chmod 600 ~/.hermes/.env
+/home/hermes/.hermes/secrets/nvidia_keys.txt
 ```
 
-## Формат одного ключа
+Допустимые дополнительные источники:
 
+```bash
+/home/hermes/.hermes/.env
 ```
+
+Переменные в `.env`, если они уже используются:
+
+```dotenv
 NVIDIA_API_KEY=nvapi-...
-```
-
-## Формат пула ключей
-
-```
 NVIDIA_API_KEY_1=nvapi-...
 NVIDIA_API_KEY_2=nvapi-...
-NVIDIA_API_KEY_3=nvapi-...
 NVIDIA_API_KEY_ACTIVE=1
 ```
 
-## Как проверить наличие ключа
+Файл `nvidia_keys.txt` хранит один ключ на строку. Значения нельзя печатать.
 
-```bash
-python scripts/nvidia_api_doctor.py --mode presence --json
+## Импорт ключей
+
+Импортировать ключи из текстового файла с несколькими `nvapi-*` токенами:
+
+```powershell
+wsl -e python3 /mnt/d/WORED/scripts/nvidia_key_manager.py --keys-file /home/hermes/.hermes/secrets/nvidia_keys.txt import-file "/mnt/d/WORED/Новая папка/Текстовый документ.txt" --replace --json
 ```
 
-Пример вывода:
+Ожидаемый безопасный вывод:
+
 ```json
 {
   "ok": true,
-  "mode": "presence",
-  "keys": {
-    "NVIDIA_API_KEY": false,
-    "NVIDIA_API_KEY_1": true,
-    "NVIDIA_API_KEY_2": true,
-    "NVIDIA_API_KEY_ACTIVE": "1"
-  },
-  "active_key_present": true,
+  "source_keys_found": 7,
+  "keys_written": 7,
   "secrets_printed": false
 }
 ```
 
-## Как проверить /v1/models
+## Проверка наличия
 
-```bash
-python scripts/nvidia_api_doctor.py --mode models --json
+```powershell
+wsl -e python3 /mnt/d/WORED/scripts/hermes/probe_nvidia_minimax.py --dry-run
 ```
 
-## Как проверить chat completion
+Pass means:
 
-```bash
-python scripts/nvidia_api_doctor.py --mode chat --json
+- `"ok": true`;
+- `"total_keys"` больше `0`;
+- `"secrets_printed": false`;
+- в выводе нет строк, начинающихся с `nvapi-`.
+
+## Проверка MiniMax M2.7
+
+Быстрый probe до первого успешного ключа:
+
+```powershell
+wsl -e python3 /mnt/d/WORED/scripts/hermes/probe_nvidia_minimax.py --timeout 20
 ```
 
-## Как переключить активный ключ
+Проверка всех ключей, даже если один уже сработал:
 
-```bash
-python scripts/nvidia_key_manager.py set-active 2
+```powershell
+wsl -e python3 /mnt/d/WORED/scripts/hermes/probe_nvidia_minimax.py --timeout 20 --exhaustive
 ```
+
+Pass means:
+
+- `"ok": true`;
+- `"working_key_index"` содержит номер ключа;
+- `"secrets_printed": false`.
+
+Если все ключи дают timeout или upstream error, это не раскрывает секреты и не считается успешным provider-probe.
+
+## Key manager
+
+Проверить статус pool без вывода значений:
+
+```powershell
+wsl -e python3 /mnt/d/WORED/scripts/nvidia_key_manager.py --keys-file /home/hermes/.hermes/secrets/nvidia_keys.txt status --json
+```
+
+Сменить legacy active index в `.env`, если старые команды всё ещё смотрят на `NVIDIA_API_KEY_ACTIVE`:
+
+```powershell
+wsl -e python3 /mnt/d/WORED/scripts/nvidia_key_manager.py set-active 1 --json
+```
+
+Новый doctor не зависит от active index: он перебирает все найденные ключи по порядку.
 
 ## Что запрещено
 
-- Печатать `nvapi-*` в любом выводе
-- Печатать `Bearer <token>`
-- Добавлять ключи в `config.yaml`, `git`, `snapshot`, `logs`, `reports`
-- Передавать ключи в командной строке
-- Хранить ключи вне `~/.hermes/.env`
+- Печатать `nvapi-*` в любом выводе.
+- Печатать `Bearer <token>`.
+- Добавлять реальные ключи в `config.yaml`, git, runtime snapshots, logs или reports.
+- Передавать ключи аргументом командной строки.
+- Использовать `cat ~/.hermes/secrets/nvidia_keys.txt`.
+- Использовать `echo >>` для записи ключей.
 
 ## Troubleshooting
 
 | Ошибка | Решение |
-|--------|----------|
-| `NVIDIA API key missing` | Добавьте `NVIDIA_API_KEY_1=nvapi-...` и `NVIDIA_API_KEY_ACTIVE=1` в `~/.hermes/.env` |
-| `401 Unauthorized` | Ключ неверный или просрочен — обновите его |
-| `403 Forbidden` | У аккаунта нет доступа к выбранной модели — проверьте права в NVIDIA AI Enterprise Portal |
-| `404 Model not found` | Модель не доступна для вашего аккаунта — попробуйте другую (`nvidia/llama-3.1-nemotron-70b-instruct`) |
-| `timeout` | Увеличьте `--timeout` или проверьте интернет |
-| `httpx not installed` | Выполните `pip install httpx` |
+|---|---|
+| `NVIDIA API key missing` | Импортируйте ключи в `/home/hermes/.hermes/secrets/nvidia_keys.txt` через `import-file`. |
+| `The read operation timed out` | Увеличьте `--timeout`; если timeout повторяется на всех ключах, проверьте доступность `https://integrate.api.nvidia.com/v1`. |
+| `unauthorized_or_invalid_key` | Ключ неверный или просрочен; удалите его из secret pool вручную через редактор. |
+| `forbidden_for_key_or_account` | У аккаунта нет доступа к выбранной модели. |
+| `model_or_endpoint_not_found` | Проверьте `--model minimaxai/minimax-m2.7` и базовый endpoint. |
 
 ## Quick Commands
 
-После добавления в `~/.hermes/config.yaml` можно использовать:
+Hermes quick command для probe должен запускать:
 
-- `/nvidia-key-status` → `nvidia_key_manager.py status`
-- `/nvidia-presence` → `nvidia_api_doctor.py --mode presence --json`
-- `/nvidia-models` → `nvidia_api_doctor.py --mode models --json`
-- `/nvidia-chat` → `nvidia_api_doctor.py --mode chat --json`
+```bash
+cd /mnt/d/WORED && python3 scripts/hermes/probe_nvidia_minimax.py
+```
+
+Для сухой проверки:
+
+```bash
+cd /mnt/d/WORED && python3 scripts/hermes/probe_nvidia_minimax.py --dry-run
+```

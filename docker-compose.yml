@@ -83,5 +83,13 @@ services:
       timeout: 5s
       retries: 5
 
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: htx_trading_bot_tunnel
+    depends_on:
+      - webui
+    command: tunnel --url http://webui:8000
+    restart: unless-stopped
+
 volumes:
   postgres_data:

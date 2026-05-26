@@ -1,13 +1,16 @@
 from aiogram import Router
 from aiogram.filters import CommandStart
-from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, WebAppInfo
 
 router = Router()
 
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
+    import os
+    webui_url = os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8081/dashboard"
     return ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text="🎛️ Command Deck", web_app=WebAppInfo(url=webui_url))],
             [KeyboardButton(text="📊 Рынок"), KeyboardButton(text="🧠 Аналитика")],
             [KeyboardButton(text="🔮 Прогнозы"), KeyboardButton(text="🗂 Портфель")],
             [KeyboardButton(text="🔔 Алерты"), KeyboardButton(text="⚙️ Система")],

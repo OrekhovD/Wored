@@ -1,0 +1,32 @@
+cwd: /mnt/d/WORED
+
+# =============================================================================
+# FINANCIAL SAFETY WARNING:
+# DO NOT USE models with prefixes: max, think, 480b, coder-plus.
+# Recommended economical models: qwen-turbo, qwen-plus.
+# =============================================================================
+model:
+  default: qwen-turbo
+  provider: alibaba
+
+safety:
+  no_secret_printing: true
+  require_plan_before_patch: true
+  forbid_destructive_commands: true
+
+quick_commands:
+  ps:
+    type: exec
+    command: docker compose ps
+
+  health:
+    type: exec
+    command: curl -fsS http://localhost:8080/ >/dev/null && echo "webui OK" || echo "webui FAIL"
+
+  logs-chatbot:
+    type: exec
+    command: docker compose logs chatbot --tail=120
+
+  logs-webui:
+    type: exec
+    command: docker compose logs webui --tail=120

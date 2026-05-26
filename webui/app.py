@@ -1570,6 +1570,7 @@ async def logout_action(request: Request):
 
 
 @app.get("/", response_class=HTMLResponse)
+@app.get("/dashboard", response_class=HTMLResponse)
 async def index(request: Request):
     auth_redirect = require_page_auth(request)
     if auth_redirect is not None:

@@ -39,3 +39,15 @@ async def menu_alerts(message: Message):
 @router.message(F.text == "⚙️ Система")
 async def menu_settings(message: Message):
     await send_settings(message)
+
+
+@router.message(F.text == "🎛️ Command Deck")
+async def menu_command_deck(message: Message):
+    import os
+    webui_url = os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8081/dashboard"
+    await message.answer(
+        "🎛️ <b>WORED Command Deck</b>\n\n"
+        "Вы можете открыть интерактивную панель управления по ссылке ниже:\n"
+        f"🔗 <a href='{webui_url}'>Открыть Command Deck</a>\n\n"
+        "<i>Или воспользуйтесь кнопкой «🎛️ Command Deck» на клавиатуре бота!</i>"
+    )
