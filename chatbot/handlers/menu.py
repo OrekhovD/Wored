@@ -51,3 +51,15 @@ async def menu_command_deck(message: Message):
         f"🔗 <a href='{webui_url}'>Открыть Command Deck</a>\n\n"
         "<i>Или воспользуйтесь кнопкой «🎛️ Command Deck» на клавиатуре бота!</i>"
     )
+
+
+@router.message(F.text == "🔑 HER Console")
+async def menu_her_console(message: Message):
+    import os
+    her_url = os.getenv("HER_MINIAPP_URL") or "http://localhost:8081/dashboard"
+    await message.answer(
+        "🔑 <b>HER Key Console</b>\n\n"
+        "Панель управления моделями и ключами AI Gateway:\n"
+        f"🔗 <a href='{her_url}'>Открыть HER Console</a>\n\n"
+        "<i>Или воспользуйтесь кнопкой «🔑 HER Console» на клавиатуре бота!</i>"
+    )
