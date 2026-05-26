@@ -26,7 +26,7 @@ async def handle_hermes_command(message: Message):
         intent = message.text.strip()
         cmd_data = route_hermes_intent(intent)
 
-        result = execute_command(cmd_data["command"], cmd_data.get("args", []))
+        result = await execute_command(cmd_data["command"], cmd_data.get("args", []))
 
         task_id = f"{time.strftime('%Y%m%d_%H%M%S')}_" + str(hash(intent))[:6].replace('-', '')
         response = format_telegram_response(task_id, result)
@@ -45,7 +45,7 @@ async def handle_admin_text(message: Message):
         intent = message.text.strip()
         cmd_data = route_hermes_intent(intent)
 
-        result = execute_command(cmd_data["command"], cmd_data.get("args", []))
+        result = await execute_command(cmd_data["command"], cmd_data.get("args", []))
 
         task_id = f"{time.strftime('%Y%m%d_%H%M%S')}_" + str(hash(intent))[:6].replace('-', '')
         response = format_telegram_response(task_id, result)

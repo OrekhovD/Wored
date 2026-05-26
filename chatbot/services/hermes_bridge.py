@@ -1,13 +1,13 @@
 # hermes_bridge.py
 
 from typing import Dict, Any, Optional
-import subprocess
 import json
 import os
 import re
-import shutil
 import time
+import asyncio
 from pathlib import Path
+from storage.redis_client import get_redis
 
 # --- CONFIG ---
 WHITELISTED_COMMANDS = [
@@ -73,9 +73,9 @@ def route_hermes_intent(intent: str) -> Dict[str, Any]:
     # Default fallback
     return {"command": "help", "args": []}
 
-# --- EXECUTE ---
-def execute_command(command_name: str, args: list = None) -> Dict[str, Any]:
-    """Execute whitelisted Hermes command safely."""
+# --- EXECUTE (REDIS QUEUE BRIDGE) ---
+async def execute_command(command_name: str, args: list = None) -> Dict[str, Any]:
+    """Sends command to Redis queue and waits for worker on host to complete it."""
     if not args:
         args = []
 
@@ -88,56 +88,51 @@ def execute_command(command_name: str, args: list = None) -> Dict[str, Any]:
             "result": "",
         }
 
-    hermes_cli = os.getenv("HERMES_CLI", "hermes")
-    hermes_workdir = Path(os.getenv("HERMES_WORKDIR", "/mnt/d/WORED"))
-    if not hermes_workdir.exists():
-        return {
-            "status": "ERROR",
-            "command": command_name,
-            "result": f"Hermes workdir is unavailable: {hermes_workdir}",
-            "return_code": -1,
-        }
-    if shutil.which(hermes_cli) is None:
-        return {
-            "status": "ERROR",
-            "command": command_name,
-            "result": f"Hermes CLI is unavailable on PATH: {hermes_cli}",
-            "return_code": -1,
-        }
+    # Generate task_id
+    task_id = f"task_{int(time.time())}_{os.urandom(3).hex()}"
+    task = {
+        "task_id": task_id,
+        "command": command_name,
+        "args": args,
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
 
     try:
-        # Build full command
-        cmd = [hermes_cli, "quick", command_name] + args
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd=str(hermes_workdir)
-        )
-
-        output = result.stdout.strip() or result.stderr.strip()
-        if len(output) > 3500:
-            output = output[:3490] + "... (truncated)"
-
-        return {
-            "status": "OK" if result.returncode == 0 else "ERROR",
-            "command": command_name,
-            "result": mask_secrets(output),
-            "return_code": result.returncode,
-        }
-    except subprocess.TimeoutExpired:
+        r = get_redis()
+        
+        # Enqueue task
+        await r.lpush("hermes:tasks", json.dumps(task, ensure_ascii=False))
+        
+        # Poll for result
+        result_key = f"hermes:result:{task_id}"
+        timeout = 60  # 60 seconds
+        poll_interval = 0.5
+        elapsed = 0.0
+        
+        while elapsed < timeout:
+            raw_result = await r.get(result_key)
+            if raw_result:
+                result_data = json.loads(raw_result)
+                # Cleanup result key
+                await r.delete(result_key)
+                return result_data
+            
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+            
+        # Timeout reached
         return {
             "status": "TIMEOUT",
             "command": command_name,
-            "result": "Command timed out after 120s",
+            "result": "Превышено время ожидания ответа от хост-воркера (timeout 60s). Убедитесь, что воркер запущен на хосте.",
             "return_code": -1,
         }
+        
     except Exception as exc:
         return {
             "status": "ERROR",
             "command": command_name,
-            "result": f"Execution failed: {str(exc)}",
+            "result": f"Ошибка взаимодействия с Redis: {str(exc)}",
             "return_code": -1,
         }
 
@@ -157,10 +152,3 @@ def format_telegram_response(task_id: str, data: Dict[str, Any]) -> str:
     else:
         lines.append("Result: (no output)")
     return "\n".join(lines)
-
-if __name__ == "__main__":
-    # For testing only
-    print(format_telegram_response(
-        "20260501_174500",
-        execute_command("brief")
-    ))
