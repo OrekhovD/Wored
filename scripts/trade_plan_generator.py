@@ -582,7 +582,7 @@ def main():
     parser.add_argument("--allow-synthetic-fallback", action="store_true",
                        help="Allow synthetic data for smoke tests (not for real trading)")
     parser.add_argument("--max-notional-pct", type=float, default=100, 
-                       help="Maximum notional value as percentage of balance (default 100%)")
+                       help="Maximum notional value as percentage of balance (default 100%%)")
     parser.add_argument("--allow-margin", action="store_true",
                        help="Allow positions where notional value exceeds balance (requires margin/leverage)")
     parser.add_argument("--save-to-journal", action="store_true",
