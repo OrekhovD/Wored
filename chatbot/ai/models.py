@@ -20,6 +20,8 @@ MINIMAX_NVIDIA_ENDPOINT = "https://integrate.api.nvidia.com/v1"
 GLM_ENDPOINT = "https://open.bigmodel.cn/api/paas/v4/"
 DASHSCOPE_ENDPOINT = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/"
 GOOGLE_OPENAI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/"
+DEEPSEEK_ENDPOINT = "https://api.deepseek.com/v1/"
+OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/"
 DEFAULT_PREMIUM_QWEN_MODEL = "qwen3.6-27b"
 
 
@@ -143,17 +145,71 @@ MODELS = {
         name="Oracle (MiniMax M2.7)",
         model_id=MINIMAX_NVIDIA_MODEL,
         endpoint=MINIMAX_NVIDIA_ENDPOINT,
-        api_key_env="MINIMAX_API_KEY",
+        api_key_env="NVIDIA_API_KEY",
         tier="minimax",
         max_tokens=2048,
         timeout=12.0,
     ),
+    "omniroute_reasoning": ModelConfig(
+        name="OmniRoute Reasoning (Qwen 3.7 Max)",
+        model_id=os.getenv("REASONING_MODEL", "qwen/qwen3.7-max"),
+        endpoint=os.getenv("AI_GATEWAY_BASE_URL", "https://cloud.omniroute.online/v1/"),
+        api_key_env="AI_GATEWAY_API_KEY",
+        tier="premium",
+        max_tokens=4096,
+        timeout=90.0,
+    ),
+    "omniroute_execution": ModelConfig(
+        name="OmniRoute Execution (Gemini 3.5 Flash)",
+        model_id=os.getenv("EXECUTION_MODEL", "google/gemini-3.5-flash"),
+        endpoint=os.getenv("AI_GATEWAY_BASE_URL", "https://cloud.omniroute.online/v1/"),
+        api_key_env="AI_GATEWAY_API_KEY",
+        tier="worker",
+        max_tokens=256,
+        timeout=10.0,
+    ),
+    "worker_deepseek": ModelConfig(
+        name="Robotyaga (DeepSeek V4 Flash)",
+        model_id="deepseek-v4-flash",
+        endpoint=DEEPSEEK_ENDPOINT,
+        api_key_env="DEEPSEEK_API_KEY",
+        tier="worker",
+        max_tokens=256,
+        timeout=10.0,
+    ),
+    "analyst_deepseek": ModelConfig(
+        name="Analyst (DeepSeek V4 Pro)",
+        model_id="deepseek-v4-pro",
+        endpoint=DEEPSEEK_ENDPOINT,
+        api_key_env="DEEPSEEK_API_KEY",
+        tier="analyst",
+        max_tokens=2048,
+        timeout=60.0,
+    ),
+    "worker_deepseek_or": ModelConfig(
+        name="Robotyaga (DeepSeek 3.2 OR)",
+        model_id="deepseek/deepseek-v3.2",
+        endpoint=OPENROUTER_ENDPOINT,
+        api_key_env="OPENROUTER_API_KEY",
+        tier="worker",
+        max_tokens=256,
+        timeout=10.0,
+    ),
+    "analyst_deepseek_or": ModelConfig(
+        name="Analyst (DeepSeek v4 Pro OR)",
+        model_id="deepseek/deepseek-v4-pro",
+        endpoint=OPENROUTER_ENDPOINT,
+        api_key_env="OPENROUTER_API_KEY",
+        tier="analyst",
+        max_tokens=2048,
+        timeout=60.0,
+    ),
 }
 
 
-WORKER_MODEL_CHAIN = ["worker", "worker_qwen35", "worker_qwen_legacy", "worker_glm", "worker_gemini"]
-ANALYST_MODEL_CHAIN = ["analyst", "analyst_qwen27b", "analyst_qwen_extra", "analyst_glm"]
-PREMIUM_MODEL_CHAIN = ["premium", "premium_qwen35b", "premium_glm"]
+WORKER_MODEL_CHAIN = ["omniroute_execution", "worker", "worker_qwen35", "worker_qwen_legacy", "worker_deepseek", "worker_deepseek_or", "worker_glm", "worker_gemini"]
+ANALYST_MODEL_CHAIN = ["omniroute_reasoning", "analyst", "analyst_qwen27b", "analyst_qwen_extra", "analyst_deepseek", "analyst_deepseek_or", "analyst_glm"]
+PREMIUM_MODEL_CHAIN = ["omniroute_reasoning", "premium", "premium_qwen35b", "analyst_deepseek_or", "premium_glm"]
 
 
 FALLBACK_ORDER = ["analyst", "worker", "premium", "minimax"]

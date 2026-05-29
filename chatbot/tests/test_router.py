@@ -63,7 +63,7 @@ async def test_fallback_on_first_model_failure():
 def test_get_client_skips_unsupported_minimax_key():
     import ai.router as router
 
-    with patch.dict(os.environ, {"MINIMAX_API_KEY": "mmx-direct-key"}, clear=False):
+    with patch.dict(os.environ, {"NVIDIA_API_KEY": "mmx-direct-key"}, clear=False):
         router._clients.clear()
         client = router.get_client("minimax")
         assert client is None
@@ -79,7 +79,7 @@ def test_worker_fallback_chain_prefers_qwen_then_glm():
 
     order = expand_fallback_tiers("worker")
 
-    assert order[:5] == ["worker", "worker_qwen35", "worker_qwen_legacy", "worker_glm", "worker_gemini"]
+    assert order[:8] == ["omniroute_execution", "worker", "worker_qwen35", "worker_qwen_legacy", "worker_deepseek", "worker_deepseek_or", "worker_glm", "worker_gemini"]
 
 
 def test_analyst_fallback_chain_prefers_reasoning_qwen_then_glm():
@@ -87,7 +87,8 @@ def test_analyst_fallback_chain_prefers_reasoning_qwen_then_glm():
 
     order = expand_fallback_tiers("analyst")
 
-    assert order[:3] == ["analyst", "analyst_qwen27b", "analyst_glm"]
+    # Extra qwen is empty by default so it filters out
+    assert order[:6] == ["omniroute_reasoning", "analyst", "analyst_qwen27b", "analyst_deepseek", "analyst_deepseek_or", "analyst_glm"]
 
 
 def test_premium_fallback_chain_prefers_reasoning_qwen_then_glm():
@@ -95,4 +96,4 @@ def test_premium_fallback_chain_prefers_reasoning_qwen_then_glm():
 
     order = expand_fallback_tiers("premium")
 
-    assert order[:3] == ["premium", "premium_qwen35b", "premium_glm"]
+    assert order[:5] == ["omniroute_reasoning", "premium", "premium_qwen35b", "analyst_deepseek_or", "premium_glm"]
