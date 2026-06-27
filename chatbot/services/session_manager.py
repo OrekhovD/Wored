@@ -977,4 +977,313 @@ async def execution_watch_loop(session_id: str) -> dict:
         await update_session_status(session_id, "completed", "session_window_completed")
         actions.append({"action": "session_completed"})
 
-    return {"session_id": session_id, "actions": actions}
+
+# ─── Mini App API helpers (ТЗ backend_contract v1) ────────────────────
+
+VALID_REVISION_COMMANDS = {"continue", "tighten", "reduce", "pause", "close_all"}
+
+
+async def apply_revision_command(
+    session_id: str,
+    command: str,
+    source: str = "telegram_miniapp",
+    actor_user_id: int = 0,
+) -> dict:
+    """
+    ТЗ 5.3 — apply execution control command from Mini App.
+    Записывает audit trail в session_revisions, выполняет FSM transition.
+    """
+    if command not in VALID_REVISION_COMMANDS:
+        return {"error": "invalid_command", "command": command}
+
+    session = await get_session(session_id)
+    if not session:
+        return {"error": "session_not_found"}
+
+    current_status = session["status"]
+    if current_status in ("stopped", "completed"):
+        return {"error": "session_ended", "status": current_status}
+
+    pool = await get_pool()
+    if not pool:
+        return {"error": "No DB pool"}
+
+    base_version = session["active_plan_version"]
+    new_version = base_version + 1
+    revision_id = _uuid()
+    now = _now_utc()
+
+    revision_payload = {
+        "command": command,
+        "source": source,
+        "actor_user_id": actor_user_id,
+        "previous_status": current_status,
+        "applied_at": now.isoformat(),
+    }
+
+    async with pool.acquire() as conn:
+        # Write revision record
+        await conn.execute(
+            """
+            INSERT INTO session_revisions
+                (id, session_id, base_version, new_version, execution_command, revision_json, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            """,
+            revision_id, session_id, base_version, new_version,
+            command, json.dumps(revision_payload),
+        )
+
+        # Update active plan version
+        await conn.execute(
+            "UPDATE trading_sessions SET active_plan_version = $2, updated_at = NOW() WHERE id = $1",
+            session_id, new_version,
+        )
+
+        # Write execution event
+        import uuid as uuid_mod
+        event_id = str(uuid_mod.uuid4())
+        new_status = current_status
+        if command == "pause":
+            new_status = "paused"
+            await conn.execute(
+                "UPDATE trading_sessions SET status = 'paused', updated_at = NOW() WHERE id = $1",
+                session_id,
+            )
+        elif command == "close_all":
+            new_status = "stopped"
+            await conn.execute(
+                "UPDATE trading_sessions SET status = 'stopped', final_status_reason = 'close_all_command', updated_at = NOW() WHERE id = $1",
+                session_id,
+            )
+
+        await conn.execute(
+            """
+            INSERT INTO execution_events
+                (id, session_id, event_type, state_before, state_after, event_payload, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            """,
+            event_id, session_id,
+            f"revision_{command}",
+            current_status, new_status,
+            json.dumps(revision_payload),
+        )
+
+    # Publish to Redis for live stream
+    try:
+        from storage.redis_client import get_redis
+        r = get_redis()
+        if r:
+            event_msg = json.dumps({
+                "id": event_id,
+                "session_id": session_id,
+                "event_type": f"revision_{command}",
+                "state_before": current_status,
+                "state_after": new_status,
+                "event_payload": revision_payload,
+                "created_at": now.isoformat(),
+            })
+            await r.publish("daily_session_events", event_msg)
+    except Exception as exc:
+        log.warning("Redis publish failed: %s", exc)
+
+    # Execute close_all: close open trades
+    if command == "close_all":
+        try:
+            async with pool.acquire() as conn:
+                open_trades = await conn.fetch(
+                    "SELECT id FROM executed_trades WHERE session_id = $1 AND status = 'open'",
+                    session_id,
+                )
+            for t in open_trades:
+                await execute_exit(session_id, str(t["id"]), 0.0, "close_all_command")
+        except Exception as exc:
+            log.warning("close_all execution failed: %s", exc)
+
+    log.info("Revision applied: session=%s cmd=%s source=%s %s→%s",
+             session_id, command, source, current_status, new_status)
+
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "executioncommand": command,
+        "accepted": True,
+        "applied_at": now.isoformat(),
+        "new_status": new_status,
+    }
+
+
+async def build_active_snapshot(session_id: str) -> dict:
+    """
+    ТЗ 5.2 — unified snapshot for Mini App.
+    Возвращает стандартизированный response с session, plan, metrics, trades, events, revision.
+    """
+    pool = await get_pool()
+    if not pool:
+        return _empty_snapshot()
+
+    async with pool.acquire() as conn:
+        session = await conn.fetchrow(
+            "SELECT * FROM trading_sessions WHERE id = $1",
+            session_id,
+        )
+        if not session:
+            return _empty_snapshot()
+
+        plan = await conn.fetchrow(
+            "SELECT * FROM session_plans WHERE session_id = $1 ORDER BY version DESC LIMIT 1",
+            session_id,
+        )
+        entries = await conn.fetch(
+            "SELECT * FROM planned_entries WHERE session_id = $1 AND plan_version = $2 ORDER BY created_at",
+            session_id, session["active_plan_version"],
+        )
+        trades = await conn.fetch(
+            "SELECT * FROM executed_trades WHERE session_id = $1 ORDER BY opened_at DESC",
+            session_id,
+        )
+        revisions = await conn.fetch(
+            "SELECT * FROM session_revisions WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1",
+            session_id,
+        )
+        metrics = await conn.fetchrow(
+            "SELECT * FROM session_metrics WHERE session_id = $1",
+            session_id,
+        )
+        events = await conn.fetch(
+            "SELECT * FROM execution_events WHERE session_id = $1 ORDER BY created_at DESC LIMIT 50",
+            session_id,
+        )
+
+    def safe_jsonb(val):
+        if val is None:
+            return None
+        if isinstance(val, str):
+            return json.loads(val)
+        return dict(val)
+
+    plan_json = safe_jsonb(plan["plan_json"]) if plan else None
+
+    # Count failed entries
+    failed_entries = sum(1 for e in entries if e["status"] == "expired")
+
+    # Last revision
+    last_rev = revisions[0] if revisions else None
+
+    return {
+        "session": {
+            "id": str(session["id"]),
+            "user_id": session["user_id"],
+            "symbol": session["symbol"],
+            "exchange": session["exchange"],
+            "status": session["status"].upper(),
+            "riskmode": session["risk_mode"],
+            "sessionstart": serialize_dt_safe(session["session_start"]),
+            "sessionend": serialize_dt_safe(session["session_end"]),
+            "failedentries": failed_entries,
+            "lastcommand": last_rev["execution_command"] if last_rev else None,
+            "activeplanversion": session["active_plan_version"],
+        },
+        "plan": {
+            "id": str(plan["id"]),
+            "version": plan["version"],
+            "thesis": plan_json.get("thesis") if plan_json else None,
+            "marketregime": plan_json.get("market_regime") if plan_json else None,
+            "primaryscenario": plan_json.get("primary_scenario") if plan_json else None,
+            "alternativescenario": plan_json.get("alternative_scenario") if plan_json else None,
+            "notradecondition": plan_json.get("no_trade_condition") if plan_json else None,
+            "riskmode": session["risk_mode"],
+            "sessionrisk": _get_session_risk(session["risk_mode"]),
+            "entries": [
+                {
+                    "id": str(e["id"]),
+                    "side": e["side"],
+                    "status": e["status"],
+                    "entryzonefrom": float(e["entry_zone_from"]),
+                    "entryzoneto": float(e["entry_zone_to"]),
+                    "stoploss": float(e["stop_loss"]),
+                    "takeprofit": safe_jsonb(e["take_profit_json"]),
+                    "leverage": e["recommended_leverage"],
+                    "budgetsharepct": float(e["budget_share_pct"]),
+                    "reasoncode": e["reason_code"],
+                }
+                for e in entries
+            ],
+        } if plan else None,
+        "metrics": {
+            "tradecount": int(metrics["trade_count"]),
+            "wincount": int(metrics["win_count"]),
+            "losscount": int(metrics["loss_count"]),
+            "liquidationcount": int(metrics["liquidation_count"]),
+            "totalpnlusdt": float(metrics["total_pnl_usdt"]),
+            "totalpnlpct": float(metrics["total_pnl_pct"]),
+            "maxdrawdownpct": float(metrics["max_drawdown_pct"]),
+            "profitfactor": float(metrics["profit_factor"]) if metrics["profit_factor"] else None,
+            "timeinmarketpct": float(metrics["time_in_market_pct"]) if metrics["time_in_market_pct"] else None,
+        } if metrics else None,
+        "trades": [
+            {
+                "id": str(t["id"]),
+                "side": t["side"],
+                "leverage": t["leverage"],
+                "entryprice": float(t["entry_price"]),
+                "exitprice": float(t["exit_price"]) if t["exit_price"] else None,
+                "pnl": float(t["realised_pnl_usdt"]) if t["realised_pnl_usdt"] else None,
+                "close_reason": t["close_reason"],
+                "status": t["status"],
+                "openedat": serialize_dt_safe(t["opened_at"]),
+                "closedat": serialize_dt_safe(t["closed_at"]),
+            }
+            for t in trades
+        ],
+        "events": [
+            {
+                "id": str(e["id"]),
+                "timestamp": serialize_dt_safe(e["created_at"]),
+                "eventtype": e["event_type"],
+                "statebefore": e["state_before"],
+                "stateafter": e["state_after"],
+                "eventpayload": safe_jsonb(e["event_payload"]),
+            }
+            for e in events
+        ],
+        "revision": {
+            "id": str(last_rev["id"]),
+            "executioncommand": last_rev["execution_command"],
+            "createdat": serialize_dt_safe(last_rev["created_at"]),
+        } if last_rev else None,
+    }
+
+
+def _empty_snapshot() -> dict:
+    return {
+        "session": None,
+        "plan": None,
+        "metrics": None,
+        "trades": [],
+        "events": [],
+        "revision": None,
+    }
+
+
+def serialize_dt_safe(value) -> str | None:
+    """ISO format datetime for JSON response."""
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat()
+    return str(value)
+
+
+def _get_session_risk(risk_mode: str) -> dict:
+    """Risk parameters for Mini App display."""
+    from services.execution_engine import get_risk_params
+    rp = get_risk_params(risk_mode)
+    return {
+        "maxsessiondrawdownpct": rp.get("max_session_drawdown_pct", 0),
+        "maxfailedentries": rp.get("max_failed_entries", 0),
+        "maxsimultaneouspositions": 1,
+        "cooldownminutesafterstop": rp.get("cooldown_minutes", 0),
+        "stoptradingafterliquidation": True,
+    }
