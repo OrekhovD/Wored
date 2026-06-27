@@ -2335,6 +2335,24 @@ async def model_management_page(request: Request):
 # ─── Daily Pipeline v2 — Telegram Mini App API (ТЗ backend_contract v1) ─
 
 VALID_REVISION_COMMANDS = {"continue", "tighten", "reduce", "pause", "close_all"}
+
+RISK_PARAMS = {
+    "defensive": {"maxsessiondrawdownpct": 5.0, "maxfailedentries": 2, "cooldownminutesafterstop": 30},
+    "balanced": {"maxsessiondrawdownpct": 10.0, "maxfailedentries": 3, "cooldownminutesafterstop": 20},
+    "aggressive": {"maxsessiondrawdownpct": 20.0, "maxfailedentries": 4, "cooldownminutesafterstop": 10},
+}
+
+
+def _get_session_risk_for_snapshot(risk_mode: str) -> dict:
+    """ТЗ 5.2 — plan.sessionrisk object for Mini App."""
+    rp = RISK_PARAMS.get(risk_mode, RISK_PARAMS["balanced"])
+    return {
+        "maxsessiondrawdownpct": rp["maxsessiondrawdownpct"],
+        "maxfailedentries": rp["maxfailedentries"],
+        "maxsimultaneouspositions": 1,
+        "cooldownminutesafterstop": rp["cooldownminutesafterstop"],
+        "stoptradingafterliquidation": True,
+    }
 TELEGRAM_WEBAPP_AUTH_DISABLED = os.getenv("TELEGRAM_WEBAPP_AUTH_DISABLED", "true").lower() in {"1", "true", "yes"}
 
 
@@ -2473,6 +2491,7 @@ async def api_daily_session_active(request: Request):
             "alternativescenario": plan_json.get("alternative_scenario") if plan_json else None,
             "notradecondition": plan_json.get("no_trade_condition") if plan_json else None,
             "riskmode": session["risk_mode"],
+            "sessionrisk": _get_session_risk_for_snapshot(session["risk_mode"]),
             "entries": [
                 {
                     "id": str(e["id"]),
