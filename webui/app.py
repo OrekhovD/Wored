@@ -2034,19 +2034,20 @@ async def api_models_probe(request: Request):
 
     results = []
     for key, cfg in MODEL_CONFIGS.items():
-        provider = getattr(cfg, "provider", "unknown")
         model_id = getattr(cfg, "model_id", "unknown")
-        endpoint = getattr(cfg, "endpoint", "")
+        name = getattr(cfg, "name", key)
+        base_url = getattr(cfg, "base_url", "") or getattr(cfg, "endpoint", "")
         api_key_env = getattr(cfg, "api_key_env", "")
         api_key = _os.getenv(api_key_env, "")
+        timeout = getattr(cfg, "timeout", 15.0)
         status = "no_key" if not api_key else "unknown"
         latency_ms = None
-        if api_key and endpoint:
+        if api_key and base_url:
             try:
                 start = _asyncio.get_event_loop().time()
-                async with _httpx.AsyncClient(timeout=10) as client:
+                async with _httpx.AsyncClient(timeout=min(timeout, 15)) as client:
                     resp = await client.post(
-                        f"{endpoint}/chat/completions",
+                        f"{base_url.rstrip('/')}/chat/completions",
                         headers={"Authorization": f"Bearer {api_key}"},
                         json={"model": model_id, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 5},
                     )
@@ -2055,17 +2056,21 @@ async def api_models_probe(request: Request):
                         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
                         status = "ok" if content.strip() else "empty"
                     else:
-                        body = resp.text[:200]
                         status = f"http_{resp.status_code}"
+            except _httpx.TimeoutException:
+                status = "timeout"
             except Exception as exc:
+                err_msg = str(exc)[:100]
                 status = "error"
-                latency_ms = None
+
+        provider = "ollama" if "ollama" in base_url else "dashscope" if "dashscope" in base_url else "minimax" if "minimax" in base_url else "unknown"
 
         results.append({
             "key": key,
-            "name": getattr(cfg, "name", key),
+            "name": name,
             "provider": provider,
             "model_id": model_id,
+            "base_url": base_url[:60],
             "status": status,
             "latency_ms": latency_ms,
             "available": bool(api_key),
