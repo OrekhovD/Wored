@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="cockpit">
+  <div class="cockpit-main">
+    <div class="cockpit-symbol">STRATEGY</div>
+    <div class="cockpit-price" id="strVersion">—</div>
+    <div class="cockpit-delta" id="strSummary">Загрузка...</div>
+  </div>
+</div>
+
+<main class="dashboard">
+  <section class="panel panel-chart">
+    <div class="panel-header">
+      <div>
+        <div class="panel-kicker">Rules</div>
+        <h2>Корректирующие правила</h2>
+      </div>
+    </div>
+    <div id="strRules" class="event-list">Загрузка...</div>
+  </section>
+  <aside class="side-column">
+    <section class="panel">
+      <div class="panel-kicker">Evaluations</div>
+      <h2>История оценок</h2>
+      <div id="strEvals" class="event-list"></div>
+    </section>
+  </aside>
+</main>
+
+<script>
+async function strLoad() {
+  try {
+    const r = await fetch('/api/strategy');
+    if (!r.ok) return;
+    const data = await r.json();
+    
+    if (!data.strategy) {
+      document.getElementById('strRules').innerHTML = '<div class="event-item"><span>Правила ещё не сформированы. Проведи серию симуляций (5+).</span></div>';
+      document.getElementById('strSummary').textContent = data.message || 'No strategy';
+      return;
+    }
+    
+    const s = data.strategy;
+    document.getElementById('strVersion').textContent = 'v' + s.version;
+    document.getElementById('strSummary').textContent = s.rules?.summary || '—';
+    
+    const rulesEl = document.getElementById('strRules');
+    const adjustments = s.rules?.adjustments || [];
+    if (!adjustments.length) {
+      rulesEl.innerHTML = '<div class="event-item">Нет корректировок</div>';
+    } else {
+      rulesEl.innerHTML = adjustments.map(a => `
+        <div class="event-item">
+          <span class="event-symbol">${a.parameter}</span>
+          <span class="event-detail">${a.old} → ${a.new}</span>
+          <span class="event-time">${a.reason || ''}</span>
+        </div>
+      `).join('');
+    }
+    
+    const evalsEl = document.getElementById('strEvals');
+    if (!data.evaluations.length) {
+      evalsEl.innerHTML = '<div class="event-item">Нет оценок</div>';
+    } else {
+      evalsEl.innerHTML = data.evaluations.map(e => `
+        <div class="event-item">
+          <span class="event-symbol">${e.run_id}</span>
+          <span class="event-detail">WR: ${e.winrate}% | PnL: ${e.avg_pnl.toFixed(2)} | DD: ${e.max_drawdown.toFixed(1)} | Liq: ${e.liquidation_rate}%</span>
+          <span class="event-time">${e.created_at || ''} | ${e.total} pos</span>
+        </div>
+      `).join('');
+    }
+  } catch (e) {
+    document.getElementById('strRules').innerHTML = '<div class="event-item">Error</div>';
+  }
+}
+strLoad();
+setInterval(strLoad, 30000);
+</script>
+{% endblock %}

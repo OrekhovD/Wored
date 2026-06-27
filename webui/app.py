@@ -1940,6 +1940,166 @@ async def api_candles(
     }
 
 
+
+
+# ─── ТЗ: Futures Lab, Strategy Performance, Model Management ─────────
+
+@app.get("/api/sim-positions")
+async def api_sim_positions(
+    request: Request,
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+):
+    """List sim positions for Futures Lab dashboard."""
+    require_api_auth(request)
+    pool = getattr(request.app.state, "pg_pool", None)
+    if not pool:
+        return JSONResponse(status_code=503, content={"detail": "Postgres unavailable"})
+    async with pool.acquire() as conn:
+        if status and status in ("open", "closed", "liquidated"):
+            rows = await conn.fetch(
+                "SELECT * FROM sim_positions WHERE status = $1 ORDER BY opened_at DESC LIMIT $2",
+                status, limit,
+            )
+        else:
+            rows = await conn.fetch(
+                "SELECT * FROM sim_positions ORDER BY opened_at DESC LIMIT $1", limit
+            )
+    items = []
+    for r in rows:
+        items.append({
+            "id": r["id"], "user_id": r["user_id"], "symbol": r["symbol"],
+            "direction": r["direction"], "leverage": r["leverage"],
+            "margin_type": r.get("margin_mode", r.get("margin_type")),
+            "order_type": r["order_type"],
+            "entry_price": float(r["entry_price"]) if r["entry_price"] else None,
+            "size": float(r["size"]) if r["size"] else None,
+            "margin": float(r["margin"]) if r["margin"] else None,
+            "status": r["status"],
+            "realized_pnl": float(r["realized_pnl"]) if r["realized_pnl"] else None,
+            "close_reason": r.get("close_reason"),
+            "created_at": serialize_dt(r["opened_at"]) if r.get("opened_at") else (serialize_dt(r["created_at"]) if r.get("created_at") else None),
+            "closed_at": serialize_dt(r["closed_at"]) if r.get("closed_at") else None,
+        })
+    open_count = len([i for i in items if i["status"] == "open"])
+    closed_count = len([i for i in items if i["status"] in ("closed", "liquidated")])
+    return {"items": items, "open_count": open_count, "closed_count": closed_count, "total": len(items)}
+
+
+@app.get("/api/strategy")
+async def api_strategy(request: Request):
+    """Get latest strategy rules for Strategy Performance page."""
+    require_api_auth(request)
+    pool = getattr(request.app.state, "pg_pool", None)
+    if not pool:
+        return JSONResponse(status_code=503, content={"detail": "Postgres unavailable"})
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM strategy_rules ORDER BY version DESC LIMIT 1"
+        )
+        evals = await conn.fetch(
+            "SELECT * FROM sim_evaluations ORDER BY created_at DESC LIMIT 10"
+        )
+    if not row:
+        return {"strategy": None, "evaluations": [], "message": "No strategy rules yet"}
+    strategy = {
+        "version": row["version"],
+        "rules": safe_json(row["rules"]) if isinstance(row["rules"], str) else row["rules"],
+        "source": row.get("source", "unknown"),
+        "created_at": serialize_dt(row["created_at"]) if row["created_at"] else None,
+    }
+    eval_list = []
+    for e in evals:
+        eval_list.append({
+            "run_id": e["run_id"], "total": e["total"],
+            "winrate": float(e["winrate"]) if e["winrate"] else 0,
+            "avg_pnl": float(e["avg_pnl"]) if e["avg_pnl"] else 0,
+            "max_drawdown": float(e["max_drawdown"]) if e["max_drawdown"] else 0,
+            "liquidation_rate": float(e["liquidation_rate"]) if e["liquidation_rate"] else 0,
+            "details": safe_json(e["details"]) if isinstance(e["details"], str) else (e["details"] or {}),
+            "created_at": serialize_dt(e["created_at"]) if e["created_at"] else None,
+        })
+    return {"strategy": strategy, "evaluations": eval_list}
+
+
+@app.get("/api/models/probe")
+async def api_models_probe(request: Request):
+    """Probe all configured AI models for Model Management page."""
+    require_api_auth(request)
+    import asyncio as _asyncio
+    import os as _os
+    import httpx as _httpx
+
+    from prediction_engine import MODEL_CONFIGS
+
+    results = []
+    for key, cfg in MODEL_CONFIGS.items():
+        provider = getattr(cfg, "provider", "unknown")
+        model_id = getattr(cfg, "model_id", "unknown")
+        endpoint = getattr(cfg, "endpoint", "")
+        api_key_env = getattr(cfg, "api_key_env", "")
+        api_key = _os.getenv(api_key_env, "")
+        status = "no_key" if not api_key else "unknown"
+        latency_ms = None
+        if api_key and endpoint:
+            try:
+                start = _asyncio.get_event_loop().time()
+                async with _httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.post(
+                        f"{endpoint}/chat/completions",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        json={"model": model_id, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 5},
+                    )
+                    latency_ms = int((_asyncio.get_event_loop().time() - start) * 1000)
+                    if resp.status_code == 200:
+                        content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                        status = "ok" if content.strip() else "empty"
+                    else:
+                        body = resp.text[:200]
+                        status = f"http_{resp.status_code}"
+            except Exception as exc:
+                status = "error"
+                latency_ms = None
+
+        results.append({
+            "key": key,
+            "name": getattr(cfg, "name", key),
+            "provider": provider,
+            "model_id": model_id,
+            "status": status,
+            "latency_ms": latency_ms,
+            "available": bool(api_key),
+        })
+    return {"models": results}
+
+
+@app.get("/futures-lab", response_class=HTMLResponse)
+async def futures_lab_page(request: Request):
+    """Futures Lab page — sim positions dashboard."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(request, "futures_lab.html", page_title="Futures Lab")
+
+
+@app.get("/strategy", response_class=HTMLResponse)
+async def strategy_page(request: Request):
+    """Strategy Performance page — rules and evaluations."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(request, "strategy.html", page_title="Strategy")
+
+
+@app.get("/model-management", response_class=HTMLResponse)
+async def model_management_page(request: Request):
+    """Model Management page — probe and rotate models."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(request, "models.html", page_title="Model Management")
+
+
 @app.exception_handler(401)
 async def unauthorized_handler(request: Request, exc: HTTPException):
     if request.url.path.startswith("/api/"):
