@@ -1443,3 +1443,33 @@ a:focus-visible {
 .ds-review-section label { font-size:0.72rem; color:var(--muted,#7291a5); text-transform:uppercase; }
 .ds-review-section p { font-size:0.82rem; color:#a8c0ce; margin:4px 0 12px; }
 @media (max-width:768px) { .ds-grid-4{grid-template-columns:repeat(2,1fr);} .ds-grid-2{grid-template-columns:1fr;} }
+
+/* ─── Daily Session: Control Buttons + Live ─── */
+.ds-control-buttons { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 0; }
+.ds-btn {
+  padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer;
+  font-size: 13px; font-weight: 600; transition: all 0.15s; color: #fff;
+}
+.ds-btn:active { transform: scale(0.95); }
+.ds-btn-continue { background: #22c55e; }
+.ds-btn-continue:hover { background: #16a34a; }
+.ds-btn-tighten { background: #3b82f6; }
+.ds-btn-tighten:hover { background: #2563eb; }
+.ds-btn-reduce { background: #f59e0b; }
+.ds-btn-reduce:hover { background: #d97706; }
+.ds-btn-pause { background: #a855f7; }
+.ds-btn-pause:hover { background: #9333ea; }
+.ds-btn-close { background: #ef4444; }
+.ds-btn-close:hover { background: #dc2626; }
+.ds-cmd-result { padding: 8px 12px; border-radius: 4px; font-size: 13px; margin-top: 8px; }
+.ds-cmd-pending { background: #1e293b; color: #94a3b8; }
+.ds-cmd-success { background: #052e16; color: #22c55e; }
+.ds-cmd-error { background: #450a0a; color: #ef4444; }
+.ds-live-indicator {
+  font-size: 11px; font-weight: 700; color: #22c55e; padding: 2px 8px;
+  border-radius: 4px; background: rgba(34,197,94,0.15); animation: ds-pulse 2s infinite;
+}
+@keyframes ds-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+.ds-event-new { background: rgba(34,197,94,0.1); border-left: 3px solid #22c55e; }
+.ds-no-trade { padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 4px; margin-top: 8px; }
+.ds-no-trade label { color: #ef4444; font-weight: 600; }

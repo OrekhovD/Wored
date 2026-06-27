@@ -21,23 +21,36 @@
         <div class="ds-stat"><label>ID</label><span id="dsId">—</span></div>
         <div class="ds-stat"><label>Symbol</label><span id="dsSymbol">—</span></div>
         <div class="ds-stat"><label>Risk Mode</label><span id="dsRiskMode">—</span></div>
-        <div class="ds-stat"><label>Budget</label><span id="dsBudget">—</span></div>
+        <div class="ds-stat"><label>Failed Entries</label><span id="dsFailedEntries">—</span></div>
         <div class="ds-stat"><label>Start</label><span id="dsStart">—</span></div>
         <div class="ds-stat"><label>End</label><span id="dsEnd">—</span></div>
         <div class="ds-stat"><label>Plan v</label><span id="dsPlanVer">—</span></div>
-        <div class="ds-stat"><label>Reason</label><span id="dsReason">—</span></div>
+        <div class="ds-stat"><label>Last Command</label><span id="dsLastCmd">—</span></div>
       </div>
+    </div>
+
+    <!-- Control Buttons (ТЗ 5.3) -->
+    <div class="ds-card" id="dsControls" style="display:none">
+      <div class="ds-card-header"><h2>Execution Control</h2></div>
+      <div class="ds-control-buttons">
+        <button class="ds-btn ds-btn-continue" onclick="sendCommand('continue')">▶ Continue</button>
+        <button class="ds-btn ds-btn-tighten" onclick="sendCommand('tighten')">🔒 Tighten</button>
+        <button class="ds-btn ds-btn-reduce" onclick="sendCommand('reduce')">📉 Reduce</button>
+        <button class="ds-btn ds-btn-pause" onclick="sendCommand('pause')">⏸ Pause</button>
+        <button class="ds-btn ds-btn-close" onclick="sendCommand('close_all')">✖ Close All</button>
+      </div>
+      <div id="dsCmdResult" class="ds-cmd-result" style="display:none"></div>
     </div>
 
     <!-- Metrics -->
     <div class="ds-card" id="dsMetrics" style="display:none">
       <div class="ds-card-header"><h2>Metrics</h2></div>
       <div class="ds-grid-4">
-        <div class="ds-stat"><label>Equity</label><span id="dsEquity">—</span></div>
-        <div class="ds-stat"><label>PnL</label><span id="dsPnl">—</span></div>
-        <div class="ds-stat"><label>PnL %</label><span id="dsPnlPct">—</span></div>
         <div class="ds-stat"><label>Trades</label><span id="dsTrades">—</span></div>
         <div class="ds-stat"><label>W/L</label><span id="dsWL">—</span></div>
+        <div class="ds-stat"><label>Liquidations</label><span id="dsLiq">—</span></div>
+        <div class="ds-stat"><label>Total PnL</label><span id="dsPnl">—</span></div>
+        <div class="ds-stat"><label>PnL %</label><span id="dsPnlPct">—</span></div>
         <div class="ds-stat"><label>Max DD</label><span id="dsMaxDd">—</span></div>
         <div class="ds-stat"><label>Profit Factor</label><span id="dsPf">—</span></div>
         <div class="ds-stat"><label>Time in Market</label><span id="dsTim">—</span></div>
@@ -50,7 +63,7 @@
       <div id="dsPlanBody"></div>
     </div>
 
-    <!-- Entries -->
+    <!-- Planned Entries -->
     <div class="ds-card" id="dsEntries" style="display:none">
       <div class="ds-card-header"><h2>Planned Entries</h2></div>
       <table class="ds-table" id="dsEntriesTable">
@@ -60,7 +73,7 @@
     </div>
 
     <!-- Trades -->
-    <div class="ds-card" id="dsTrades" style="display:none">
+    <div class="ds-card" id="dsTradesCard" style="display:none">
       <div class="ds-card-header"><h2>Executed Trades</h2></div>
       <table class="ds-table" id="dsTradesTable">
         <thead><tr><th>ID</th><th>Side</th><th>Lev</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Reason</th><th>Status</th></tr></thead>
@@ -68,34 +81,33 @@
       </table>
     </div>
 
-    <!-- Revisions -->
-    <div class="ds-card" id="dsRevisions" style="display:none">
-      <div class="ds-card-header"><h2>Hourly Revisions</h2></div>
-      <div id="dsRevisionsBody"></div>
+    <!-- Last Revision -->
+    <div class="ds-card" id="dsRevision" style="display:none">
+      <div class="ds-card-header"><h2>Last Revision</h2></div>
+      <div id="dsRevisionBody"></div>
     </div>
 
-    <!-- Event Log -->
+    <!-- Event Log (live SSE) -->
     <div class="ds-card" id="dsEvents" style="display:none">
-      <div class="ds-card-header"><h2>Execution Event Log</h2></div>
+      <div class="ds-card-header">
+        <h2>Execution Event Log</h2>
+        <span class="ds-live-indicator" id="dsLiveIndicator">LIVE</span>
+      </div>
       <div class="ds-event-log" id="dsEventsBody"></div>
-    </div>
-
-    <!-- Review -->
-    <div class="ds-card" id="dsReview" style="display:none">
-      <div class="ds-card-header"><h2>Post-Session Review</h2></div>
-      <div id="dsReviewBody"></div>
     </div>
   </div>
 </section>
 
 <script>
 const STATUS_COLORS = {
-  idle: '#6b7280', armed: '#f59e0b', in_position: '#10b981',
-  cooldown: '#3b82f6', paused: '#a855f7', stopped: '#ef4444', completed: '#22c55e'
+  IDLE: '#6b7280', ARMED: '#f59e0b', IN_POSITION: '#10b981',
+  COOLDOWN: '#3b82f6', PAUSED: '#a855f7', STOPPED: '#ef4444', COMPLETED: '#22c55e'
 };
 
 function fmtPrice(v) { return v ? '$' + Number(v).toLocaleString('en', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '—'; }
 function fmtPnl(v) { if (v === null || v === undefined) return '—'; const n = Number(v); return (n >= 0 ? '+' : '') + n.toFixed(4); }
+
+let currentSessionId = null;
 
 async function loadSession() {
   try {
@@ -104,71 +116,81 @@ async function loadSession() {
 
     if (!data.session) {
       document.getElementById('dsEmpty').style.display = '';
+      document.querySelectorAll('.ds-card').forEach(c => c.style.display = 'none');
+      currentSessionId = null;
       return;
     }
 
     document.getElementById('dsEmpty').style.display = 'none';
     const s = data.session;
+    currentSessionId = s.id;
 
     // Header
     document.getElementById('dsHeader').style.display = '';
     document.getElementById('dsId').textContent = s.id.slice(0, 8);
     document.getElementById('dsSymbol').textContent = s.symbol;
-    document.getElementById('dsRiskMode').textContent = s.risk_mode;
-    document.getElementById('dsBudget').textContent = '$' + s.budget_usdt.toFixed(2);
-    document.getElementById('dsStart').textContent = s.session_start ? new Date(s.session_start).toLocaleString() : '—';
-    document.getElementById('dsEnd').textContent = s.session_end ? new Date(s.session_end).toLocaleString() : '—';
-    document.getElementById('dsPlanVer').textContent = s.active_plan_version;
-    document.getElementById('dsReason').textContent = s.final_status_reason || '—';
+    document.getElementById('dsRiskMode').textContent = s.riskmode || '—';
+    document.getElementById('dsFailedEntries').textContent = s.failedentries ?? '—';
+    document.getElementById('dsStart').textContent = s.sessionstart ? new Date(s.sessionstart).toLocaleString() : '—';
+    document.getElementById('dsEnd').textContent = s.sessionend ? new Date(s.sessionend).toLocaleString() : '—';
+    document.getElementById('dsPlanVer').textContent = s.activeplanversion ?? '—';
+    document.getElementById('dsLastCmd').textContent = s.lastcommand || '—';
     const badge = document.getElementById('dsStatusBadge');
-    badge.textContent = s.status.toUpperCase();
+    badge.textContent = s.status;
     badge.style.color = STATUS_COLORS[s.status] || '#6b7280';
+
+    // Controls (show unless stopped/completed)
+    if (s.status !== 'STOPPED' && s.status !== 'COMPLETED') {
+      document.getElementById('dsControls').style.display = '';
+    }
 
     // Metrics
     if (data.metrics) {
       document.getElementById('dsMetrics').style.display = '';
       const m = data.metrics;
-      document.getElementById('dsEquity').textContent = fmtPrice(m.current_equity);
-      document.getElementById('dsPnl').textContent = fmtPnl(m.total_pnl_usdt);
-      document.getElementById('dsPnlPct').textContent = fmtPnl(m.total_pnl_pct) + '%';
-      document.getElementById('dsTrades').textContent = m.trade_count;
-      document.getElementById('dsWL').textContent = m.win_count + '/' + m.loss_count;
-      document.getElementById('dsMaxDd').textContent = Number(m.max_drawdown_pct).toFixed(2) + '%';
-      document.getElementById('dsPf').textContent = m.profit_factor ? Number(m.profit_factor).toFixed(2) : 'N/A';
-      document.getElementById('dsTim').textContent = Number(m.time_in_market_pct).toFixed(1) + '%';
+      document.getElementById('dsTrades').textContent = m.tradecount;
+      document.getElementById('dsWL').textContent = m.wincount + '/' + m.losscount;
+      document.getElementById('dsLiq').textContent = m.liquidationcount;
+      document.getElementById('dsPnl').textContent = fmtPnl(m.totalpnlusdt);
+      document.getElementById('dsPnlPct').textContent = fmtPnl(m.totalpnlpct) + '%';
+      document.getElementById('dsMaxDd').textContent = Number(m.maxdrawdownpct).toFixed(2) + '%';
+      document.getElementById('dsPf').textContent = m.profitfactor ? Number(m.profitfactor).toFixed(2) : 'N/A';
+      document.getElementById('dsTim').textContent = m.timeinmarketpct ? Number(m.timeinmarketpct).toFixed(1) + '%' : '—';
     }
 
     // Plan
     if (data.plan) {
       document.getElementById('dsPlan').style.display = '';
-      const p = data.plan.plan_json || {};
+      const p = data.plan;
       const body = document.getElementById('dsPlanBody');
+      const tpArr = p.entries && p.entries[0] ? (p.entries[0].takeprofit || []) : [];
       body.innerHTML = `
         <div class="ds-grid-2">
-          <div><label>Regime</label><span>${p.market_regime || '—'}</span></div>
-          <div><label>Model</label><span>${p.model_used || '—'}</span></div>
+          <div><label>Regime</label><span>${p.marketregime || '—'}</span></div>
+          <div><label>Version</label><span>v${p.version}</span></div>
         </div>
         <div class="ds-thesis">${p.thesis || '—'}</div>
         <div class="ds-grid-2">
-          <div><label>Primary</label><span>${p.primary_scenario || '—'}</span></div>
-          <div><label>Alternative</label><span>${p.alternative_scenario || '—'}</span></div>
+          <div><label>Primary Scenario</label><span>${p.primaryscenario || '—'}</span></div>
+          <div><label>Alternative</label><span>${p.alternativescenario || '—'}</span></div>
         </div>
+        ${p.notradecondition ? `<div class="ds-no-trade"><label>No-Trade Condition</label><span>${p.notradecondition}</span></div>` : ''}
       `;
     }
 
     // Entries
-    if (data.entries && data.entries.length) {
+    if (data.plan && data.plan.entries && data.plan.entries.length) {
       document.getElementById('dsEntries').style.display = '';
       const tbody = document.getElementById('dsEntriesBody');
-      tbody.innerHTML = data.entries.map((e, i) => `
+      tbody.innerHTML = data.plan.entries.map((e, i) => `
         <tr>
           <td>${i + 1}</td>
           <td class="${e.side === 'long' ? 'ds-long' : 'ds-short'}">${e.side.toUpperCase()}</td>
-          <td>${fmtPrice(e.entry_zone_from)} - ${fmtPrice(e.entry_zone_to)}</td>
-          <td>${fmtPrice(e.stop_loss)}</td>
-          <td>${(e.take_profit || []).map(fmtPrice).join(', ')}</td>
+          <td>${fmtPrice(e.entryzonefrom)} - ${fmtPrice(e.entryzoneto)}</td>
+          <td>${fmtPrice(e.stoploss)}</td>
+          <td>${(e.takeprofit || []).map(fmtPrice).join(', ')}</td>
           <td>${e.leverage}x</td>
-          <td>${e.budget_share_pct}%</td>
+          <td>${e.budgetsharepct}%</td>
           <td class="ds-status-${e.status}">${e.status}</td>
         </tr>
       `).join('');
@@ -176,34 +198,32 @@ async function loadSession() {
 
     // Trades
     if (data.trades && data.trades.length) {
-      document.getElementById('dsTrades').style.display = '';
+      document.getElementById('dsTradesCard').style.display = '';
       const tbody = document.getElementById('dsTradesBody');
       tbody.innerHTML = data.trades.map(t => `
         <tr>
           <td>${t.id.slice(0, 8)}</td>
           <td class="${t.side === 'long' ? 'ds-long' : 'ds-short'}">${t.side.toUpperCase()}</td>
           <td>${t.leverage}x</td>
-          <td>${fmtPrice(t.entry_price)}</td>
-          <td>${fmtPrice(t.exit_price)}</td>
-          <td class="${t.realised_pnl >= 0 ? 'ds-profit' : 'ds-loss'}">${fmtPnl(t.realised_pnl)}</td>
+          <td>${fmtPrice(t.entryprice)}</td>
+          <td>${fmtPrice(t.exitprice)}</td>
+          <td class="${t.pnl >= 0 ? 'ds-profit' : 'ds-loss'}">${fmtPnl(t.pnl)}</td>
           <td>${t.close_reason || '—'}</td>
           <td class="ds-status-${t.status}">${t.status}</td>
         </tr>
       `).join('');
     }
 
-    // Revisions
-    if (data.revisions && data.revisions.length) {
-      document.getElementById('dsRevisions').style.display = '';
-      const body = document.getElementById('dsRevisionsBody');
-      body.innerHTML = data.revisions.map(r => `
+    // Last Revision
+    if (data.revision) {
+      document.getElementById('dsRevision').style.display = '';
+      const r = data.revision;
+      document.getElementById('dsRevisionBody').innerHTML = `
         <div class="ds-revision-item">
-          <span class="ds-rev-ver">v${r.base_version} → v${r.new_version}</span>
-          <span class="ds-rev-cmd">${r.execution_command}</span>
-          <span class="ds-rev-summary">${(r.revision_json || {}).summary || ''}</span>
-          <span class="ds-rev-time">${r.created_at ? new Date(r.created_at).toLocaleString() : ''}</span>
+          <span class="ds-rev-cmd">${r.executioncommand}</span>
+          <span class="ds-rev-time">${r.createdat ? new Date(r.createdat).toLocaleString() : ''}</span>
         </div>
-      `).join('');
+      `;
     }
 
     // Events
@@ -212,31 +232,89 @@ async function loadSession() {
       const body = document.getElementById('dsEventsBody');
       body.innerHTML = data.events.map(e => `
         <div class="ds-event-item">
-          <span class="ds-event-type">${e.event_type}</span>
-          <span class="ds-event-states">${e.state_before || ''} → ${e.state_after || ''}</span>
-          <span class="ds-event-time">${e.created_at ? new Date(e.created_at).toLocaleString() : ''}</span>
+          <span class="ds-event-type">${e.eventtype}</span>
+          <span class="ds-event-states">${e.statebefore || ''} → ${e.stateafter || ''}</span>
+          <span class="ds-event-time">${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</span>
         </div>
       `).join('');
     }
 
-    // Review
-    if (data.review) {
-      document.getElementById('dsReview').style.display = '';
-      const r = data.review;
-      document.getElementById('dsReviewBody').innerHTML = `
-        <div class="ds-review-model">${r.review_model} · ${r.status}</div>
-        <div class="ds-review-text">${(r.review_text || '').replace(/\n/g, '<br>')}</div>
-        ${r.what_worked ? `<div class="ds-review-section"><label>What worked</label><p>${r.what_worked}</p></div>` : ''}
-        ${r.what_failed ? `<div class="ds-review-section"><label>What failed</label><p>${r.what_failed}</p></div>` : ''}
-      `;
+    // Start SSE stream for live events
+    if (currentSessionId && !window.dsSSE) {
+      startEventStream(currentSessionId);
     }
-
   } catch (err) {
     console.error('Daily session load error:', err);
   }
 }
 
+async function sendCommand(cmd) {
+  if (!currentSessionId) return;
+  const result = document.getElementById('dsCmdResult');
+  result.style.display = '';
+  result.textContent = 'Sending...';
+  result.className = 'ds-cmd-result ds-cmd-pending';
+
+  try {
+    const res = await fetch('/api/daily-session/revision', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({session_id: currentSessionId, command: cmd})
+    });
+    const data = await res.json();
+    if (data.ok) {
+      result.textContent = `✓ ${cmd} → ${data.new_status}`;
+      result.className = 'ds-cmd-result ds-cmd-success';
+    } else {
+      result.textContent = `✗ ${data.error || 'failed'}`;
+      result.className = 'ds-cmd-result ds-cmd-error';
+    }
+    setTimeout(() => { result.style.display = 'none'; }, 3000);
+    loadSession(); // refresh
+  } catch (err) {
+    result.textContent = `✗ ${err.message}`;
+    result.className = 'ds-cmd-result ds-cmd-error';
+  }
+}
+
+function startEventStream(sessionId) {
+  const url = `/api/daily-session/events/stream?session_id=${sessionId}`;
+  const es = new EventSource(url);
+  window.dsSSE = es;
+
+  es.addEventListener('execution_event', (e) => {
+    const data = JSON.parse(e.data);
+    const body = document.getElementById('dsEventsBody');
+    if (!body) return;
+    document.getElementById('dsEvents').style.display = '';
+    const item = document.createElement('div');
+    item.className = 'ds-event-item ds-event-new';
+    item.innerHTML = `
+      <span class="ds-event-type">${data.eventtype}</span>
+      <span class="ds-event-states">${data.statebefore || ''} → ${data.stateafter || ''}</span>
+      <span class="ds-event-time">${data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : ''}</span>
+    `;
+    body.prepend(item);
+    // Remove highlight after 2s
+    setTimeout(() => item.classList.remove('ds-event-new'), 2000);
+    // Reload session to update state
+    loadSession();
+  });
+
+  es.addEventListener('heartbeat', () => {
+    const ind = document.getElementById('dsLiveIndicator');
+    if (ind) {
+      ind.style.opacity = '0.5';
+      setTimeout(() => { if (ind) ind.style.opacity = '1'; }, 300);
+    }
+  });
+
+  es.onerror = () => {
+    console.log('SSE disconnected, will retry...');
+  };
+}
+
 loadSession();
-setInterval(loadSession, 5000);
+setInterval(loadSession, 10000);
 </script>
 {% endblock %}
