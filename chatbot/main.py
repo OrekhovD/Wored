@@ -19,6 +19,7 @@ from handlers.settings import router as settings_router
 from handlers.trader import router as trader_router
 from handlers.models import router as models_router
 from handlers.admin import router as admin_router
+from handlers.pipeline import router as pipeline_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 log = logging.getLogger("chatbot")
@@ -123,6 +124,7 @@ async def main():
     dp.include_router(trader_router)
     dp.include_router(models_router)
     dp.include_router(admin_router)
+    dp.include_router(pipeline_router)
     if os.getenv("HERMES_CHATBOT_GATEWAY_ENABLED", "false").lower() in {"1", "true", "yes"}:
         from handlers.hermes_admin import router as hermes_admin_router
         dp.include_router(hermes_admin_router)
@@ -140,6 +142,15 @@ async def main():
         log.info('TZ tables ensured')
     except Exception as e:
         log.error('ensure_ext_tables failed: %s', e)
+
+    # Daily Pipeline v2 — ensure tables
+    try:
+        from services.pipeline_schema import ensure_pipeline_tables
+        await ensure_pipeline_tables()
+        log.info('Pipeline tables ensured (8 tables)')
+    except Exception as e:
+        log.error('ensure_pipeline_tables failed: %s', e)
+
     log.info("Chatbot started polling")
     asyncio.create_task(alert_listener(bot))
     asyncio.create_task(_sim_ai_monitor(bot))

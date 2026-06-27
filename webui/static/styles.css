@@ -1399,3 +1399,47 @@ a:focus-visible {
 .eval-run { font-size: 0.75rem; color: #36c9dd; font-weight: 600; }
 .eval-metrics { font-size: 0.8rem; font-variant-numeric: tabular-nums; }
 .eval-meta { font-size: 0.7rem; color: var(--muted, #7291a5); }
+
+/* ─── Daily Session page ─── */
+.ds-container { display:flex; flex-direction:column; gap:16px; padding:16px 0; }
+.ds-empty { text-align:center; padding:40px; color:var(--muted,#7291a5); font-size:0.9rem; }
+.ds-empty code { background:rgba(10,20,28,0.6); padding:2px 6px; border-radius:4px; }
+.ds-card { background:var(--panel); border:1px solid var(--panel-border); border-radius:10px; padding:16px 20px; }
+.ds-card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.ds-card-header h2 { font-size:1rem; font-weight:600; margin:0; color:#c5d4dd; }
+.ds-status-badge { font-size:0.75rem; font-weight:700; letter-spacing:0.05em; padding:3px 10px; border-radius:20px; background:rgba(255,255,255,0.06); }
+.ds-grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+.ds-grid-2 { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-bottom:8px; }
+.ds-stat { display:flex; flex-direction:column; gap:2px; }
+.ds-stat label { font-size:0.7rem; color:var(--muted,#7291a5); text-transform:uppercase; letter-spacing:0.04em; }
+.ds-stat span { font-size:0.9rem; font-variant-numeric:tabular-nums; color:#d3e0e8; }
+.ds-thesis { font-size:0.85rem; color:#a8c0ce; padding:8px 12px; background:rgba(10,20,28,0.4); border-radius:6px; margin:8px 0; line-height:1.5; }
+.ds-table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+.ds-table th { text-align:left; padding:6px 10px; color:var(--muted,#7291a5); font-weight:500; border-bottom:1px solid var(--panel-border); font-size:0.72rem; text-transform:uppercase; }
+.ds-table td { padding:6px 10px; border-bottom:1px solid rgba(114,145,165,0.08); font-variant-numeric:tabular-nums; }
+.ds-long { color:#38d77f; font-weight:600; }
+.ds-short { color:#ff5f65; font-weight:600; }
+.ds-profit { color:#38d77f; }
+.ds-loss { color:#ff5f65; }
+.ds-status-pending { color:#f8b64c; }
+.ds-status-triggered { color:#36c9dd; }
+.ds-status-expired { color:var(--muted,#7291a5); }
+.ds-status-cancelled { color:var(--muted,#7291a5); text-decoration:line-through; }
+.ds-status-open { color:#f8b64c; font-weight:600; }
+.ds-status-closed { color:#38d77f; }
+.ds-status-liquidated { color:#ff5f65; font-weight:600; }
+.ds-revision-item { display:flex; align-items:center; gap:12px; padding:6px 0; border-bottom:1px solid rgba(114,145,165,0.06); font-size:0.82rem; }
+.ds-rev-ver { font-weight:600; color:#36c9dd; min-width:80px; }
+.ds-rev-cmd { font-size:0.75rem; padding:2px 8px; border-radius:4px; background:rgba(255,255,255,0.06); }
+.ds-rev-summary { color:#a8c0ce; flex:1; }
+.ds-rev-time { font-size:0.72rem; color:var(--muted,#7291a5); }
+.ds-event-log { max-height:300px; overflow-y:auto; }
+.ds-event-item { display:flex; align-items:center; gap:12px; padding:4px 0; font-size:0.78rem; border-bottom:1px solid rgba(114,145,165,0.04); }
+.ds-event-type { font-weight:600; color:#36c9dd; min-width:140px; }
+.ds-event-states { color:#a8c0ce; }
+.ds-event-time { font-size:0.72rem; color:var(--muted,#7291a5); margin-left:auto; }
+.ds-review-model { font-size:0.75rem; color:#36c9dd; margin-bottom:8px; }
+.ds-review-text { font-size:0.85rem; line-height:1.6; color:#c5d4dd; padding:8px 12px; background:rgba(10,20,28,0.4); border-radius:6px; margin-bottom:12px; }
+.ds-review-section label { font-size:0.72rem; color:var(--muted,#7291a5); text-transform:uppercase; }
+.ds-review-section p { font-size:0.82rem; color:#a8c0ce; margin:4px 0 12px; }
+@media (max-width:768px) { .ds-grid-4{grid-template-columns:repeat(2,1fr);} .ds-grid-2{grid-template-columns:1fr;} }

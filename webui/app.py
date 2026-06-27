@@ -2332,6 +2332,198 @@ async def model_management_page(request: Request):
     return template_response(request, "models.html", page_title="Model Management")
 
 
+# ─── Daily Pipeline v2 (ТЗ 13.2) ───────────────────────────────────────
+
+
+@app.get("/daily-session", response_class=HTMLResponse)
+async def daily_session_page(request: Request):
+    """Daily Session page — ТЗ 13.2 WebUI contracts."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(request, "daily_session.html", page_title="Daily Session")
+
+
+@app.get("/api/daily-session/active")
+async def api_daily_session_active(request: Request):
+    """Get active trading session with plan, metrics, trades, revisions."""
+    require_api_auth(request)
+
+    pool = request.app.state.pg_pool
+    if pool is None:
+        return JSONResponse({"error": "database_unavailable"}, status_code=503)
+
+    async with pool.acquire() as conn:
+        session = await conn.fetchrow(
+            """
+            SELECT * FROM trading_sessions
+            ORDER BY created_at DESC LIMIT 1
+            """,
+        )
+
+        if not session:
+            return {"session": None}
+
+        session_id = str(session["id"])
+
+        plan = await conn.fetchrow(
+            "SELECT * FROM session_plans WHERE session_id = $1 ORDER BY version DESC LIMIT 1",
+            session_id,
+        )
+        entries = await conn.fetch(
+            "SELECT * FROM planned_entries WHERE session_id = $1 ORDER BY created_at",
+            session_id,
+        )
+        trades = await conn.fetch(
+            "SELECT * FROM executed_trades WHERE session_id = $1 ORDER BY opened_at DESC",
+            session_id,
+        )
+        revisions = await conn.fetch(
+            "SELECT * FROM session_revisions WHERE session_id = $1 ORDER BY created_at DESC",
+            session_id,
+        )
+        metrics = await conn.fetchrow(
+            "SELECT * FROM session_metrics WHERE session_id = $1",
+            session_id,
+        )
+        review = await conn.fetchrow(
+            "SELECT * FROM daily_reviews WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1",
+            session_id,
+        )
+        events = await conn.fetch(
+            "SELECT * FROM execution_events WHERE session_id = $1 ORDER BY created_at DESC LIMIT 50",
+            session_id,
+        )
+
+    def safe_jsonb(val):
+        if val is None:
+            return None
+        if isinstance(val, str):
+            return json.loads(val)
+        return dict(val)
+
+    return {
+        "session": {
+            "id": str(session["id"]),
+            "user_id": session["user_id"],
+            "symbol": session["symbol"],
+            "status": session["status"],
+            "risk_mode": session["risk_mode"],
+            "budget_usdt": float(session["initial_budget_usdt"]),
+            "session_start": serialize_dt(session["session_start"]),
+            "session_end": serialize_dt(session["session_end"]),
+            "active_plan_version": session["active_plan_version"],
+            "final_status_reason": session["final_status_reason"],
+        },
+        "plan": {
+            "version": plan["version"],
+            "plan_type": plan["plan_type"],
+            "plan_json": safe_jsonb(plan["plan_json"]),
+            "created_by_role": plan["created_by_role"],
+            "created_at": serialize_dt(plan["created_at"]),
+        } if plan else None,
+        "entries": [
+            {
+                "id": str(e["id"]),
+                "side": e["side"],
+                "status": e["status"],
+                "entry_zone_from": float(e["entry_zone_from"]),
+                "entry_zone_to": float(e["entry_zone_to"]),
+                "stop_loss": float(e["stop_loss"]),
+                "take_profit": safe_jsonb(e["take_profit_json"]),
+                "leverage": e["recommended_leverage"],
+                "budget_share_pct": float(e["budget_share_pct"]),
+                "confirmation_rule": e["confirmation_rule"],
+                "reason_code": e["reason_code"],
+            }
+            for e in entries
+        ],
+        "trades": [
+            {
+                "id": str(t["id"]),
+                "side": t["side"],
+                "leverage": t["leverage"],
+                "entry_price": float(t["entry_price"]),
+                "exit_price": float(t["exit_price"]) if t["exit_price"] else None,
+                "position_notional": float(t["position_notional_usdt"]),
+                "margin_used": float(t["margin_used_usdt"]),
+                "open_fee": float(t["open_fee_usdt"]),
+                "close_fee": float(t["close_fee_usdt"]) if t["close_fee_usdt"] else None,
+                "realised_pnl": float(t["realised_pnl_usdt"]) if t["realised_pnl_usdt"] else None,
+                "close_reason": t["close_reason"],
+                "status": t["status"],
+                "opened_at": serialize_dt(t["opened_at"]),
+                "closed_at": serialize_dt(t["closed_at"]),
+            }
+            for t in trades
+        ],
+        "revisions": [
+            {
+                "base_version": r["base_version"],
+                "new_version": r["new_version"],
+                "execution_command": r["execution_command"],
+                "revision_json": safe_jsonb(r["revision_json"]),
+                "created_at": serialize_dt(r["created_at"]),
+            }
+            for r in revisions
+        ],
+        "metrics": dict(metrics) if metrics else None,
+        "review": {
+            "review_model": review["review_model"],
+            "review_text": review["review_text"],
+            "what_worked": review["what_worked"],
+            "what_failed": review["what_failed"],
+            "status": review["status"],
+            "created_at": serialize_dt(review["created_at"]),
+        } if review else None,
+        "events": [
+            {
+                "event_type": e["event_type"],
+                "state_before": e["state_before"],
+                "state_after": e["state_after"],
+                "payload": safe_jsonb(e["event_payload"]),
+                "created_at": serialize_dt(e["created_at"]),
+            }
+            for e in events
+        ],
+    }
+
+
+@app.post("/api/daily-session/start")
+async def api_daily_session_start(request: Request, body: dict = Body(...)):
+    """Start a new daily trading session."""
+    require_api_auth(request)
+
+    import uuid as uuid_mod
+    from datetime import timedelta
+
+    pool = request.app.state.pg_pool
+    if pool is None:
+        return JSONResponse({"error": "database_unavailable"}, status_code=503)
+
+    budget = float(body.get("budget_usdt", 100.0))
+    risk_mode = body.get("risk_mode", "balanced")
+    duration = int(body.get("duration_hours", 8))
+    user_id = int(body.get("user_id", 5249526259))
+
+    session_id = str(uuid_mod.uuid4())
+    now = datetime.now(timezone.utc)
+    session_end = now + timedelta(hours=duration)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO trading_sessions
+                (id, user_id, symbol, exchange, session_start, session_end,
+                 forecast_horizon_hours, initial_budget_usdt, risk_mode, status)
+            VALUES ($1, $2, 'BTCUSDT', 'HTX', $3, $4, $5, $6, $7, 'idle')
+            """,
+            session_id, user_id, now, session_end, duration, budget, risk_mode,
+        )
+
+    return {"session_id": session_id, "status": "idle", "message": "Session created. Plan generation requires chatbot analyst."}
+
+
 @app.exception_handler(401)
 async def unauthorized_handler(request: Request, exc: HTTPException):
     if request.url.path.startswith("/api/"):

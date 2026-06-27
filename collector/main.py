@@ -11,6 +11,7 @@ from journal.writer import write_entry
 from predictions.evaluator import evaluate_due_forecasts, refresh_historical_forecast_scores
 from scheduler.alert_checker import check_alerts
 from scheduler.sim_monitor import check_sim_positions
+from scheduler.pipeline_jobs import register_pipeline_jobs
 from storage.postgres_client import get_pool
 from storage.redis_client import get_redis
 
@@ -51,6 +52,14 @@ async def main():
     get_redis()
     await refresh_historical_forecast_scores()
 
+    # Daily Pipeline v2 — ensure tables exist
+    try:
+        import importlib
+        schema_mod = importlib.import_module("services.pipeline_schema")
+        await schema_mod.ensure_pipeline_tables()
+    except Exception as exc:
+        log.warning("Pipeline tables init (collector): %s", exc)
+
     asyncio.create_task(ws_listen())
 
     scheduler = AsyncIOScheduler()
@@ -58,6 +67,9 @@ async def main():
     scheduler.add_job(check_alerts, "interval", minutes=5, id="check_alerts")
     scheduler.add_job(evaluate_due_forecasts, "interval", minutes=5, id="evaluate_forecasts")
     scheduler.add_job(check_sim_positions, "interval", minutes=2, id="check_sim_positions")
+
+    # Daily Pipeline v2 jobs (ТЗ раздел 11)
+    register_pipeline_jobs(scheduler)
 
     from storage.postgres_client import cleanup_old_tickers
 
