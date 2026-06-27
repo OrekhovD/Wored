@@ -23,6 +23,194 @@ async def get_pool():
             log.error(f"Postgres connect error: {e}")
     return _pool
 
+# ─── Table schemas for TЗ requirements ───────────────────────────────
+
+EXT_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS user_model_prefs (
+    user_id BIGINT PRIMARY KEY,
+    model_alias VARCHAR(50) NOT NULL DEFAULT 'auto',
+    auto_mode BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS usage_log (
+    id SERIAL PRIMARY KEY,
+    request_id VARCHAR(64),
+    user_id BIGINT,
+    task_type VARCHAR(30),
+    routing_mode VARCHAR(20),
+    requested_model VARCHAR(80),
+    final_model VARCHAR(80),
+    prompt_tokens INT DEFAULT 0,
+    completion_tokens INT DEFAULT 0,
+    total_tokens INT DEFAULT 0,
+    latency_ms INT DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'ok',
+    error_type VARCHAR(40),
+    error_msg TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_log_user ON usage_log (user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_log_model ON usage_log (final_model, created_at);
+
+CREATE TABLE IF NOT EXISTS strategy_rules (
+    id SERIAL PRIMARY KEY,
+    version INT NOT NULL,
+    rules JSONB NOT NULL,
+    source VARCHAR(30) DEFAULT 'strategy_learner',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sim_evaluations (
+    id SERIAL PRIMARY KEY,
+    evaluation_run_id VARCHAR(64) NOT NULL,
+    total_positions INT DEFAULT 0,
+    winrate DECIMAL(5,2) DEFAULT 0,
+    avg_pnl DECIMAL(20,8) DEFAULT 0,
+    max_drawdown DECIMAL(5,2) DEFAULT 0,
+    liquidation_rate DECIMAL(5,2) DEFAULT 0,
+    details JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+
+async def ensure_ext_tables():
+    """Create TЗ-related tables if they don't exist."""
+    pool = await get_pool()
+    if not pool:
+        return
+    async with pool.acquire() as conn:
+        for stmt in [s.strip() for s in EXT_TABLES_SQL.split(";") if s.strip()]:
+            await conn.execute(stmt)
+
+
+# ─── user_model_prefs CRUD ────────────────────────────────────────────
+
+async def save_user_model(user_id: int, model_alias: str, auto_mode: bool = True) -> bool:
+    """Save user's model preference."""
+    pool = await get_pool()
+    if not pool:
+        return False
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO user_model_prefs (user_id, model_alias, auto_mode, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (user_id) DO UPDATE SET
+                model_alias = EXCLUDED.model_alias,
+                auto_mode = EXCLUDED.auto_mode,
+                updated_at = NOW()
+            """,
+            user_id, model_alias, auto_mode,
+        )
+    return True
+
+
+async def get_user_model(user_id: int) -> dict | None:
+    """Get user's model preference."""
+    pool = await get_pool()
+    if not pool:
+        return None
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT user_id, model_alias, auto_mode FROM user_model_prefs WHERE user_id = $1",
+            user_id,
+        )
+    return dict(row) if row else None
+
+
+# ─── usage_log CRUD ───────────────────────────────────────────────────
+
+async def record_usage(
+    request_id: str, user_id: int, task_type: str, routing_mode: str,
+    requested_model: str, final_model: str,
+    prompt_tokens: int = 0, completion_tokens: int = 0, total_tokens: int = 0,
+    latency_ms: int = 0, status: str = "ok", error_type: str = None, error_msg: str = None,
+) -> bool:
+    """Log an AI request for token accounting."""
+    pool = await get_pool()
+    if not pool:
+        return False
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO usage_log
+                (request_id, user_id, task_type, routing_mode, requested_model, final_model,
+                 prompt_tokens, completion_tokens, total_tokens, latency_ms, status, error_type, error_msg)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            """,
+            request_id, user_id, task_type, routing_mode, requested_model, final_model,
+            prompt_tokens, completion_tokens, total_tokens, latency_ms, status, error_type, error_msg,
+        )
+    return True
+
+
+async def get_usage_summary(user_id: int, period: str = "day") -> dict:
+    """Get usage summary for a user. period: day/week/month."""
+    pool = await get_pool()
+    if not pool:
+        return {"requests": 0, "total_tokens": 0}
+    interval = {"day": "1 day", "week": "7 days", "month": "30 days"}.get(period, "1 day")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""
+            SELECT COUNT(*) as requests, COALESCE(SUM(total_tokens), 0) as total_tokens
+            FROM usage_log
+            WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '{interval}'
+            """,
+            user_id,
+        )
+    return {"requests": row["requests"], "total_tokens": row["total_tokens"]} if row else {"requests": 0, "total_tokens": 0}
+
+
+# ─── strategy_rules CRUD ──────────────────────────────────────────────
+
+async def save_strategy_rules(rules: dict, version: int = 1, source: str = "strategy_learner") -> bool:
+    pool = await get_pool()
+    if not pool:
+        return False
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO strategy_rules (version, rules, source) VALUES ($1, $2, $3)",
+            version, json.dumps(rules), source,
+        )
+    return True
+
+
+async def get_latest_strategy_rules() -> dict | None:
+    pool = await get_pool()
+    if not pool:
+        return None
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT version, rules, created_at FROM strategy_rules ORDER BY id DESC LIMIT 1"
+        )
+    if not row:
+        return None
+    return {"version": row["version"], "rules": json.loads(row["rules"]) if isinstance(row["rules"], str) else row["rules"], "created_at": _serialize_dt(row["created_at"])}
+
+
+# ─── sim_evaluations CRUD ─────────────────────────────────────────────
+
+async def save_sim_evaluation(run_id: str, total: int, winrate: float, avg_pnl: float, max_dd: float, liq_rate: float, details: dict = None) -> bool:
+    pool = await get_pool()
+    if not pool:
+        return False
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO sim_evaluations (evaluation_run_id, total_positions, winrate, avg_pnl, max_drawdown, liquidation_rate, details)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            """,
+            run_id, total, winrate, avg_pnl, max_dd, liq_rate, json.dumps(details) if details else None,
+        )
+    return True
+
+
+
 async def get_recent_alert_history(limit: int = 5):
     pool = await get_pool()
     if not pool: return []
@@ -293,3 +481,4 @@ async def get_latest_prediction_request(symbol: str | None = None) -> dict | Non
     if not items:
         return None
     return await get_prediction_request_detail(items[0]["id"])
+

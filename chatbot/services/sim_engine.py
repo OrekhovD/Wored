@@ -23,7 +23,9 @@ MAKER_FEE_RATE = 0.0002   # 0.02% maker (лимитный ордер)
 FUNDING_RATE = 0.0001     # 0.01% каждые 8ч (упрощённо)
 FUNDING_INTERVAL_HOURS = 8
 EXECUTION_DELAY_MS = (50, 350)  # имитация задержки исполнения 50-350ms
-LIQUIDATION_MARGIN = 0.005    # ликвидация при падении до 0.5% от маржи
+LIQUIDATION_MARGIN = 0.005
+MIN_LEVERAGE = 100  # ТЗ 7.2: только плечо выше 100x
+ALLOWED_SYMBOLS = {'btcusdt'}  # ТЗ 7.2: только BTC/USDT    # ликвидация при падении до 0.5% от маржи
 
 
 @dataclass
@@ -121,10 +123,14 @@ async def open_position(
         return {"error": f"Тип ордера должен limit/market, получено: {order_type}"}
     if margin_mode not in ("cross", "isolated"):
         return {"error": f"Режим маржи должен cross/isolated, получено: {margin_mode}"}
-    if leverage < 1 or leverage > 200:
+    if leverage < MIN_LEVERAGE:
+        return {"error": f"Плечо должно быть не менее {MIN_LEVERAGE}x (ТЗ: только high-leverage >100x). Получено: {leverage}x"}
+    if leverage > 200:
         return {"error": f"Плечо должно 1-200x, получено: {leverage}"}
     if margin <= 0:
         return {"error": "Маржа должна быть положительной"}
+    if symbol.lower() not in ALLOWED_SYMBOLS:
+        return {"error": f"Только BTC/USDT поддерживается (ТЗ 7.2). Получено: {symbol}"}
     if entry_price <= 0:
         return {"error": "Цена входа должна быть положительной"}
 

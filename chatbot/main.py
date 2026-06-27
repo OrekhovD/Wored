@@ -16,6 +16,9 @@ from handlers.analytics import router as analytics_router
 from handlers.portfolio import router as portfolio_router
 from handlers.predictions import router as predictions_router
 from handlers.settings import router as settings_router
+from handlers.trader import router as trader_router
+from handlers.models import router as models_router
+from handlers.admin import router as admin_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 log = logging.getLogger("chatbot")
@@ -117,6 +120,9 @@ async def main():
     dp.include_router(portfolio_router)
     dp.include_router(predictions_router)
     dp.include_router(settings_router)
+    dp.include_router(trader_router)
+    dp.include_router(models_router)
+    dp.include_router(admin_router)
     if os.getenv("HERMES_CHATBOT_GATEWAY_ENABLED", "false").lower() in {"1", "true", "yes"}:
         from handlers.hermes_admin import router as hermes_admin_router
         dp.include_router(hermes_admin_router)
@@ -128,6 +134,12 @@ async def main():
 
     dp.include_router(chat_router) # should be last since it catches messages
 
+    from storage.postgres_client import ensure_ext_tables
+    try:
+        await ensure_ext_tables()
+        log.info('TZ tables ensured')
+    except Exception as e:
+        log.error('ensure_ext_tables failed: %s', e)
     log.info("Chatbot started polling")
     asyncio.create_task(alert_listener(bot))
     asyncio.create_task(_sim_ai_monitor(bot))
