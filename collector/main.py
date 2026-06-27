@@ -10,6 +10,7 @@ from indicators.calculator import calculate_indicators
 from journal.writer import write_entry
 from predictions.evaluator import evaluate_due_forecasts, refresh_historical_forecast_scores
 from scheduler.alert_checker import check_alerts
+from scheduler.sim_monitor import check_sim_positions
 from storage.postgres_client import get_pool
 from storage.redis_client import get_redis
 
@@ -56,6 +57,7 @@ async def main():
     scheduler.add_job(record_ai_journal, "interval", minutes=15, id="record_ai_journal")
     scheduler.add_job(check_alerts, "interval", minutes=5, id="check_alerts")
     scheduler.add_job(evaluate_due_forecasts, "interval", minutes=5, id="evaluate_forecasts")
+    scheduler.add_job(check_sim_positions, "interval", minutes=2, id="check_sim_positions")
 
     from storage.postgres_client import cleanup_old_tickers
 

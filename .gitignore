@@ -26,3 +26,17 @@ hermes/sync-keys.ps1
 
 # Hermes runtime snapshots
 runtime_snapshot/
+.env.wored
+.zcode/
+# Scratch files with potential secrets
+scratch/check_*.py
+scratch/patch_auth.py
+scratch/test_api*.py
+scratch/test_deepseek*.py
+scratch/test_ollama*.py
+scratch/test_omniroute*.py
+scratch/update_*.py
+check_new_key_details.py
+find_deepseek_models.py
+test_allowed_models.py
+test_other_deepseek.py

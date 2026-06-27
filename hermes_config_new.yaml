@@ -1,38 +1,82 @@
-# =============================================================================
-# OMNIROUTE INTEGRATION (via AI-GATEWAY)
-# =============================================================================
+cwd: /mnt/d/WORED
+
+agent:
+  system_prompt: 'Ты — Hermes, инженерный агент проекта WORED.
+    Твоя роль: Captain Engineer (технический исполнитель).
+    
+    Персонализация Captain Engineer:
+    - пиратский стиль разрешён только как лёгкий тон в обращениях и навигационных метафорах;
+    - инженерные ответы должны оставаться короткими, проверяемыми и без шума;
+    - команды, пути, риски, diff, логи и тесты не маскируются пиратской стилистикой;
+    - нельзя добровольно заявлять runtime status и нельзя говорить, что Docker services работают, без проверки в текущем turn;
+    - если пользователь спрашивает про правила дизайна WORED, перечислить WebUI design guardrails из AGENTS.md.
+
+    КРИТИЧЕСКИЕ ПРАВИЛА:
+    1. НЕ ПРАВЬ КОД без явного запроса пользователя или плана от LEAD-агента (Antigravity).
+    Если плана нет — запроси его.
+    2. НИКОГДА не печатать секреты — содержимое .env, .env.postgres, API-ключи, токены, пароли, bearer tokens.
+    3. Опасные команды (rm -rf, git reset --hard, docker compose down -v) выполняй ТОЛЬКО после явного подтверждения.
+
+    ОТМЕНЁННЫЕ КОМАНДЫ (CRITICAL):
+    Если выполнение твоей команды было отменено, НЕ ПРЕДПОЛАГАЙ автоматически, что команда не была выполнена.
+    СНАЧАЛА проверь состояние рабочей директории, логи, артефакты и измененные файлы (через команды статуса).
+    Только после проверки фактического состояния среды предлагай повторный запуск или корректировку.
+
+    СУБАГЕНТЫ — ЗАПРЕЩЕНЫ:
+    НЕ используй субагенты. Выполняй все задачи самостоятельно в текущей сессии.
+    '
+
+gateway:
+  platforms: telegram
+
 model:
-  default: kr/claude-opus-4.7
-  provider: ai-gateway
+  auto_detect_auxiliary: false
+  auto_detect_vision: false
+  context_length: 256000
+  default: glm-5.2
+  provider: custom
   reasoning:
     enabled: true
-    model: kr/claude-opus-4.7
-
-ai-gateway:
-  base_url: https://terms-shakira-mason-nancy.trycloudflare.com/v1
-
-safety:
-  no_secret_printing: true
-  require_plan_before_patch: true
-  forbid_destructive_commands: true
+    model: deepseek-v4-pro
+  base_url: https://api.ollama.com/v1
+  api_key: 6bab7f40e8ca4da0b9abc72a66fa6c12.tCjESJRFOnDALtZ3U8W88Dkp
 
 quick_commands:
   ps:
     type: exec
     command: docker compose ps
-
-  health:
+  logs:
     type: exec
-    command: curl -fsS http://localhost:8080/ >/dev/null && echo "webui OK" || echo "webui FAIL"
-
+    command: docker compose logs --tail=120
+  logs-collector:
+    type: exec
+    command: docker compose logs collector --tail=120
   logs-chatbot:
     type: exec
     command: docker compose logs chatbot --tail=120
-
   logs-webui:
     type: exec
     command: docker compose logs webui --tail=120
-
-  omniroute-models:
+  redis-tickers:
     type: exec
-    command: 'curl -s -H "Authorization: Bearer $AI_GATEWAY_API_KEY" $AI_GATEWAY_BASE_URL/models | jq -r ".data[].id"'
+    command: docker compose exec -T redis redis-cli keys "ticker:*"
+  redis-journal:
+    type: exec
+    command: docker compose exec -T redis redis-cli get ai:journal:latest
+  postgres-dt:
+    type: exec
+    command: docker compose exec -T postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"'
+
+safety:
+  forbid_destructive_commands: true
+  no_secret_printing: true
+  require_plan_before_patch: true
+
+terminal:
+  backend: local
+  environments:
+    local:
+      workdir: /mnt/d/WORED
+
+approvals:
+  mode: 'off'

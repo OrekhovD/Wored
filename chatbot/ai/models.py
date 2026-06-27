@@ -22,6 +22,7 @@ DASHSCOPE_ENDPOINT = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/"
 GOOGLE_OPENAI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/"
 DEEPSEEK_ENDPOINT = "https://api.deepseek.com/v1/"
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/"
+OLLAMA_CLOUD_ENDPOINT = "https://ollama.com/v1"
 DEFAULT_PREMIUM_QWEN_MODEL = "qwen3.6-27b"
 
 
@@ -204,12 +205,39 @@ MODELS = {
         max_tokens=2048,
         timeout=60.0,
     ),
+    "worker_ollama": ModelConfig(
+        name="Robotyaga (Ollama Cloud)",
+        model_id=os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4-flash"),
+        endpoint=OLLAMA_CLOUD_ENDPOINT,
+        api_key_env="OLLAMA_CLOUD_API_KEY",
+        tier="worker",
+        max_tokens=256,
+        timeout=15.0,
+    ),
+    "analyst_ollama": ModelConfig(
+        name="Analyst (Ollama Cloud)",
+        model_id=os.getenv("OLLAMA_ANALYST_MODEL", "deepseek-v4-pro"),
+        endpoint=OLLAMA_CLOUD_ENDPOINT,
+        api_key_env="OLLAMA_CLOUD_API_KEY",
+        tier="analyst",
+        max_tokens=2048,
+        timeout=60.0,
+    ),
+    "premium_ollama": ModelConfig(
+        name="Strategist (Ollama Cloud)",
+        model_id=os.getenv("OLLAMA_PREMIUM_MODEL", "glm-5.2"),
+        endpoint=OLLAMA_CLOUD_ENDPOINT,
+        api_key_env="OLLAMA_CLOUD_API_KEY",
+        tier="premium",
+        max_tokens=4096,
+        timeout=90.0,
+    ),
 }
 
 
-WORKER_MODEL_CHAIN = ["omniroute_execution", "worker", "worker_qwen35", "worker_qwen_legacy", "worker_deepseek", "worker_deepseek_or", "worker_glm", "worker_gemini"]
-ANALYST_MODEL_CHAIN = ["omniroute_reasoning", "analyst", "analyst_qwen27b", "analyst_qwen_extra", "analyst_deepseek", "analyst_deepseek_or", "analyst_glm"]
-PREMIUM_MODEL_CHAIN = ["omniroute_reasoning", "premium", "premium_qwen35b", "analyst_deepseek_or", "premium_glm"]
+WORKER_MODEL_CHAIN = ["worker_ollama", "omniroute_execution", "worker", "worker_qwen35", "worker_qwen_legacy", "worker_deepseek", "worker_deepseek_or", "worker_glm", "worker_gemini"]
+ANALYST_MODEL_CHAIN = ["analyst_ollama", "omniroute_reasoning", "analyst", "analyst_qwen27b", "analyst_qwen_extra", "analyst_deepseek", "analyst_deepseek_or", "analyst_glm"]
+PREMIUM_MODEL_CHAIN = ["premium_ollama", "omniroute_reasoning", "premium", "premium_qwen35b", "analyst_deepseek_or", "premium_glm"]
 
 
 FALLBACK_ORDER = ["analyst", "worker", "premium", "minimax"]

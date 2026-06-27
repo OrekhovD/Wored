@@ -48,12 +48,7 @@ WHITELISTED_COMMANDS = {
         "--format", "markdown"
     ],
     "risk-position": [
-        sys.executable, "scripts/risk_position.py", 
-        "--balance", "1000", 
-        "--risk-pct", "1", 
-        "--entry", "62000", 
-        "--stop", "61000", 
-        "--take", "65000"
+        sys.executable, "scripts/risk_position.py"
     ],
     "signal-explainer": [
         sys.executable, "scripts/signal_explainer.py", 
@@ -127,13 +122,17 @@ def execute_command(command_name: str, args: list = None) -> dict:
                     "return_code": -1
                 }
 
-    # Strict whitelist argument appending (only allow safe additions if any)
-    # We do NOT append arbitrary arguments to prevent injection. Only safe predefined arguments.
-    cmd_to_run = cmd_base
+    # Handle argument appending for specific commands that require user input
+    cmd_to_run = cmd_base.copy()
     if args:
-        # In a real setup, we might parse args safely. For now, we only execute the exact whitelisted baseline command
-        # to guarantee absolute security, or append safely validated arguments.
-        logger.info(f"Arguments provided but ignored for security: {args}")
+        # Only append arguments for commands that are designed to accept them
+        if command_name in ["risk-position", "signal-explainer", "brief"]:
+            cmd_to_run.extend(args)
+            logger.info(f"Appending user-provided arguments: {args}")
+        else:
+            logger.info(f"Arguments provided but ignored for security: {args}")
+    else:
+        logger.info("No additional arguments provided.")
 
     logger.info(f"Executing: {' '.join(cmd_to_run)} in {CWD}")
     

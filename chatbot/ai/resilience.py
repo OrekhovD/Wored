@@ -313,6 +313,10 @@ _TIER_CONFIGS = {
     "premium_qwen35b": {"timeout": 95.0, "retries": 2, "cb_threshold": 5},
     "premium_glm": {"timeout": 95.0, "retries": 2, "cb_threshold": 5},
     "omniroute_reasoning": {"timeout": 95.0, "retries": 2, "cb_threshold": 5},
+    # Ollama Cloud tier configs (primary provider)
+    "worker_ollama": {"timeout": 15.0, "retries": 1, "cb_threshold": 8},
+    "analyst_ollama": {"timeout": 65.0, "retries": 2, "cb_threshold": 5},
+    "premium_ollama": {"timeout": 95.0, "retries": 2, "cb_threshold": 5},
     # Second-opinion routing should fail fast and move on when MiniMax/NIM is slow or unavailable.
     "minimax": {"timeout": 12.0,  "retries": 0, "cb_threshold": 2},
 }

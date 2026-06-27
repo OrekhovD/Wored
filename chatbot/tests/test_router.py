@@ -74,26 +74,25 @@ def test_minimax_uses_current_nvidia_model_id():
     assert MODELS["minimax"].model_id == "minimaxai/minimax-m2.7"
 
 
-def test_worker_fallback_chain_prefers_qwen_then_glm():
+def test_worker_fallback_chain_prefers_ollama_then_qwen_then_glm():
     from ai.models import expand_fallback_tiers
 
     order = expand_fallback_tiers("worker")
 
-    assert order[:8] == ["omniroute_execution", "worker", "worker_qwen35", "worker_qwen_legacy", "worker_deepseek", "worker_deepseek_or", "worker_glm", "worker_gemini"]
+    assert order[:9] == ["worker_ollama", "omniroute_execution", "worker", "worker_qwen35", "worker_qwen_legacy", "worker_deepseek", "worker_deepseek_or", "worker_glm", "worker_gemini"]
 
 
-def test_analyst_fallback_chain_prefers_reasoning_qwen_then_glm():
+def test_analyst_fallback_chain_prefers_ollama_then_reasoning_qwen_then_glm():
     from ai.models import expand_fallback_tiers
 
     order = expand_fallback_tiers("analyst")
 
-    # Extra qwen is empty by default so it filters out
-    assert order[:6] == ["omniroute_reasoning", "analyst", "analyst_qwen27b", "analyst_deepseek", "analyst_deepseek_or", "analyst_glm"]
+    assert order[:7] == ["analyst_ollama", "omniroute_reasoning", "analyst", "analyst_qwen27b", "analyst_deepseek", "analyst_deepseek_or", "analyst_glm"]
 
 
-def test_premium_fallback_chain_prefers_reasoning_qwen_then_glm():
+def test_premium_fallback_chain_prefers_ollama_then_reasoning_qwen_then_glm():
     from ai.models import expand_fallback_tiers
 
     order = expand_fallback_tiers("premium")
 
-    assert order[:5] == ["omniroute_reasoning", "premium", "premium_qwen35b", "analyst_deepseek_or", "premium_glm"]
+    assert order[:6] == ["premium_ollama", "omniroute_reasoning", "premium", "premium_qwen35b", "analyst_deepseek_or", "premium_glm"]

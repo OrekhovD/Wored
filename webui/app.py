@@ -204,19 +204,16 @@ def get_session_secret() -> str:
     raw_secret = os.getenv("WEBUI_SESSION_SECRET")
     if raw_secret:
         return raw_secret
-
-    material = f"{get_admin_username()}::{get_admin_password()}::{os.getenv('TELEGRAM_ADMIN_ID', 'local')}"
-    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
-    return f"wored-webui-{digest}"
+    # Fallback to a random secret if not configured
+    return secrets.token_urlsafe(32)
 
 
 def get_internal_api_token() -> str:
     explicit = os.getenv("WEBUI_INTERNAL_TOKEN", "").strip()
     if explicit:
         return explicit
-
-    material = f"wored-internal::{get_session_secret()}::{os.getenv('TELEGRAM_TOKEN', 'local')}"
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+    # Fallback to a random token if not configured
+    return secrets.token_urlsafe(32)
 
 
 def verify_internal_api_token(token: str | None) -> None:

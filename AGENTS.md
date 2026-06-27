@@ -63,16 +63,83 @@ Docker Compose runtime содержит 5 сервисов:
 
 ## Активная AI-цепочка WORED
 
-Основная цепочка:
-- Qwen auto-switch
-- qwen3.6-flash
-- qwen3.5-flash
-- qwen-flash
-- glm-4-flash
+### Ollama Cloud API
+- **Endpoint:** `https://ollama.com/v1` (OpenAI-совместимый)
+- **Auth:** `Authorization: Bearer $OLLAMA_CLOUD_API_KEY`
+- **Переменная окружения:** `OLLAMA_CLOUD_API_KEY` в `.env`
 
-Fallback:
-- GLM
-- MiniMax reviewer
+### Полный каталог доступных моделей (35 шт., динамически обновляется)
+
+**DeepSeek:**
+- `deepseek-v4-flash` — быстрая рабочая модель (worker по умолчанию) `[Скорость: 7/10]`
+- `deepseek-v4-pro` — аналитическая модель (analyst по умолчанию) `[Reasoning: 10/10]`
+- `deepseek-v3.2` — предыдущее поколение `[Reasoning: 8/10]`
+- `deepseek-v3.1:671b` — 671B параметров `[Reasoning: 9/10]`
+
+**GLM (ZhipuAI):**
+- `glm-5.2` — премиум-модель (premium по умолчанию) `[Универсал: 10/10]`
+- `glm-5.1` — `[Универсал: 9/10]`
+- `glm-5` — `[Универсал: 9/10]`
+- `glm-4.7` — `[Универсал: 8/10]`
+
+**Qwen:**
+- `qwen3.5:397b` — 397B параметров `[Reasoning: 9/10]`
+- `qwen3-coder:480b` — кодинг, 480B `[Кодинг: 9/10]`
+- `qwen3-coder-next` — следующая версия кодера `[Кодинг: 9.5/10]`
+
+**Gemma (Google):**
+- `gemma4:31b` — `[Универсал: 7.5/10]`
+- `gemma3:27b` — `[Универсал: 6.5/10]`
+- `gemma3:12b` — `[Универсал: 5.5/10]`
+- `gemma3:4b` — `[Скорость: 3/10]`
+
+**Gemini (Google):**
+- `gemini-3-flash-preview` — `[Скорость: 8/10]`
+
+**MiniMax:**
+- `minimax-m3` — `[Reasoning: 8/10]`
+- `minimax-m2.7` — `[Reasoning: 7/10]`
+- `minimax-m2.5` — `[Reasoning: 6/10]`
+- `minimax-m2.1` — `[Reasoning: 5/10]`
+
+**Kimi (Moonshot):**
+- `kimi-k2.7-code` — кодинг `[Кодинг: 9/10]`
+- `kimi-k2.6` — `[Универсал: 8/10]`
+- `kimi-k2.5` — `[Универсал: 7/10]`
+
+**Mistral:**
+- `mistral-large-3:675b` — 675B параметров `[Reasoning: 9/10]`
+- `devstral-2:123b` — `[Кодинг: 8/10]`
+- `devstral-small-2:24b` — `[Кодинг: 6/10]`
+- `ministral-3:14b` — `[Скорость: 5/10]`
+- `ministral-3:8b` — `[Скорость: 4/10]`
+- `ministral-3:3b` — `[Скорость: 2/10]`
+
+**NVIDIA Nemotron:**
+- `nemotron-3-ultra` — `[Reasoning: 9/10]`
+- `nemotron-3-super` — `[Reasoning: 8/10]`
+- `nemotron-3-nano:30b` — `[Скорость: 6/10]`
+
+**Другие:**
+- `gpt-oss:120b` — `[Reasoning: 8/10]`
+- `gpt-oss:20b` — `[Скорость: 5/10]`
+- `rnj-1:8b` — `[Скорость: 3/10]`
+
+### Рекомендуемая конфигурация ролей
+- **Worker** (быстрые задачи): `deepseek-v4-flash`
+- **Analyst** (анализ, рассуждения): `deepseek-v4-pro`
+- **Premium** (сложные задачи): `glm-5.2`
+
+### Fallback-цепочка
+GLM → MiniMax → Qwen
+
+## Переключение моделей (Model Switcher)
+Смена активных моделей Ollama Cloud осуществляется через `.env` файл в корне `d:\WORED\`.
+Доступные переменные для управления приоритетными моделями (значения по умолчанию):
+- `OLLAMA_WORKER_MODEL=deepseek-v4-flash`
+- `OLLAMA_ANALYST_MODEL=deepseek-v4-pro`
+- `OLLAMA_PREMIUM_MODEL=glm-5.2`
+Чтобы переключить модель, измените нужную переменную и перезапустите контейнер chatbot (`docker compose restart chatbot`).
 
 Hermes сейчас может работать на GLM 5 как технический агент.
 Это НЕ означает, что chatbot runtime должен быть переписан под GLM 5.

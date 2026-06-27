@@ -53,6 +53,21 @@ services:
     command: python main.py
     restart: unless-stopped
 
+  chatbot_wored:
+    build: ./chatbot
+    container_name: htx_trading_bot_chatbot_wored
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - .env.wored
+    volumes:
+      - ./chatbot:/app
+    command: python main.py
+    restart: unless-stopped
+
   webui:
     build: ./webui
     container_name: htx_trading_bot_webui
@@ -83,13 +98,7 @@ services:
       timeout: 5s
       retries: 5
 
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    container_name: htx_trading_bot_tunnel
-    depends_on:
-      - webui
-    command: tunnel --url http://webui:8000
-    restart: unless-stopped
+
 
 volumes:
   postgres_data:

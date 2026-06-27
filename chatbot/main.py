@@ -41,10 +41,69 @@ async def alert_listener(bot: Bot):
             except Exception as e:
                 log.error(f"Push alert failed: {e}")
 
+
+async def _sim_ai_monitor(bot: Bot):
+    """Periodic check of AI-managed sim positions. Runs every 3 minutes."""
+    import json
+    from services.sim_engine import get_open_positions, close_position, calculate_unrealized_pnl
+    from storage.redis_client import get_redis
+
+    await asyncio.sleep(10)  # wait for bot to start
+    log.info('Sim AI monitor started (3min interval)')
+
+    while True:
+        try:
+            positions = await get_open_positions()
+            ai_positions = [p for p in positions if p.get('ai_managed')]
+            if not ai_positions:
+                await asyncio.sleep(180)
+                continue
+
+            redis = get_redis()
+            for pos in ai_positions:
+                symbol = pos['symbol']
+                ticker_data = await redis.get(f'ticker:{symbol}')
+                if not ticker_data:
+                    continue
+
+                price = json.loads(ticker_data)['price']
+                pnl = calculate_unrealized_pnl(pos, price)
+
+                # Simple AI decision: close if ROI < -50% (stop loss) or ROI > 100% (take profit)
+                # Full AI eval would call premium model here
+                should_close = pnl['roi_pct'] <= -50.0 or pnl['roi_pct'] >= 100.0
+                if pnl['is_liquidated']:
+                    should_close = True
+
+                if should_close:
+                    reason = 'ai_stop_loss' if pnl['roi_pct'] < 0 else 'ai_take_profit'
+                    if pnl['is_liquidated']:
+                        reason = 'liquidation'
+                    result = await close_position(pos['id'], price, reason=reason)
+                    log.info('AI auto-closed sim #%d: %s %s pnl=%.4f reason=%s',
+                             pos['id'], pos['direction'], symbol, result.get('realized_pnl', 0), reason)
+
+                    # Notify user via Telegram
+                    admin_id = int(os.getenv('TELEGRAM_ADMIN_ID', '0'))
+                    if admin_id:
+                        from services.sim_engine import format_position_card
+                        card = format_position_card(result)
+                        try:
+                            await bot.send_message(admin_id, f"🤖 AI закрыла позицию\n\n{card}")
+                        except Exception as e:
+                            log.error('Notify failed: %s', e)
+
+        except Exception as exc:
+            log.error('Sim AI monitor error: %s', exc)
+
+        await asyncio.sleep(180)
+
+
 async def main():
     token = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
     if not token or "replace_with_bot_token" in token:
-        log.warning("Please update TELEGRAM_TOKEN in .env. Bot may fail to start.")
+        log.error("TELEGRAM_TOKEN is missing or invalid. Bot cannot start.")
+        return
 
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
@@ -61,10 +120,17 @@ async def main():
     if os.getenv("HERMES_CHATBOT_GATEWAY_ENABLED", "false").lower() in {"1", "true", "yes"}:
         from handlers.hermes_admin import router as hermes_admin_router
         dp.include_router(hermes_admin_router)
+    # DEBUG: log all incoming updates
+    from aiogram.types import Update
+    @dp.update()
+    async def debug_all_updates(update: Update):
+        log.info('DEBUG UPDATE: %s', update.model_dump_json()[:200])
+
     dp.include_router(chat_router) # should be last since it catches messages
 
     log.info("Chatbot started polling")
     asyncio.create_task(alert_listener(bot))
+    asyncio.create_task(_sim_ai_monitor(bot))
     
     # Configure the system Menu Button to open WORED WebApp Dashboard
     from aiogram.types import MenuButtonWebApp, WebAppInfo
@@ -80,7 +146,7 @@ async def main():
     except Exception as e:
         log.error(f"Failed to set WORED chat menu button: {e}")
 
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, drop_pending_updates=True)
 
 if __name__ == '__main__':
     asyncio.run(main())
