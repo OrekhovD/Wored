@@ -174,6 +174,5 @@ async def ensure_pipeline_tables():
         log.warning("No DB pool — pipeline tables not created")
         return
     async with pool.acquire() as conn:
-        for stmt in [s.strip() for s in PIPELINE_TABLES_SQL.split(";") if s.strip()]:
-            await conn.execute(stmt)
+        await conn.execute(PIPELINE_TABLES_SQL)
     log.info("Pipeline tables ensured (8 tables)")

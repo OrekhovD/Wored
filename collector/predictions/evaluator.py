@@ -96,3 +96,13 @@ async def evaluate_sim_series(user_id: int | None = None, min_positions: int = 5
         "liquidation_rate": round(liq_rate, 2),
         "details": details,
     }
+
+
+async def evaluate_due_forecasts():
+    """Evaluate forecasts that are due (horizon reached). Stub for collector scheduler."""
+    log.debug("evaluate_due_forecasts: no-op stub (predictions handled by chatbot)")
+
+
+async def refresh_historical_forecast_scores():
+    """Refresh historical forecast scores. Stub for collector scheduler."""
+    log.debug("refresh_historical_forecast_scores: no-op stub")
