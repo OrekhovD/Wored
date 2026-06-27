@@ -3,8 +3,12 @@
 <div class="cockpit">
   <div class="cockpit-main">
     <div class="cockpit-symbol">STRATEGY</div>
-    <div class="cockpit-price" id="strVersion">—</div>
+    <div class="cockpit-price" id="strVersion">v—</div>
     <div class="cockpit-delta" id="strSummary">Загрузка...</div>
+  </div>
+  <div class="cockpit-actions">
+    <button class="primary-button" id="btnEvaluate" onclick="strEvaluate()">Re-evaluate</button>
+    <span class="confidence-badge" id="strConfidence">—</span>
   </div>
 </div>
 
@@ -12,12 +16,54 @@
   <section class="panel panel-chart">
     <div class="panel-header">
       <div>
+        <div class="panel-kicker">KPI</div>
+        <h2>Метрики из реальных позиций</h2>
+      </div>
+    </div>
+    <div class="kpi-grid" id="strKpi">
+      <div class="kpi-card"><span class="kpi-label">Winrate</span><span class="kpi-value" id="kpiWr">—</span></div>
+      <div class="kpi-card"><span class="kpi-label">Avg PnL</span><span class="kpi-value" id="kpiPnl">—</span></div>
+      <div class="kpi-card"><span class="kpi-label">Max Drawdown</span><span class="kpi-value" id="kpiDd">—</span></div>
+      <div class="kpi-card"><span class="kpi-label">Liq Rate</span><span class="kpi-value" id="kpiLiq">—</span></div>
+      <div class="kpi-card"><span class="kpi-label">Total PnL</span><span class="kpi-value" id="kpiTotal">—</span></div>
+      <div class="kpi-card"><span class="kpi-label">Positions</span><span class="kpi-value" id="kpiPos">—</span></div>
+    </div>
+    <div id="strChart" class="pnl-chart"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <div>
         <div class="panel-kicker">Rules</div>
         <h2>Корректирующие правила</h2>
       </div>
     </div>
-    <div id="strRules" class="event-list">Загрузка...</div>
+    <div id="strRules" class="rules-list">Загрузка...</div>
   </section>
+
+  <section class="panel">
+    <div class="panel-header">
+      <div>
+        <div class="panel-kicker">Positions</div>
+        <h2>Последние позиции</h2>
+      </div>
+      <div class="pos-filter">
+        <button class="ghost-button pos-filter-btn active" data-status="all" onclick="strFilterPos('all')">All</button>
+        <button class="ghost-button pos-filter-btn" data-status="open" onclick="strFilterPos('open')">Open</button>
+        <button class="ghost-button pos-filter-btn" data-status="closed" onclick="strFilterPos('closed')">Closed</button>
+        <button class="ghost-button pos-filter-btn" data-status="liquidated" onclick="strFilterPos('liquidated')">Liq</button>
+      </div>
+    </div>
+    <div class="pos-table-wrap">
+      <table class="data-table" id="strPosTable">
+        <thead>
+          <tr><th>#</th><th>Symbol</th><th>Dir</th><th>Lev</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Reason</th><th>Opened</th></tr>
+        </thead>
+        <tbody id="strPosBody"><tr><td colspan="10" class="muted">Загрузка...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
   <aside class="side-column">
     <section class="panel">
       <div class="panel-kicker">Evaluations</div>
@@ -28,53 +74,176 @@
 </main>
 
 <script>
-async function strLoad() {
+let posData = [];
+let pnlChart = null;
+let posFilter = 'all';
+
+async function strLoadMetrics() {
+  try {
+    const r = await fetch('/api/strategy/metrics');
+    if (!r.ok) return;
+    const m = await r.json();
+    document.getElementById('kpiWr').textContent = m.winrate + '%';
+    document.getElementById('kpiWr').className = 'kpi-value ' + (m.winrate >= 50 ? 'kpi-ok' : m.winrate >= 30 ? 'kpi-warn' : 'kpi-bad');
+    document.getElementById('kpiPnl').textContent = m.avg_pnl;
+    document.getElementById('kpiPnl').className = 'kpi-value ' + (m.avg_pnl >= 0 ? 'kpi-ok' : 'kpi-bad');
+    document.getElementById('kpiDd').textContent = m.max_drawdown;
+    document.getElementById('kpiDd').className = 'kpi-value ' + (m.max_drawdown <= 20 ? 'kpi-ok' : m.max_drawdown <= 50 ? 'kpi-warn' : 'kpi-bad');
+    document.getElementById('kpiLiq').textContent = m.liquidation_rate + '%';
+    document.getElementById('kpiLiq').className = 'kpi-value ' + (m.liquidation_rate <= 10 ? 'kpi-ok' : m.liquidation_rate <= 25 ? 'kpi-warn' : 'kpi-bad');
+    document.getElementById('kpiTotal').textContent = m.total_pnl;
+    document.getElementById('kpiTotal').className = 'kpi-value ' + (m.total_pnl >= 0 ? 'kpi-ok' : 'kpi-bad');
+    document.getElementById('kpiPos').textContent = m.total + ' (' + m.open_count + ' open)';
+    strRenderChart(m.pnl_series || []);
+  } catch (e) { console.error('metrics', e); }
+}
+
+function strRenderChart(series) {
+  if (!window.LightweightCharts || !series.length) return;
+  const el = document.getElementById('strChart');
+  el.innerHTML = '';
+  const chart = LightweightCharts.createChart(el, {
+    width: el.clientWidth, height: 200,
+    layout: { background: { color: 'transparent' }, textColor: '#7291a5' },
+    grid: { vertLines: { color: 'rgba(114,145,165,0.08)' }, horzLines: { color: 'rgba(114,145,165,0.08)' } },
+    timeScale: { borderColor: 'rgba(114,145,165,0.2)' },
+    rightPriceScale: { borderColor: 'rgba(114,145,165,0.2)' },
+  });
+  const area = chart.addAreaSeries({
+    lineColor: '#36c9dd', topColor: 'rgba(54,201,221,0.15)', bottomColor: 'rgba(54,201,221,0)',
+    lineWidth: 2,
+  });
+  const data = series.map(p => ({
+    time: (p.x || '').slice(0, 19).replace('T', ' '),
+    value: p.y,
+  })).filter(p => p.time);
+  area.setData(data);
+  chart.timeScale().fitContent();
+  pnlChart = chart;
+  window.addEventListener('resize', () => { if (pnlChart) pnlChart.applyOptions({ width: el.clientWidth }); });
+}
+
+async function strLoadStrategy() {
   try {
     const r = await fetch('/api/strategy');
     if (!r.ok) return;
     const data = await r.json();
-    
     if (!data.strategy) {
-      document.getElementById('strRules').innerHTML = '<div class="event-item"><span>Правила ещё не сформированы. Проведи серию симуляций (5+).</span></div>';
+      document.getElementById('strRules').innerHTML = '<div class="event-item muted">Правила ещё не сформированы. Нажми Re-evaluate.</div>';
       document.getElementById('strSummary').textContent = data.message || 'No strategy';
       return;
     }
-    
     const s = data.strategy;
     document.getElementById('strVersion').textContent = 'v' + s.version;
     document.getElementById('strSummary').textContent = s.rules?.summary || '—';
-    
+    const conf = s.rules?.confidence || 'low';
+    const confEl = document.getElementById('strConfidence');
+    confEl.textContent = conf;
+    confEl.className = 'confidence-badge conf-' + conf;
+
     const rulesEl = document.getElementById('strRules');
-    const adjustments = s.rules?.adjustments || [];
-    if (!adjustments.length) {
-      rulesEl.innerHTML = '<div class="event-item">Нет корректировок</div>';
+    const adj = s.rules?.adjustments || [];
+    if (!adj.length) {
+      rulesEl.innerHTML = '<div class="event-item muted">Нет корректировок</div>';
     } else {
-      rulesEl.innerHTML = adjustments.map(a => `
-        <div class="event-item">
-          <span class="event-symbol">${a.parameter}</span>
-          <span class="event-detail">${a.old} → ${a.new}</span>
-          <span class="event-time">${a.reason || ''}</span>
-        </div>
-      `).join('');
+      rulesEl.innerHTML = adj.map(a => {
+        const dir = a.new > a.old ? 'up' : a.new < a.old ? 'down' : 'flat';
+        const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : '→';
+        const cls = dir === 'down' ? 'adj-decrease' : dir === 'up' ? 'adj-increase' : 'adj-flat';
+        return `<div class="rule-item ${cls}">
+          <span class="rule-param">${a.parameter}</span>
+          <span class="rule-change"><span class="rule-old">${a.old}</span> ${arrow} <span class="rule-new">${a.new}</span></span>
+          <span class="rule-reason">${a.reason || ''}</span>
+        </div>`;
+      }).join('');
     }
-    
+
     const evalsEl = document.getElementById('strEvals');
     if (!data.evaluations.length) {
-      evalsEl.innerHTML = '<div class="event-item">Нет оценок</div>';
+      evalsEl.innerHTML = '<div class="event-item muted">Нет оценок. Нажми Re-evaluate.</div>';
     } else {
-      evalsEl.innerHTML = data.evaluations.map(e => `
-        <div class="event-item">
-          <span class="event-symbol">${e.run_id}</span>
-          <span class="event-detail">WR: ${e.winrate}% | PnL: ${e.avg_pnl.toFixed(2)} | DD: ${e.max_drawdown.toFixed(1)} | Liq: ${e.liquidation_rate}%</span>
-          <span class="event-time">${e.created_at || ''} | ${e.total} pos</span>
-        </div>
-      `).join('');
+      evalsEl.innerHTML = data.evaluations.map(e => {
+        const wrCls = e.winrate >= 50 ? 'kpi-ok' : e.winrate >= 30 ? 'kpi-warn' : 'kpi-bad';
+        const pnlCls = e.avg_pnl >= 0 ? 'kpi-ok' : 'kpi-bad';
+        return `<div class="eval-item">
+          <span class="eval-run">${e.run_id.slice(0,8)}</span>
+          <span class="eval-metrics"><span class="${wrCls}">WR ${e.winrate}%</span> | <span class="${pnlCls}">PnL ${e.avg_pnl.toFixed(2)}</span> | DD ${e.max_drawdown.toFixed(1)} | Liq ${e.liquidation_rate}%</span>
+          <span class="eval-meta">${e.total} pos · ${(e.created_at||'').slice(0,16)}</span>
+        </div>`;
+      }).join('');
+    }
+  } catch (e) { console.error('strategy', e); }
+}
+
+async function strLoadPositions() {
+  try {
+    const r = await fetch('/api/strategy/positions?limit=20');
+    if (!r.ok) return;
+    const data = await r.json();
+    posData = data.positions || [];
+    strRenderPos();
+  } catch (e) { console.error('positions', e); }
+}
+
+function strRenderPos() {
+  const tbody = document.getElementById('strPosBody');
+  const filtered = posFilter === 'all' ? posData : posData.filter(p => p.status === posFilter);
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="muted">Нет позиций</td></tr>';
+    return;
+  }
+  tbody.innerHTML = filtered.map(p => {
+    const pnlCls = p.realized_pnl > 0 ? 'pnl-pos' : p.realized_pnl < 0 ? 'pnl-neg' : 'pnl-zero';
+    const statusCls = p.status === 'closed' ? 'status-closed' : p.status === 'liquidated' ? 'status-liq' : 'status-open';
+    const dirCls = p.direction === 'long' ? 'dir-long' : 'dir-short';
+    const entry = p.entry_price ? p.entry_price.toFixed(2) : '—';
+    const close = p.close_price ? p.close_price.toFixed(2) : '—';
+    const opened = (p.opened_at||'').slice(5,16).replace('T',' ');
+    return `<tr>
+      <td class="muted">${p.id}</td>
+      <td>${p.symbol}</td>
+      <td class="${dirCls}">${p.direction}</td>
+      <td>${p.leverage}x</td>
+      <td>${entry}</td>
+      <td>${close}</td>
+      <td class="${pnlCls}">${p.realized_pnl.toFixed(2)}</td>
+      <td class="${statusCls}">${p.status}</td>
+      <td class="muted">${p.close_reason || '—'}</td>
+      <td class="muted">${opened}</td>
+    </tr>`;
+  }).join('');
+}
+
+function strFilterPos(status) {
+  posFilter = status;
+  document.querySelectorAll('.pos-filter-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('.pos-filter-btn[data-status="'+status+'"]').classList.add('active');
+  strRenderPos();
+}
+
+async function strEvaluate() {
+  const btn = document.getElementById('btnEvaluate');
+  btn.disabled = true;
+  btn.textContent = 'Evaluating...';
+  try {
+    const r = await fetch('/api/strategy/evaluate', { method: 'POST' });
+    const data = await r.json();
+    if (data.ok) {
+      btn.textContent = 'Done v' + data.version + ' ✅';
+      strLoadMetrics();
+      strLoadStrategy();
+      strLoadPositions();
+    } else {
+      btn.textContent = 'Error: ' + (data.message || 'failed');
     }
   } catch (e) {
-    document.getElementById('strRules').innerHTML = '<div class="event-item">Error</div>';
+    btn.textContent = 'Error: ' + e.message;
   }
+  setTimeout(() => { btn.disabled = false; btn.textContent = 'Re-evaluate'; }, 3000);
 }
-strLoad();
-setInterval(strLoad, 30000);
+
+strLoadMetrics();
+strLoadStrategy();
+strLoadPositions();
 </script>
 {% endblock %}

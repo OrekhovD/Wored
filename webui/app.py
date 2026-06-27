@@ -2011,7 +2011,7 @@ async def api_strategy(request: Request):
     eval_list = []
     for e in evals:
         eval_list.append({
-            "run_id": e["run_id"], "total": e["total"],
+            "run_id": e["evaluation_run_id"], "total": e["total_positions"],
             "winrate": float(e["winrate"]) if e["winrate"] else 0,
             "avg_pnl": float(e["avg_pnl"]) if e["avg_pnl"] else 0,
             "max_drawdown": float(e["max_drawdown"]) if e["max_drawdown"] else 0,
@@ -2076,6 +2076,233 @@ async def api_models_probe(request: Request):
             "available": bool(api_key),
         })
     return {"models": results}
+
+
+# ─── Strategy API: metrics, positions, evaluate ──────────────────────
+
+@app.get("/api/strategy/metrics")
+async def api_strategy_metrics(request: Request):
+    """Compute KPI metrics from real sim_positions."""
+    require_api_auth(request)
+    pool = getattr(request.app.state, "pg_pool", None)
+    if not pool:
+        return JSONResponse(status_code=503, content={"detail": "Postgres unavailable"})
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT status, realized_pnl, close_reason, leverage, entry_price, close_price, "
+            "opened_at, closed_at, symbol, direction FROM sim_positions "
+            "ORDER BY COALESCE(closed_at, opened_at) DESC LIMIT 100"
+        )
+    total = len(rows)
+    if total == 0:
+        return {"total": 0, "winrate": 0, "avg_pnl": 0, "total_pnl": 0,
+                "max_drawdown": 0, "liquidation_rate": 0, "open_count": 0,
+                "closed_count": 0, "wins": 0, "losses": 0, "liquidations": 0,
+                "avg_leverage": 0, "pnl_series": [], "best_pnl": 0, "worst_pnl": 0}
+
+    wins = losses = liquidations = 0
+    open_count = 0
+    closed_count = 0
+    pnl_list = []
+    pnl_series = []
+    cumulative = 0.0
+    peak = 0.0
+    max_dd = 0.0
+    leverage_sum = 0.0
+
+    for r in rows:
+        status = r["status"] or ""
+        pnl = float(r["realized_pnl"] or 0)
+        leverage_sum += float(r["leverage"] or 0)
+        if status == "open":
+            open_count += 1
+            continue
+        closed_count += 1
+        cumulative += pnl
+        pnl_series.append({
+            "x": (r["closed_at"].isoformat() if r["closed_at"] else ""),
+            "y": round(cumulative, 4),
+            "pnl": round(pnl, 4),
+            "symbol": r["symbol"],
+            "status": status,
+        })
+        if cumulative > peak:
+            peak = cumulative
+        dd = peak - cumulative
+        if dd > max_dd:
+            max_dd = dd
+        pnl_list.append(pnl)
+        if pnl > 0:
+            wins += 1
+        else:
+            losses += 1
+        if status == "liquidated" or r["close_reason"] == "liquidation":
+            liquidations += 1
+
+    winrate = (wins / closed_count * 100) if closed_count > 0 else 0
+    avg_pnl = (sum(pnl_list) / len(pnl_list)) if pnl_list else 0
+    liq_rate = (liquidations / closed_count * 100) if closed_count > 0 else 0
+    avg_lev = (leverage_sum / total) if total > 0 else 0
+
+    return {
+        "total": total,
+        "open_count": open_count,
+        "closed_count": closed_count,
+        "wins": wins,
+        "losses": losses,
+        "liquidations": liquidations,
+        "winrate": round(winrate, 1),
+        "avg_pnl": round(avg_pnl, 2),
+        "total_pnl": round(sum(pnl_list), 2),
+        "max_drawdown": round(max_dd, 2),
+        "liquidation_rate": round(liq_rate, 1),
+        "avg_leverage": round(avg_lev, 1),
+        "best_pnl": round(max(pnl_list), 2) if pnl_list else 0,
+        "worst_pnl": round(min(pnl_list), 2) if pnl_list else 0,
+        "pnl_series": pnl_series,
+    }
+
+
+@app.get("/api/strategy/positions")
+async def api_strategy_positions(request: Request, limit: int = 20):
+    """Get recent sim positions for Strategy page table."""
+    require_api_auth(request)
+    pool = getattr(request.app.state, "pg_pool", None)
+    if not pool:
+        return JSONResponse(status_code=503, content={"detail": "Postgres unavailable"})
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, symbol, direction, leverage, margin_mode, entry_price, close_price, "
+            "realized_pnl, status, close_reason, opened_at, closed_at, ai_managed "
+            "FROM sim_positions ORDER BY COALESCE(closed_at, opened_at) DESC LIMIT $1",
+            min(limit, 50),
+        )
+    positions = []
+    for r in rows:
+        positions.append({
+            "id": r["id"],
+            "symbol": r["symbol"],
+            "direction": r["direction"],
+            "leverage": int(r["leverage"]),
+            "margin_mode": r["margin_mode"],
+            "entry_price": float(r["entry_price"]) if r["entry_price"] else None,
+            "close_price": float(r["close_price"]) if r["close_price"] else None,
+            "realized_pnl": float(r["realized_pnl"] or 0),
+            "status": r["status"],
+            "close_reason": r["close_reason"] or "",
+            "opened_at": serialize_dt(r["opened_at"]) if r["opened_at"] else None,
+            "closed_at": serialize_dt(r["closed_at"]) if r["closed_at"] else None,
+            "ai_managed": bool(r["ai_managed"]),
+        })
+    return {"positions": positions}
+
+
+@app.post("/api/strategy/evaluate")
+async def api_strategy_evaluate(request: Request):
+    """Run evaluation on sim_positions and generate new strategy rules."""
+    require_api_auth(request)
+    pool = getattr(request.app.state, "pg_pool", None)
+    if not pool:
+        return JSONResponse(status_code=503, content={"detail": "Postgres unavailable"})
+
+    # Compute metrics from real sim_positions
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT status, realized_pnl, close_reason, leverage FROM sim_positions "
+            "WHERE status IN ('closed','liquidated') ORDER BY closed_at DESC LIMIT 100"
+        )
+    if len(rows) < 3:
+        return JSONResponse(status_code=400, content={
+            "ok": False, "message": f"Need 3+ closed positions, have {len(rows)}"
+        })
+
+    total = len(rows)
+    wins = liquidations = 0
+    pnl_list = []
+    cumulative = 0.0
+    peak = 0.0
+    max_dd = 0.0
+
+    for r in rows:
+        pnl = float(r["realized_pnl"] or 0)
+        cumulative += pnl
+        if cumulative > peak:
+            peak = cumulative
+        dd = peak - cumulative
+        if dd > max_dd:
+            max_dd = dd
+        pnl_list.append(pnl)
+        if pnl > 0:
+            wins += 1
+        if r["status"] == "liquidated" or r["close_reason"] == "liquidation":
+            liquidations += 1
+
+    winrate = (wins / total * 100) if total > 0 else 0
+    avg_pnl = (sum(pnl_list) / total) if total > 0 else 0
+    liq_rate = (liquidations / total * 100) if total > 0 else 0
+    details = {
+        "wins": wins, "losses": total - wins, "liquidations": liquidations,
+        "best_pnl": max(pnl_list) if pnl_list else 0,
+        "worst_pnl": min(pnl_list) if pnl_list else 0,
+    }
+
+    import uuid as _uuid
+    run_id = _uuid.uuid4().hex[:16]
+
+    # Save evaluation
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO sim_evaluations (evaluation_run_id, total_positions, winrate, avg_pnl, max_drawdown, liquidation_rate, details) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            run_id, total, round(winrate, 2), round(avg_pnl, 4),
+            round(max_dd, 2), round(liq_rate, 2), json.dumps(details),
+        )
+        # Get current version
+        current = await conn.fetchrow(
+            "SELECT version FROM strategy_rules ORDER BY id DESC LIMIT 1"
+        )
+        version = (current["version"] + 1) if current else 1
+
+    # Heuristic rules generation (no AI dependency in webui)
+    adjustments = []
+    if liq_rate > 20:
+        adjustments.append({"parameter": "max_leverage", "old": 200, "new": 150,
+                           "reason": f"Ликвидации {liq_rate:.0f}% > 20%, снизить плечо"})
+    if winrate < 40:
+        adjustments.append({"parameter": "rsi_entry_filter", "old": 50, "new": 60,
+                           "reason": f"Winrate {winrate:.0f}% < 40%, ужесточить вход"})
+    if avg_pnl < 0:
+        adjustments.append({"parameter": "min_confirmation_signals", "old": 1, "new": 2,
+                           "reason": f"Avg PnL {avg_pnl:.2f} < 0, больше подтверждений"})
+    if max_dd > 50:
+        adjustments.append({"parameter": "stop_loss_pct", "old": 0, "new": 5,
+                           "reason": f"Max DD {max_dd:.0f}% > 50%, добавить стоп-лосс"})
+    if winrate > 60 and liq_rate < 10:
+        adjustments.append({"parameter": "status", "old": "active", "new": "active",
+                           "reason": "Метрики в норме, без изменений"})
+
+    summary = f"Winrate {winrate:.0f}%, ликвидации {liq_rate:.0f}%, avg PnL {avg_pnl:.2f}"
+    confidence = "high" if total >= 20 else "medium" if total >= 5 else "low"
+    new_rules = {"adjustments": adjustments, "summary": summary, "confidence": confidence}
+
+    # Save new strategy rules
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO strategy_rules (version, rules, source) VALUES ($1, $2, $3)",
+            version, json.dumps(new_rules), "heuristic_webui",
+        )
+
+    return {
+        "ok": True,
+        "run_id": run_id,
+        "version": version,
+        "metrics": {
+            "total": total, "winrate": round(winrate, 1), "avg_pnl": round(avg_pnl, 2),
+            "max_drawdown": round(max_dd, 2), "liquidation_rate": round(liq_rate, 1),
+            "wins": wins, "losses": total - wins, "liquidations": liquidations,
+        },
+        "rules": new_rules,
+    }
 
 
 @app.get("/futures-lab", response_class=HTMLResponse)
