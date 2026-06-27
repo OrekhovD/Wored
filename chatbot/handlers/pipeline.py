@@ -1,28 +1,21 @@
 """
-Daily Pipeline WORED v2 — Telegram handler для pipeline команд.
+Daily Pipeline WORED v2 — Telegram handler (ТЗ new Telegram UX)
 
-ТЗ 13.1 — минимальный набор intents:
-  статус сессии
-  активный план
-  последняя ревизия
-  мои позиции
-  детали позиции {id}
-  pnl
-  почему вход {id}
-  почему выход {id}
-  остановить сессию
-
-Также: старт сессии (daily_session, старт сессии, начать сессию)
+§6.1 — session commands and phrases
+§8  — mandatory response templates (compact, templated)
+§10 — intent-first routing, regex-first for critical commands
+§11 — normalized errors only
 """
 from __future__ import annotations
 
 import json
 import logging
 import re
+import os
 from typing import Optional
 
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.filters import Command
 
 log = logging.getLogger(__name__)
@@ -30,95 +23,269 @@ router = Router(name="pipeline")
 
 DEFAULT_USER_ID = 5249526259
 
+# ── Inline keyboards (ТЗ §9: max 5 buttons) ──
+
+def _miniapp_url() -> str:
+    return os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8080/daily-session"
+
+def _session_kb() -> InlineKeyboardMarkup:
+    """ТЗ §8.1 — кнопки для статус сессии."""
+    url = _miniapp_url()
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 Mini App", web_app={"url": url} if False else None, url=url)],
+        [
+            InlineKeyboardButton(text="📦 Позиции", callback_data="pipeline_positions"),
+            InlineKeyboardButton(text="⏸ Pause", callback_data="pipeline_pause"),
+        ],
+        [
+            InlineKeyboardButton(text="🛡 Tighten", callback_data="pipeline_tighten"),
+            InlineKeyboardButton(text="🛑 Close all", callback_data="pipeline_close_all"),
+        ],
+    ])
+
+def _start_kb() -> InlineKeyboardMarkup:
+    """ТЗ §8.5 — кнопки после старта сессии."""
+    url = _miniapp_url()
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 Открыть Mini App", url=url)],
+        [
+            InlineKeyboardButton(text="📈 Статус сессии", callback_data="pipeline_status"),
+            InlineKeyboardButton(text="⏸ Pause", callback_data="pipeline_pause"),
+        ],
+    ])
+
+def _no_session_kb() -> InlineKeyboardMarkup:
+    """ТЗ §11.2 — кнопки когда сессии нет."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 Старт сессии", callback_data="pipeline_start")],
+        [InlineKeyboardButton(text="📊 Рынок", callback_data="back_to_market")],
+    ])
+
+def _portfolio_kb() -> InlineKeyboardMarkup:
+    """ТЗ §8.2 — кнопки для позиций."""
+    url = _miniapp_url()
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 Открыть Mini App", url=url)],
+        [
+            InlineKeyboardButton(text="📄 Все позиции", callback_data="pipeline_positions"),
+            InlineKeyboardButton(text="🛑 Close all", callback_data="pipeline_close_all"),
+        ],
+    ])
+
+def _balance_kb() -> InlineKeyboardMarkup:
+    """ТЗ §8.3 — кнопки для баланса."""
+    url = _miniapp_url()
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 Mini App", url=url)],
+        [
+            InlineKeyboardButton(text="📈 Сессия", callback_data="pipeline_status"),
+            InlineKeyboardButton(text="📦 Позиции", callback_data="pipeline_positions"),
+        ],
+    ])
+
+def _result_kb() -> InlineKeyboardMarkup:
+    """ТЗ §8.4 — кнопки для результата сессии."""
+    url = _miniapp_url()
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 Открыть обзор", url=url)],
+        [
+            InlineKeyboardButton(text="🧠 Review", callback_data="pipeline_review"),
+            InlineKeyboardButton(text="📊 Прогнозы", callback_data="prediction_menu"),
+        ],
+    ])
+
+
+# ── Normalized error messages (ТЗ §11) ──
+
+ERR_NO_SESSION = (
+    "ℹ️ <b>Активной сессии нет.</b>\n"
+    "Запусти новую дневную сессию для BTCUSDT."
+)
+
+ERR_SESSION_UNAVAILABLE = "⚠️ Сессия временно недоступна. Попробуй через несколько секунд."
+
+ERR_REVISION_NOT_ALLOWED = (
+    "⚠️ Команда сейчас недоступна для текущего состояния сессии.\n"
+    "Проверь статус сессии и повтори действие."
+)
+
+ERR_MARKET_STALE = "⚠️ Данные рынка временно недоступны. Попробуй обновить через несколько секунд."
+
+ERR_BACKEND = "⚠️ Временная ошибка сервиса. Попробуй позже."
+
+
+# ── Router handlers (ТЗ §10.2 — regex-first) ──
 
 @router.message(Command("session"))
 async def cmd_session(message: Message):
-    """Команда /session — статус daily pipeline сессии."""
-    await message.answer("📊 Загрузка...", parse_mode="HTML")
-    text = await handle_pipeline_intent({"intent": "pipeline_status"}, message.from_user.id)
-    await message.answer(text, parse_mode="HTML")
+    """ТЗ §6.1 — /session = статус сессии."""
+    text, kb = await _build_status_response(message.from_user.id)
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 
-@router.message(F.text.regexp(r"(?i)(старт сессии|начать сессию|daily session|запусти сессию|старт торговли)"))
+@router.message(F.text.regexp(r"(?i)(старт сессии|начать сессию|daily session|запусти сессию|старт торговли|запусти дневную)"))
 async def msg_start_session(message: Message):
-    """Запуск daily session через текстовое сообщение."""
+    """ТЗ §8.5 — старт сессии через текстовое сообщение."""
     intent = classify_pipeline_intent(message.text or "")
     if intent:
-        text = await handle_pipeline_intent(intent, message.from_user.id)
-        await message.answer(text, parse_mode="HTML")
+        text, kb = await _handle_start_safe(message.from_user.id, intent)
+        await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(F.text.regexp(r"(?i)(остановить сессию|стоп сессия|stop session|закрыть сессию)"))
 async def msg_stop_session(message: Message):
-    """Остановка daily session."""
-    text = await handle_pipeline_intent({"intent": "pipeline_stop"}, message.from_user.id)
+    text = await _handle_stop_safe(message.from_user.id)
     await message.answer(text, parse_mode="HTML")
 
 
 @router.message(F.text.regexp(r"(?i)(статус сессии|сессия статус|session status|состояние сессии)"))
 async def msg_session_status(message: Message):
-    """Статус daily session."""
-    text = await handle_pipeline_intent({"intent": "pipeline_status"}, message.from_user.id)
+    """ТЗ §8.1 — компактный статус."""
+    text, kb = await _build_status_response(message.from_user.id)
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.message(F.text.regexp(r"(?i)(результат сессии|итог сессии|session result)"))
+async def msg_session_result(message: Message):
+    """ТЗ §8.4 — результат сессии."""
+    text, kb = await _build_result_response(message.from_user.id)
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.message(F.text.regexp(r"(?i)(пауза сессии|pause session|поставь паузу)"))
+async def msg_pause_session(message: Message):
+    """ТЗ §6.1 — пауза через текст."""
+    text = await _handle_revision_safe(message.from_user.id, "pause")
     await message.answer(text, parse_mode="HTML")
 
 
+@router.message(F.text.regexp(r"(?i)(продолжить сессию|resume session|continue session)"))
+async def msg_continue_session(message: Message):
+    """ТЗ §6.1 — продолжить через текст."""
+    text = await _handle_revision_safe(message.from_user.id, "continue")
+    await message.answer(text, parse_mode="HTML")
+
+
+@router.message(F.text.regexp(r"(?i)(сколько позиций|мои позиции|портфель|баланс|pnl|покажи pnl)"))
+async def msg_portfolio_commands(message: Message):
+    """ТЗ §6.5/§8.2/§8.3 — позиции и баланс через regex-first."""
+    msg = (message.text or "").lower().strip()
+    if any(p in msg for p in ["баланс", "pnl", "покажи pnl"]):
+        text, kb = await _build_balance_response(message.from_user.id)
+    else:
+        text, kb = await _build_positions_response(message.from_user.id)
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+# ── Callback handlers for inline buttons ──
+
+@router.callback_query(F.data == "pipeline_start")
+async def cb_start(callback):
+    await callback.answer()
+    text, kb = await _handle_start_safe(callback.from_user.id, {"intent": "pipeline_start", "budget": 100.0, "risk_mode": "balanced"})
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "pipeline_status")
+async def cb_status(callback):
+    await callback.answer()
+    text, kb = await _build_status_response(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "pipeline_positions")
+async def cb_positions(callback):
+    await callback.answer()
+    text, kb = await _build_positions_response(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "pipeline_pause")
+async def cb_pause(callback):
+    await callback.answer()
+    text = await _handle_revision_safe(callback.from_user.id, "pause")
+    await callback.message.answer(text, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "pipeline_tighten")
+async def cb_tighten(callback):
+    await callback.answer()
+    text = await _handle_revision_safe(callback.from_user.id, "tighten")
+    await callback.message.answer(text, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "pipeline_close_all")
+async def cb_close_all(callback):
+    await callback.answer()
+    text = await _handle_revision_safe(callback.from_user.id, "close_all")
+    await callback.message.answer(text, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "pipeline_review")
+async def cb_review(callback):
+    await callback.answer()
+    text = await _build_review_response(callback.from_user.id)
+    await callback.message.answer(text, parse_mode="HTML")
+
+
+# ── Intent classifier (ТЗ §10.1 — intent-first, regex-first) ──
+
 def classify_pipeline_intent(message: str) -> dict | None:
-    """
-    Определить pipeline intent из сообщения пользователя.
-    Возвращает {"intent": "pipeline_*", ...} или None если не pipeline.
-    """
     msg = message.lower().strip()
 
-    # Start session
-    if any(p in msg for p in ["старт сессии", "начать сессию", "daily session", "старт торговли", "запусти сессию"]):
-        # Extract budget if present
+    # Start session (ТЗ §10.2 — regex-first)
+    if any(p in msg for p in ["старт сессии", "начать сессию", "daily session", "старт торговли", "запусти сессию", "запусти дневную"]):
         budget_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:usdt|\$|дол|бакс)", msg)
         budget = float(budget_match.group(1)) if budget_match else 100.0
-
-        # Extract risk mode
         risk = "balanced"
         if "агрессив" in msg or "aggressive" in msg:
             risk = "aggressive"
         elif "защит" in msg or "defensive" in msg or "консерват" in msg:
             risk = "defensive"
-
         return {"intent": "pipeline_start", "budget": budget, "risk_mode": risk}
 
     # Stop session
     if any(p in msg for p in ["остановить сессию", "стоп сессия", "stop session", "закрыть сессию"]):
         return {"intent": "pipeline_stop"}
 
-    # Session status
+    # Revision commands (ТЗ §10.2 — regex-first)
+    if any(p in msg for p in ["пауза сессии", "pause session", "поставь паузу"]):
+        return {"intent": "pipeline_revision_cmd", "command": "pause"}
+    if any(p in msg for p in ["продолжить сессию", "resume session", "continue session"]):
+        return {"intent": "pipeline_revision_cmd", "command": "continue"}
+    if msg.strip() in ("tighten", "reduce", "close all", "close_all", "continue", "pause"):
+        cmd_map = {"close all": "close_all", "close_all": "close_all"}
+        return {"intent": "pipeline_revision_cmd", "command": cmd_map.get(msg.strip(), msg.strip())}
+
+    # Status
     if any(p in msg for p in ["статус сессии", "сессия статус", "session status", "состояние сессии"]):
         return {"intent": "pipeline_status"}
 
-    # Active plan
+    # Result
+    if any(p in msg for p in ["результат сессии", "итог сессии", "session result"]):
+        return {"intent": "pipeline_result"}
+
+    # Portfolio (ТЗ §10.2 — regex-first)
+    if any(p in msg for p in ["сколько позиций", "мои позиции", "позиции сессии", "session positions", "открытые сделки сессии"]):
+        return {"intent": "pipeline_positions"}
+    if any(p in msg for p in ["баланс", "pnl", "покажи pnl", "прибыль сессии", "результат сессии"]) and "сесс" in msg:
+        return {"intent": "pipeline_pnl"}
+
+    # Plan
     if any(p in msg for p in ["активный план", "текущий план", "active plan", "план сессии"]):
         return {"intent": "pipeline_plan"}
 
-    # Latest revision
+    # Revision history
     if any(p in msg for p in ["последняя ревизия", "latest revision", "ревизия плана"]):
         return {"intent": "pipeline_revision"}
 
-    # My positions
-    if any(p in msg for p in ["мои позиции", "позиции сессии", "session positions", "открытые сделки сессии"]):
-        return {"intent": "pipeline_positions"}
-
-    # PnL
-    if any(p in msg for p in ["pnl сессии", "pnl", "прибыль сессии", "результат сессии"]) and "сесс" in msg:
-        return {"intent": "pipeline_pnl"}
-
-    # Why entry {id}
+    # Detail queries
     why_entry = re.search(r"почему вход\s+(\S+)", msg)
     if why_entry:
         return {"intent": "pipeline_why_entry", "entry_id": why_entry.group(1)}
-
-    # Why exit {id}
     why_exit = re.search(r"почему выход\s+(\S+)", msg)
     if why_exit:
         return {"intent": "pipeline_why_exit", "trade_id": why_exit.group(1)}
-
-    # Position details {id}
     pos_detail = re.search(r"детали позиции\s+(\S+)", msg)
     if pos_detail:
         return {"intent": "pipeline_position_detail", "trade_id": pos_detail.group(1)}
@@ -126,25 +293,369 @@ def classify_pipeline_intent(message: str) -> dict | None:
     return None
 
 
+# ── Safe handlers (ТЗ §7.4 — normalized errors, §8 — templates) ──
+
+async def _handle_start_safe(user_id: int, intent: dict) -> tuple[str, InlineKeyboardMarkup | None]:
+    """ТЗ §8.5 — старт сессии, безопасный ответ."""
+    try:
+        from services.session_manager import create_session, generate_initial_plan, get_active_session
+
+        existing = await get_active_session(user_id)
+        if existing:
+            # Idempotent — return current session
+            text, _ = await _build_status_response(user_id)
+            return text, _start_kb()
+
+        budget = intent.get("budget", 100.0)
+        risk = intent.get("risk_mode", "balanced")
+
+        result = await create_session(user_id=user_id, budget_usdt=budget, duration_hours=8, risk_mode=risk)
+
+        if "error" in result:
+            return ERR_BACKEND, None
+
+        plan = await generate_initial_plan(result["session_id"])
+        if "error" in plan:
+            return (
+                f"🚀 <b>Сессия запущена</b>\n"
+                f"ID: <code>{result['session_id'][:8]}</code>\n"
+                f"Статус: ARMED\n"
+                f"Режим риска: {risk}\n"
+                f"Бюджет: {budget:.0f} USDT\n"
+                f"Горизонт: 8 часов\n"
+                f"Инструмент: BTCUSDT\n\n"
+                f"⚠️ План генерируется…",
+                _start_kb()
+            )
+
+        # ТЗ §8.5 — шаблон подтверждения
+        text = (
+            f"🚀 <b>Сессия запущена</b>\n"
+            f"ID: <code>{result['session_id'][:8]}</code>\n"
+            f"Статус: ARMED\n"
+            f"Режим риска: {risk}\n"
+            f"Бюджет: {budget:.0f} USDT\n"
+            f"Горизонт: 8 часов\n"
+            f"Инструмент: BTCUSDT\n"
+            f"План: v{plan.get('version', 1)} · {plan.get('market_regime', '—')}"
+        )
+        return text, _start_kb()
+    except Exception as exc:
+        log.error("Pipeline start error: %s", exc)
+        return ERR_BACKEND, None
+
+
+async def _handle_stop_safe(user_id: int) -> str:
+    """ТЗ §6.1 — остановка сессии, безопасный ответ."""
+    try:
+        from services.session_manager import get_active_session
+        from services.stats_audit import session_closeout
+
+        session = await get_active_session(user_id)
+        if not session:
+            return ERR_NO_SESSION
+
+        result = await session_closeout(str(session["id"]))
+        return (
+            f"🛑 <b>Сессия остановлена</b>\n"
+            f"ID: <code>{str(session['id'])[:8]}</code>\n"
+            f"Сделок: {result.get('trade_count', 0)}\n"
+            f"PnL: {result.get('total_pnl_usdt', 0):+.4f} USDT\n"
+            f"Max DD: {result.get('max_drawdown_pct', 0):.2f}%\n"
+            f"Profit factor: {result.get('profit_factor', 'N/A')}"
+        )
+    except Exception as exc:
+        log.error("Pipeline stop error: %s", exc)
+        return ERR_BACKEND
+
+
+async def _handle_revision_safe(user_id: int, command: str) -> str:
+    """ТЗ §6.1/§10.2 — revision команда через regex-first."""
+    try:
+        from services.session_manager import get_active_session, apply_revision_command
+
+        session = await get_active_session(user_id)
+        if not session:
+            return ERR_NO_SESSION
+
+        if session["status"] in ("STOPPED", "COMPLETED"):
+            return ERR_REVISION_NOT_ALLOWED
+
+        result = await apply_revision_command(str(session["id"]), command, source="telegram", actor_user_id=user_id)
+
+        if not result.get("ok"):
+            return ERR_REVISION_NOT_ALLOWED
+
+        cmd_emoji = {"continue": "✅", "tighten": "🛡", "reduce": "📉", "pause": "⏸", "close_all": "🛑"}.get(command, "🔧")
+        return f"{cmd_emoji} <b>{command}</b> → {result.get('new_status', session['status'])}"
+    except Exception as exc:
+        log.error("Pipeline revision error: %s", exc)
+        return ERR_REVISION_NOT_ALLOWED
+
+
+async def _build_status_response(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    """ТЗ §8.1 — компактный статус сессии."""
+    try:
+        from services.session_manager import get_active_session
+        session = await get_active_session(user_id)
+        if not session:
+            return ERR_NO_SESSION, _no_session_kb()
+
+        from storage.postgres_client import get_pool
+        pool = await get_pool()
+        if not pool:
+            return ERR_SESSION_UNAVAILABLE, None
+
+        async with pool.acquire() as conn:
+            metrics = await conn.fetchrow("SELECT * FROM session_metrics WHERE session_id = $1", str(session["id"]))
+            trades = await conn.fetch(
+                "SELECT * FROM executed_trades WHERE session_id = $1 ORDER BY opened_at DESC",
+                str(session["id"]),
+            )
+            last_rev = await conn.fetchrow(
+                "SELECT execution_command FROM session_revisions WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1",
+                str(session["id"]),
+            )
+
+        open_count = sum(1 for t in trades if t["status"] == "open")
+        pnl_unreal = 0.0
+        pnl_real = 0.0
+        for t in trades:
+            if t["status"] == "open":
+                # approximate unrealized from metrics if available
+                pass
+            elif t["status"] == "closed" and t["realised_pnl_usdt"]:
+                pnl_real += float(t["realised_pnl_usdt"])
+
+        # ТЗ §8.1 — шаблон
+        lines = [
+            f"🎯 <b>Активная сессия</b>",
+            f"ID: <code>{str(session['id'])[:8]}</code>",
+            f"Статус: {session['status'].upper()}",
+            f"План: v{session['active_plan_version']}",
+            f"Режим риска: {session['risk_mode']}",
+            f"Бюджет: {float(session['initial_budget_usdt']):.0f} USDT",
+            f"Открыто позиций: {open_count}",
+        ]
+
+        if metrics:
+            lines.append(f"Realized PnL: {float(metrics['total_pnl_usdt']):+.2f} USDT")
+            lines.append(f"Total PnL: {float(metrics['total_pnl_usdt']):+.2f} USDT ({float(metrics['total_pnl_pct']):+.1f}%)")
+            lines.append(f"Max DD: {float(metrics['max_drawdown_pct']):.1f}%")
+            lines.append(f"Сделок: {metrics['trade_count']} (W:{metrics['win_count']} L:{metrics['loss_count']})")
+
+        if last_rev:
+            lines.append(f"Последняя команда: {last_rev['execution_command']}")
+
+        # ТЗ §7.3 — если > 10 строк, offer Mini App
+        text = "\n".join(lines)
+        return text, _session_kb()
+    except Exception as exc:
+        log.error("Pipeline status error: %s", exc)
+        return ERR_SESSION_UNAVAILABLE, None
+
+
+async def _build_positions_response(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    """ТЗ §8.2 — digest позиций, максимум 3 по приоритету."""
+    try:
+        from services.session_manager import get_active_session
+        session = await get_active_session(user_id)
+        if not session:
+            return ERR_NO_SESSION, _no_session_kb()
+
+        from storage.postgres_client import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            trades = await conn.fetch(
+                "SELECT * FROM executed_trades WHERE session_id = $1 ORDER BY opened_at DESC",
+                str(session["id"]),
+            )
+
+        if not trades:
+            return "📦 <b>Открытых позиций нет.</b>\nСессия активна, входы ожидаются.", _portfolio_kb()
+
+        open_trades = [t for t in trades if t["status"] == "open"]
+        total_margin = sum(float(t["margin_used_usdt"] or 0) for t in open_trades)
+
+        # ТЗ §8.2 — digest
+        longs = sum(1 for t in open_trades if t["side"] == "long")
+        shorts = sum(1 for t in open_trades if t["side"] == "short")
+
+        lines = [
+            f"📦 <b>Открытые позиции</b>",
+            f"Всего: {len(open_trades)}",
+        ]
+        if longs:
+            lines.append(f"LONG BTCUSDT: {longs}")
+        if shorts:
+            lines.append(f"SHORT ETHUSDT: {shorts}")
+        lines.append(f"Общая маржа: {total_margin:.2f} USDT")
+
+        # ТЗ §8.2 — максимум 3 позиции по приоритету риска
+        if len(open_trades) > 3:
+            lines.append(f"\n<i>Показаны 3 позиции из {len(open_trades)} по приоритету.</i>")
+            shown = open_trades[:3]
+        else:
+            shown = open_trades
+
+        for t in shown:
+            side_emoji = "🟢" if t["side"] == "long" else "🔴"
+            lines.append(
+                f"{side_emoji} #{str(t['id'])[:8]} {t['side'].upper()} {t['leverage']}x "
+                f"entry={float(t['entry_price']):.1f} [{t['status']}]"
+            )
+
+        return "\n".join(lines), _portfolio_kb()
+    except Exception as exc:
+        log.error("Pipeline positions error: %s", exc)
+        return ERR_BACKEND, None
+
+
+async def _build_balance_response(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    """ТЗ §8.3 — агрегированный финансовый summary."""
+    try:
+        from services.session_manager import get_active_session
+        session = await get_active_session(user_id)
+        if not session:
+            return ERR_NO_SESSION, _no_session_kb()
+
+        from storage.postgres_client import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            metrics = await conn.fetchrow("SELECT * FROM session_metrics WHERE session_id = $1", str(session["id"]))
+            trades = await conn.fetch("SELECT * FROM executed_trades WHERE session_id = $1", str(session["id"]))
+
+        open_count = sum(1 for t in trades if t["status"] == "open")
+        budget = float(session["initial_budget_usdt"])
+
+        if metrics:
+            equity = float(metrics.get("current_equity") or budget)
+            real_pnl = float(metrics.get("total_pnl_usdt") or 0)
+            total_pnl = real_pnl
+            total_pct = float(metrics.get("total_pnl_pct") or 0)
+            max_dd = float(metrics.get("max_drawdown_pct") or 0)
+        else:
+            equity = budget
+            real_pnl = 0.0
+            total_pnl = 0.0
+            total_pct = 0.0
+            max_dd = 0.0
+
+        # ТЗ §8.3 — шаблон
+        text = (
+            f"💰 <b>Баланс и PnL</b>\n"
+            f"Стартовый бюджет: {budget:.2f} USDT\n"
+            f"Текущий equity: {equity:.2f} USDT\n"
+            f"Total PnL: {total_pnl:+.2f} USDT ({total_pct:+.2f}%)\n"
+            f"Max drawdown: {max_dd:.1f}%\n"
+            f"Открыто позиций: {open_count}"
+        )
+        return text, _balance_kb()
+    except Exception as exc:
+        log.error("Pipeline balance error: %s", exc)
+        return ERR_BACKEND, None
+
+
+async def _build_result_response(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    """ТЗ §8.4 — финальный summary digest."""
+    try:
+        from services.session_manager import get_active_session
+        session = await get_active_session(user_id)
+        if not session:
+            return ERR_NO_SESSION, _no_session_kb()
+
+        from storage.postgres_client import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            metrics = await conn.fetchrow("SELECT * FROM session_metrics WHERE session_id = $1", str(session["id"]))
+
+        budget = float(session["initial_budget_usdt"])
+
+        if metrics:
+            # ТЗ §8.4 — шаблон
+            text = (
+                f"🏁 <b>Результат сессии</b>\n"
+                f"Статус: {session['status'].upper()}\n"
+                f"Период: 8h\n"
+                f"Бюджет: {budget:.2f} USDT\n"
+                f"Итог equity: {float(metrics.get('current_equity') or budget):.2f} USDT\n"
+                f"Total PnL: {float(metrics['total_pnl_usdt']):+.2f} USDT ({float(metrics['total_pnl_pct']):+.1f}%)\n"
+                f"Сделок: {metrics['trade_count']}\n"
+                f"Win/Loss: {metrics['win_count']}/{metrics['loss_count']}\n"
+                f"Ликвидаций: {metrics['liquidation_count']}\n"
+                f"Max DD: {float(metrics['max_drawdown_pct']):.1f}%\n"
+                f"Profit factor: {float(metrics['profit_factor']) if metrics['profit_factor'] else 'N/A'}"
+            )
+        else:
+            text = (
+                f"🏁 <b>Результат сессии</b>\n"
+                f"Статус: {session['status'].upper()}\n"
+                f"Бюджет: {budget:.2f} USDT\n"
+                f"Метрики ещё не рассчитаны."
+            )
+        return text, _result_kb()
+    except Exception as exc:
+        log.error("Pipeline result error: %s", exc)
+        return ERR_BACKEND, None
+
+
+async def _build_review_response(user_id: int) -> str:
+    """ТЗ §8.4 — review (Premium model анализ сессии)."""
+    try:
+        from services.session_manager import get_active_session
+        session = await get_active_session(user_id)
+        if not session:
+            return ERR_NO_SESSION
+
+        from storage.postgres_client import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            review = await conn.fetchrow(
+                "SELECT * FROM daily_reviews WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1",
+                str(session["id"]),
+            )
+
+        if not review:
+            return "🧠 <b>Review</b>\nReview ещё не сформирован. Сессия должна быть завершена."
+
+        return (
+            f"🧠 <b>Review сессии</b>\n"
+            f"Модель: {review['review_model']}\n"
+            f"Статус: {review['status']}\n\n"
+            f"{review.get('review_text', '') or ''}"
+        )
+    except Exception as exc:
+        log.error("Pipeline review error: %s", exc)
+        return ERR_BACKEND
+
+
 async def handle_pipeline_intent(intent: dict, user_id: int = DEFAULT_USER_ID) -> str:
     """Обработать pipeline intent и вернуть текстовый ответ для Telegram."""
     intent_type = intent.get("intent", "")
-
     try:
         if intent_type == "pipeline_start":
-            return await _handle_start(user_id, intent)
+            text, _ = await _handle_start_safe(user_id, intent)
+            return text
         elif intent_type == "pipeline_stop":
-            return await _handle_stop(user_id)
+            return await _handle_stop_safe(user_id)
         elif intent_type == "pipeline_status":
-            return await _handle_status(user_id)
+            text, _ = await _build_status_response(user_id)
+            return text
+        elif intent_type == "pipeline_result":
+            text, _ = await _build_result_response(user_id)
+            return text
+        elif intent_type == "pipeline_revision_cmd":
+            return await _handle_revision_safe(user_id, intent.get("command", ""))
+        elif intent_type == "pipeline_positions":
+            text, _ = await _build_positions_response(user_id)
+            return text
+        elif intent_type == "pipeline_pnl":
+            text, _ = await _build_balance_response(user_id)
+            return text
         elif intent_type == "pipeline_plan":
             return await _handle_plan(user_id)
         elif intent_type == "pipeline_revision":
             return await _handle_revision(user_id)
-        elif intent_type == "pipeline_positions":
-            return await _handle_positions(user_id)
-        elif intent_type == "pipeline_pnl":
-            return await _handle_pnl(user_id)
         elif intent_type == "pipeline_why_entry":
             return await _handle_why_entry(intent.get("entry_id", ""))
         elif intent_type == "pipeline_why_exit":
@@ -155,116 +666,16 @@ async def handle_pipeline_intent(intent: dict, user_id: int = DEFAULT_USER_ID) -
             return "❌ Неизвестная команда pipeline"
     except Exception as exc:
         log.error("Pipeline handler error: %s", exc)
-        return f"❌ Ошибка: {exc}"
+        return ERR_BACKEND
 
 
-async def _handle_start(user_id: int, intent: dict) -> str:
-    from services.session_manager import create_session, generate_initial_plan, get_active_session
-
-    # Check if already has active session
-    existing = await get_active_session(user_id)
-    if existing:
-        return f"⚠️ У вас уже есть активная сессия #{existing['id'][:8]}... Статус: {existing['status']}"
-
-    budget = intent.get("budget", 100.0)
-    risk = intent.get("risk_mode", "balanced")
-
-    result = await create_session(
-        user_id=user_id,
-        budget_usdt=budget,
-        duration_hours=8,
-        risk_mode=risk,
-    )
-
-    if "error" in result:
-        return f"❌ {result['error']}"
-
-    # Generate initial plan
-    plan = await generate_initial_plan(result["session_id"])
-    if "error" in plan:
-        return f"⚠️ Сессия создана, но план не сгенерирован: {plan['error']}"
-
-    return (
-        f"🚀 <b>Daily Session запущена</b>\n"
-        f"ID: <code>{result['session_id'][:8]}</code>\n"
-        f"Бюджет: {budget:.2f} USDT\n"
-        f"Режим: {risk}\n"
-        f"Длительность: 8ч\n"
-        f"Модель: {plan.get('model_used', '?')}\n"
-        f"Regime: {plan.get('market_regime', '?')}\n"
-        f"Thesis: {plan.get('thesis', '?')}\n"
-        f"Entries: {plan.get('entries_count', 0)}\n\n"
-        f"📊 Pipeline активен. Пиши «статус сессии» для проверки."
-    )
-
-
-async def _handle_stop(user_id: int) -> str:
-    from services.session_manager import get_active_session, update_session_status
-    from services.stats_audit import session_closeout
-
-    session = await get_active_session(user_id)
-    if not session:
-        return "📭 Нет активной сессии"
-
-    result = await session_closeout(str(session["id"]))
-    return (
-        f"🛑 <b>Сессия остановлена</b>\n"
-        f"Trades: {result.get('trade_count', 0)}\n"
-        f"PnL: {result.get('total_pnl_usdt', 0):+.4f} USDT\n"
-        f"Drawdown: {result.get('max_drawdown_pct', 0):.2f}%\n"
-        f"Profit factor: {result.get('profit_factor', 'N/A')}"
-    )
-
-
-async def _handle_status(user_id: int) -> str:
-    from services.session_manager import get_active_session
-
-    session = await get_active_session(user_id)
-    if not session:
-        return "📭 Нет активной сессии"
-
-    from storage.postgres_client import get_pool
-    pool = await get_pool()
-    if not pool:
-        return "❌ Нет БД"
-
-    async with pool.acquire() as conn:
-        metrics = await conn.fetchrow(
-            "SELECT * FROM session_metrics WHERE session_id = $1",
-            str(session["id"]),
-        )
-        trades = await conn.fetch(
-            "SELECT COUNT(*) as count, SUM(CASE WHEN status='open' THEN 1 ELSE 0 END) as open_count FROM executed_trades WHERE session_id = $1",
-            str(session["id"]),
-        )
-
-    status_emoji = {"armed": "🎯", "in_position": "📈", "paused": "⏸", "cooldown": "❄️", "idle": "💤"}.get(session["status"], "❓")
-
-    lines = [
-        f"{status_emoji} <b>Статус сессии</b>",
-        f"ID: <code>{str(session['id'])[:8]}</code>",
-        f"Состояние: <b>{session['status'].upper()}</b>",
-        f"Plan v{session['active_plan_version']}",
-        f"Бюджет: {float(session['initial_budget_usdt']):.2f} USDT",
-    ]
-
-    if metrics:
-        lines.append(f"Equity: {float(metrics['current_equity'] if 'current_equity' in metrics.keys() else 0):.2f} USDT")
-        lines.append(f"PnL: {float(metrics['total_pnl_usdt']):+.4f} USDT ({float(metrics['total_pnl_pct']):+.2f}%)")
-        lines.append(f"Trades: {metrics['trade_count']} (W:{metrics['win_count']} L:{metrics['loss_count']})")
-        lines.append(f"Drawdown: {float(metrics['max_drawdown_pct']):.2f}%")
-        pf = metrics['profit_factor']
-        lines.append(f"Profit factor: {float(pf) if pf else 'N/A'}")
-
-    return "\n".join(lines)
-
+# ── Legacy detail handlers (unchanged) ──
 
 async def _handle_plan(user_id: int) -> str:
     from services.session_manager import get_active_session
-
     session = await get_active_session(user_id)
     if not session:
-        return "📭 Нет активной сессии"
+        return ERR_NO_SESSION
 
     from storage.postgres_client import get_pool
     pool = await get_pool()
@@ -302,15 +713,19 @@ async def _handle_plan(user_id: int) -> str:
         lines.append(f"  Status: {e['status']}")
         lines.append("")
 
+    # ТЗ §7.3 — если длинный, offer Mini App
+    if len(lines) > 12:
+        url = _miniapp_url()
+        lines.append(f'📱 <a href="{url}">Открыть Mini App</a> для полного плана')
+
     return "\n".join(lines)
 
 
 async def _handle_revision(user_id: int) -> str:
     from services.session_manager import get_active_session
-
     session = await get_active_session(user_id)
     if not session:
-        return "📭 Нет активной сессии"
+        return ERR_NO_SESSION
 
     from storage.postgres_client import get_pool
     pool = await get_pool()
@@ -327,7 +742,7 @@ async def _handle_revision(user_id: int) -> str:
     if isinstance(rev_data, str):
         rev_data = json.loads(rev_data)
 
-    cmd_emoji = {"continue": "✅", "tighten": "🔧", "reduce": "📉", "pause": "⏸", "close_all": "🛑"}.get(
+    cmd_emoji = {"continue": "✅", "tighten": "🛡", "reduce": "📉", "pause": "⏸", "close_all": "🛑"}.get(
         rev["execution_command"], "❓"
     )
 
@@ -340,75 +755,11 @@ async def _handle_revision(user_id: int) -> str:
     )
 
 
-async def _handle_positions(user_id: int) -> str:
-    from services.session_manager import get_active_session
-
-    session = await get_active_session(user_id)
-    if not session:
-        return "📭 Нет активной сессии"
-
-    from storage.postgres_client import get_pool
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        trades = await conn.fetch(
-            "SELECT * FROM executed_trades WHERE session_id = $1 ORDER BY opened_at DESC",
-            str(session["id"]),
-        )
-
-    if not trades:
-        return "📭 Сделок в сессии нет"
-
-    lines = [f"📊 <b>Позиции сессии</b> ({len(trades)})"]
-    for t in trades:
-        side_emoji = "🟢" if t["side"] == "long" else "🔴"
-        status_emoji = "📈" if t["status"] == "open" else "✅" if t["status"] == "closed" else "💥"
-        pnl_str = ""
-        if t["realised_pnl_usdt"] is not None:
-            pnl_str = f" PnL: {float(t['realised_pnl_usdt']):+.4f}"
-        lines.append(
-            f"{side_emoji}{status_emoji} #{str(t['id'])[:8]} {t['side'].upper()} {t['leverage']}x "
-            f"entry={float(t['entry_price']):.2f}{pnl_str} [{t['status']}]"
-        )
-
-    return "\n".join(lines)
-
-
-async def _handle_pnl(user_id: int) -> str:
-    from services.session_manager import get_active_session
-
-    session = await get_active_session(user_id)
-    if not session:
-        return "📭 Нет активной сессии"
-
-    from storage.postgres_client import get_pool
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        metrics = await conn.fetchrow(
-            "SELECT * FROM session_metrics WHERE session_id = $1",
-            str(session["id"]),
-        )
-
-    if not metrics:
-        return "📭 Метрик нет (сессия только началась)"
-
-    return (
-        f"💰 <b>PnL сессии</b>\n"
-        f"Total: {float(metrics['total_pnl_usdt']):+.4f} USDT ({float(metrics['total_pnl_pct']):+.2f}%)\n"
-        f"Win: {metrics['win_count']} | Loss: {metrics['loss_count']} | Liq: {metrics['liquidation_count']}\n"
-        f"Max DD: {float(metrics['max_drawdown_pct']):.2f}%\n"
-        f"PF: {float(metrics['profit_factor']) if metrics['profit_factor'] else 'N/A'}\n"
-        f"Time in market: {float(metrics['time_in_market_pct']):.1f}%"
-    )
-
-
 async def _handle_why_entry(entry_id: str) -> str:
     from storage.postgres_client import get_pool
     pool = await get_pool()
     async with pool.acquire() as conn:
-        entry = await conn.fetchrow(
-            "SELECT * FROM planned_entries WHERE id = $1",
-            entry_id,
-        )
+        entry = await conn.fetchrow("SELECT * FROM planned_entries WHERE id = $1", entry_id)
 
     if not entry:
         return f"❌ Entry {entry_id} не найден"
@@ -428,10 +779,7 @@ async def _handle_why_exit(trade_id: str) -> str:
     from storage.postgres_client import get_pool
     pool = await get_pool()
     async with pool.acquire() as conn:
-        trade = await conn.fetchrow(
-            "SELECT * FROM executed_trades WHERE id = $1",
-            trade_id,
-        )
+        trade = await conn.fetchrow("SELECT * FROM executed_trades WHERE id = $1", trade_id)
 
     if not trade:
         return f"❌ Trade {trade_id} не найден"
@@ -449,10 +797,7 @@ async def _handle_position_detail(trade_id: str) -> str:
     from storage.postgres_client import get_pool
     pool = await get_pool()
     async with pool.acquire() as conn:
-        trade = await conn.fetchrow(
-            "SELECT * FROM executed_trades WHERE id = $1",
-            trade_id,
-        )
+        trade = await conn.fetchrow("SELECT * FROM executed_trades WHERE id = $1", trade_id)
 
     if not trade:
         return f"❌ Trade {trade_id} не найден"

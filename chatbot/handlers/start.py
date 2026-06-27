@@ -6,18 +6,17 @@ router = Router()
 
 
 def get_main_keyboard() -> ReplyKeyboardMarkup:
+    """ТЗ §5.1 — 6 разделов + главный CTA (Mini App / Старт сессии)."""
     import os
-    webui_url = os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8081/dashboard"
-    her_url = os.getenv("HER_MINIAPP_URL") or "http://localhost:8081/dashboard"
+    miniapp_url = os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8080/daily-session"
     return ReplyKeyboardMarkup(
         keyboard=[
-            [
-                KeyboardButton(text="🎛️ Command Deck", web_app=WebAppInfo(url=webui_url)),
-                KeyboardButton(text="🔑 HER Console", web_app=WebAppInfo(url=her_url)),
-            ],
+            # Row 0: Главный CTA — Mini App (ТЗ §5.2)
+            [KeyboardButton(text="📱 Сессия", web_app=WebAppInfo(url=miniapp_url))],
+            # Row 1: 6 разделов (ТЗ §5.1)
             [KeyboardButton(text="📊 Рынок"), KeyboardButton(text="🧠 Аналитика")],
-            [KeyboardButton(text="🔮 Прогнозы"), KeyboardButton(text="🗂 Портфель")],
-            [KeyboardButton(text="🔔 Алерты"), KeyboardButton(text="⚙️ Система")],
+            [KeyboardButton(text="🔮 Прогнозы"), KeyboardButton(text="📦 Портфель")],
+            [KeyboardButton(text="🔔 Алерты"), KeyboardButton(text="🎯 Старт сессии")],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -27,12 +26,15 @@ def get_main_keyboard() -> ReplyKeyboardMarkup:
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     text = (
-        "👋 <b>Добро пожаловать в WORED Bot</b>\n\n"
-        "Это Telegram-контур для рынка, AI-аналитики и почасовых прогнозов.\n"
-        "Используйте кнопки ниже или задайте вопрос текстом.\n\n"
-        "Быстрые сценарии:\n"
-        "• <b>Рынок</b> — live snapshot по watchlist\n"
-        "• <b>Аналитика</b> — reasoning analysis по монете\n"
-        "• <b>Прогнозы</b> — запуск hourly forecast и live scorecard по моделям"
+        "🏴‍☠️ <b>WORED Trading Bot</b>\n\n"
+        "Daily Pipeline · BTCUSDT · HTX · 8h\n\n"
+        "📱 <b>Сессия</b> — Mini App: live runtime, revision-команды, метрики\n"
+        "📊 <b>Рынок</b> — live snapshot по watchlist\n"
+        "🧠 <b>Аналитика</b> — AI анализ по монете\n"
+        "🔮 <b>Прогнозы</b> — Forecast Lab\n"
+        "📦 <b>Портфель</b> — позиции и PnL\n"
+        "🔔 <b>Алерты</b> — последние движения\n"
+        "🎯 <b>Старт сессии</b> — запустить дневную торговую сессию\n\n"
+        "Или пиши текстом: «статус сессии», «цена btc», «анализ eth»…"
     )
     await message.answer(text, reply_markup=get_main_keyboard())

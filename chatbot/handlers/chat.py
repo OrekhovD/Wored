@@ -10,39 +10,67 @@ router = Router()
 
 def sanitize_html(text: str) -> str:
     """Fix common broken HTML from AI responses for Telegram."""
-    # Allowed Telegram HTML tags
     allowed = {'b', 'i', 'u', 's', 'code', 'pre', 'a', 'blockquote'}
-    
-    # Find all opening tags
     for tag in allowed:
-        # Count opens and closes
         opens = len(re.findall(rf'<{tag}(?:\s[^>]*)?>', text, re.IGNORECASE))
         closes = len(re.findall(rf'</{tag}>', text, re.IGNORECASE))
-        # Add missing close tags
         for _ in range(opens - closes):
             text += f'</{tag}>'
-    
     return text
 
 def strip_html(text: str) -> str:
     """Remove all HTML tags as a last resort."""
     return re.sub(r'<[^>]+>', '', text)
 
+def _is_product_intent(text: str) -> bool:
+    """ТЗ §10.2 — перехват продуктовых intents до AI chat (regex-first)."""
+    from handlers.pipeline import classify_pipeline_intent
+    intent = classify_pipeline_intent(text or "")
+    if intent:
+        return True
+    msg = (text or "").lower().strip()
+    # ТЗ §6.2 — market keywords
+    if any(p in msg for p in ["рынок", "цена btc", "цена eth", "btcusdt", "watchlist", "покажи рынок", "снэпшот рынка"]):
+        return True
+    # ТЗ §6.3 — analytics
+    if any(p in msg for p in ["анализ btc", "анализ eth", "сравни", "что по btc", "reasoning по"]):
+        return True
+    # ТЗ §6.4 — forecast
+    if any(p in msg for p in ["прогноз btc", "forecast lab", "scorecard", "прогнозы"]):
+        return True
+    # ТЗ §6.5 — portfolio
+    if any(p in msg for p in ["портфель", "баланс", "pnl", "покажи pnl", "сколько позиций", "мои позиции"]):
+        return True
+    # ТЗ §6.6 — alerts
+    if any(p in msg for p in ["алерты", "добавить алерт", "мои алерты", "удалить алерт"]):
+        return True
+    return False
+
 @router.message(F.text)
 async def cmd_chat(message: Message):
-    wait_msg = await message.answer("🤔 <i>Анализирую данные...</i>")
+    """ТЗ §7.5 — один intent → один режим → один тип ответа.
+
+    ТЗ §10.2 — regex-first: перехватываем продуктовые intents до AI chat.
+    """
+    # ТЗ §10.2 — check pipeline/product intents first
+    if _is_product_intent(message.text or ""):
+        from handlers.pipeline import classify_pipeline_intent, handle_pipeline_intent
+        intent = classify_pipeline_intent(message.text or "")
+        if intent:
+            text = await handle_pipeline_intent(intent, message.from_user.id)
+            await message.answer(text, parse_mode="HTML")
+            return
+
+    # Fallback: AI chat for non-product queries (ТЗ §10.3 — worker-tier only)
+    wait_msg = await message.answer("🤔 <i>Анализирую…</i>")
     try:
         reply = await route_request(message.text)
-        
-        # Try sending with sanitized HTML first
         try:
             await wait_msg.edit_text(sanitize_html(reply))
         except TelegramBadRequest:
-            # If HTML is still broken, strip all tags and send plain
             log.warning("HTML sanitize failed, sending as plain text")
             await wait_msg.edit_text(strip_html(reply), parse_mode=None)
-            
     except Exception as e:
         log.error(f"AI call error: {e}")
-        await wait_msg.edit_text(f"❌ Ошибка вызова AI: {e}", parse_mode=None)
-
+        # ТЗ §7.4 — normalized error, no raw backend error
+        await wait_msg.edit_text("⚠️ Временная ошибка сервиса. Попробуй позже.", parse_mode=None)
