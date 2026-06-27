@@ -1410,6 +1410,9 @@ a:focus-visible {
 .ds-status-badge { font-size:0.75rem; font-weight:700; letter-spacing:0.05em; padding:3px 10px; border-radius:20px; background:rgba(255,255,255,0.06); }
 .ds-grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
 .ds-grid-2 { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-bottom:8px; }
+.ds-grid-2 > div { display:flex; flex-direction:column; gap:2px; }
+.ds-grid-2 > div label { font-size:0.7rem; color:var(--muted,#7291a5); text-transform:uppercase; letter-spacing:0.04em; }
+.ds-grid-2 > div span { font-size:0.9rem; color:#c5d6e0; }
 .ds-stat { display:flex; flex-direction:column; gap:2px; }
 .ds-stat label { font-size:0.7rem; color:var(--muted,#7291a5); text-transform:uppercase; letter-spacing:0.04em; }
 .ds-stat span { font-size:0.9rem; font-variant-numeric:tabular-nums; color:#d3e0e8; }

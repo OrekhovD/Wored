@@ -2484,7 +2484,7 @@ async def api_daily_session_active(request: Request):
         },
         "plan": {
             "id": str(plan["id"]),
-            "version": plan["version"],
+            "version": session["active_plan_version"],
             "thesis": plan_json.get("thesis") if plan_json else None,
             "marketregime": plan_json.get("market_regime") if plan_json else None,
             "primaryscenario": plan_json.get("primary_scenario") if plan_json else None,
@@ -2518,7 +2518,17 @@ async def api_daily_session_active(request: Request):
             "maxdrawdownpct": float(metrics["max_drawdown_pct"]),
             "profitfactor": float(metrics["profit_factor"]) if metrics["profit_factor"] else None,
             "timeinmarketpct": float(metrics["time_in_market_pct"]) if metrics["time_in_market_pct"] else None,
-        } if metrics else None,
+        } if metrics else {
+            "tradecount": 0,
+            "wincount": 0,
+            "losscount": 0,
+            "liquidationcount": 0,
+            "totalpnlusdt": 0.0,
+            "totalpnlpct": 0.0,
+            "maxdrawdownpct": 0.0,
+            "profitfactor": None,
+            "timeinmarketpct": 0.0,
+        },
         "trades": [
             {
                 "id": str(t["id"]),
@@ -2539,8 +2549,8 @@ async def api_daily_session_active(request: Request):
                 "id": str(e["id"]),
                 "timestamp": serialize_dt(e["created_at"]),
                 "eventtype": e["event_type"],
-                "statebefore": e["state_before"],
-                "stateafter": e["state_after"],
+                "statebefore": (e["state_before"] or "").upper(),
+                "stateafter": (e["state_after"] or "").upper(),
                 "eventpayload": safe_jsonb(e["event_payload"]),
             }
             for e in events
@@ -2786,8 +2796,8 @@ async def api_daily_session_events(
                 "id": str(e["id"]),
                 "timestamp": serialize_dt(e["created_at"]),
                 "eventtype": e["event_type"],
-                "statebefore": e["state_before"],
-                "stateafter": e["state_after"],
+                "statebefore": (e["state_before"] or "").upper(),
+                "stateafter": (e["state_after"] or "").upper(),
                 "eventpayload": safe_jsonb(e["event_payload"]),
             }
             for e in events

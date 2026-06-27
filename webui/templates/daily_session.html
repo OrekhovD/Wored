@@ -175,6 +175,12 @@ async function loadSession() {
           <div><label>Alternative</label><span>${p.alternativescenario || '—'}</span></div>
         </div>
         ${p.notradecondition ? `<div class="ds-no-trade"><label>No-Trade Condition</label><span>${p.notradecondition}</span></div>` : ''}
+        ${p.sessionrisk ? `<div class="ds-grid-4 ds-risk-grid">
+          <div class="ds-stat"><label>Max DD</label><span>${p.sessionrisk.maxsessiondrawdownpct}%</span></div>
+          <div class="ds-stat"><label>Max Fails</label><span>${p.sessionrisk.maxfailedentries}</span></div>
+          <div class="ds-stat"><label>Cooldown</label><span>${p.sessionrisk.cooldownminutesafterstop}m</span></div>
+          <div class="ds-stat"><label>Max Positions</label><span>${p.sessionrisk.maxsimultaneouspositions}</span></div>
+        </div>` : ''}
       `;
     }
 
