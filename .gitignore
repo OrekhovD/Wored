@@ -40,3 +40,4 @@ check_new_key_details.py
 find_deepseek_models.py
 test_allowed_models.py
 test_other_deepseek.py
+nVidia.md
