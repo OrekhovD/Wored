@@ -6,333 +6,337 @@
     <div class="section-subtitle">BTCUSDT Perpetual · HTX · 8h Pipeline · Simulation</div>
   </div>
 
-  <div id="dsContainer" class="ds-container">
+  <div class="ds3-layout">
 
-    <!-- ═══ ZONE 1: SESSION SETUP PANEL ═══ -->
-    <div class="ds-card ds-setup-panel" id="dsSetupPanel">
-      <div class="ds-card-header">
-        <h2>Session Setup</h2>
-        <span class="ds-setup-toggle" onclick="toggleSetupPanel()">▼</span>
-      </div>
-
-      <div id="dsSetupBody" class="ds-setup-body">
-        <!-- 3.2.1 Instrument & Market -->
-        <div class="ds-setup-block">
-          <h3>Instrument & Market</h3>
-          <div class="ds-form-grid">
-            <div class="ds-form-row">
-              <label>Symbol</label>
-              <select id="dsFSymbol" disabled>
-                <option value="BTCUSDT">BTCUSDT Perpetual (HTX)</option>
-              </select>
-            </div>
-            <div class="ds-form-row">
-              <label>Exchange</label>
-              <input type="text" value="HTX" readonly>
-            </div>
-            <div class="ds-form-row">
-              <label>Contract Type</label>
-              <input type="text" value="USDT-M Perpetual" readonly>
-            </div>
-            <div class="ds-form-row">
-              <label>Position Mode</label>
-              <input type="text" value="One-way" readonly>
-            </div>
-            <div class="ds-form-row">
-              <label>Margin Mode</label>
-              <select id="dsFMarginMode">
-                <option value="isolated">Isolated</option>
-                <option value="cross">Cross</option>
-              </select>
-            </div>
-          </div>
+    <!-- ═══ LEFT COLUMN: Setup & Control (P1) ═══ -->
+    <aside class="ds3-left">
+      <div class="ds-card ds-setup-panel">
+        <div class="ds-card-header">
+          <h2>Session Setup</h2>
         </div>
 
-        <!-- 3.2.2 Trade Style & Horizon -->
-        <div class="ds-setup-block">
-          <h3>Trade Style & Horizon</h3>
-          <div class="ds-form-grid">
-            <div class="ds-form-row">
-              <label>Trade Direction</label>
-              <div class="ds-radio-group">
-                <label class="ds-radio"><input type="radio" name="dsFDirection" value="auto" checked> AUTO</label>
-                <label class="ds-radio"><input type="radio" name="dsFDirection" value="long"> LONG</label>
-                <label class="ds-radio"><input type="radio" name="dsFDirection" value="short"> SHORT</label>
-                <label class="ds-radio"><input type="radio" name="dsFDirection" value="both"> BOTH</label>
-              </div>
-            </div>
-            <div class="ds-form-row">
-              <label>Trade Horizon</label>
-              <div class="ds-radio-group">
-                <label class="ds-radio"><input type="radio" name="dsFHorizon" value="fast" checked onchange="updateHorizonDefaults()"> FAST</label>
-                <label class="ds-radio"><input type="radio" name="dsFHorizon" value="medium" onchange="updateHorizonDefaults()"> MEDIUM</label>
-                <label class="ds-radio"><input type="radio" name="dsFHorizon" value="long" onchange="updateHorizonDefaults()"> LONG</label>
-              </div>
-            </div>
-            <div class="ds-form-row">
-              <label>Session Duration</label>
-              <select id="dsFDuration">
-                <option value="4">4h</option>
-                <option value="8" selected>8h</option>
-                <option value="12">12h</option>
-              </select>
-            </div>
-            <div class="ds-form-row">
-              <label>Start Time</label>
-              <select id="dsFStartTime">
-                <option value="now" selected>Now</option>
-                <option value="schedule">Schedule</option>
-              </select>
-            </div>
-            <div class="ds-form-row">
-              <label>Execution Mode</label>
-              <input type="text" value="Simulation only" readonly>
+        <div class="ds-setup-body">
+          <!-- 1. Trade Direction -->
+          <div class="ds-setup-block">
+            <h3>Trade Direction</h3>
+            <div class="ds-radio-group">
+              <label class="ds-radio"><input type="radio" name="dsFDirection" value="auto" checked> AUTO</label>
+              <label class="ds-radio"><input type="radio" name="dsFDirection" value="long"> LONG</label>
+              <label class="ds-radio"><input type="radio" name="dsFDirection" value="short"> SHORT</label>
+              <label class="ds-radio"><input type="radio" name="dsFDirection" value="both"> BOTH</label>
             </div>
           </div>
-        </div>
 
-        <!-- 3.2.3 Budget & Risk -->
-        <div class="ds-setup-block">
-          <h3>Budget & Risk</h3>
-          <div class="ds-form-grid">
+          <!-- 2. Trade Horizon -->
+          <div class="ds-setup-block">
+            <h3>Trade Horizon</h3>
+            <div class="ds-radio-group">
+              <label class="ds-radio"><input type="radio" name="dsFHorizon" value="fast" checked onchange="updateHorizonDefaults()"> FAST</label>
+              <label class="ds-radio"><input type="radio" name="dsFHorizon" value="medium" onchange="updateHorizonDefaults()"> MEDIUM</label>
+              <label class="ds-radio"><input type="radio" name="dsFHorizon" value="long" onchange="updateHorizonDefaults()"> LONG</label>
+            </div>
+          </div>
+
+          <!-- 3. Budget -->
+          <div class="ds-setup-block">
+            <h3>Budget</h3>
             <div class="ds-form-row">
-              <label>Budget (USDT)</label>
               <input type="number" id="dsFBudget" value="100" min="25" max="1000" step="25" oninput="updateBudgetSlider()">
               <input type="range" id="dsFBudgetSlider" min="25" max="500" step="25" value="100" oninput="document.getElementById('dsFBudget').value=this.value">
             </div>
+          </div>
+
+          <!-- 4. Risk Mode -->
+          <div class="ds-setup-block">
+            <h3>Risk Mode</h3>
             <div class="ds-form-row">
-              <label>Risk Mode</label>
               <select id="dsFRisk" onchange="updateRiskDefaults()">
                 <option value="defensive">Defensive</option>
                 <option value="balanced" selected>Balanced</option>
                 <option value="aggressive">Aggressive</option>
               </select>
             </div>
+          </div>
+
+          <!-- 5. Target Net Profit -->
+          <div class="ds-setup-block">
+            <h3>Target Net Profit</h3>
             <div class="ds-form-row">
-              <label>Max Session Drawdown %</label>
-              <input type="number" id="dsFMaxDD" value="6.0" step="0.5" readonly>
+              <label>Per trade (USDT)</label>
+              <input type="number" id="dsFTarget" value="1.5" min="0.5" max="50" step="0.5">
             </div>
+          </div>
+
+          <!-- 6. Max Trade Duration -->
+          <div class="ds-setup-block">
+            <h3>Max Trade Duration</h3>
             <div class="ds-form-row">
-              <label>Max Failed Entries</label>
-              <input type="number" id="dsFMaxFails" value="3" readonly>
-            </div>
-            <div class="ds-form-row">
-              <label>Max Simultaneous Positions</label>
-              <input type="number" id="dsFMaxPos" value="1" readonly>
-            </div>
-            <div class="ds-form-row">
-              <label>Max Trade Duration (min)</label>
+              <label>Minutes</label>
               <input type="number" id="dsFMaxDur" value="15" min="5" max="480" step="5">
             </div>
           </div>
-          <div class="ds-leverage-policy">
-            <label>Leverage Policy:</label>
-            <span class="ds-lev-badge">100x</span>
-            <span class="ds-lev-badge">125x</span>
-            <span class="ds-lev-badge">150x</span>
-            <span class="ds-lev-badge">200x</span>
+
+          <!-- 7. Cost Filter -->
+          <div class="ds-setup-block">
+            <h3>Cost Filter</h3>
+            <div class="ds-form-row">
+              <label class="ds-checkbox-row">
+                <input type="checkbox" id="dsFCostFilter" checked>
+                <span>Enabled (reject unprofitable trades)</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 8. Session Duration -->
+          <div class="ds-setup-block">
+            <h3>Session Duration</h3>
+            <div class="ds-form-row">
+              <select id="dsFDuration">
+                <option value="4">4h</option>
+                <option value="8" selected>8h</option>
+                <option value="12">12h</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Leverage Policy (read-only) -->
+          <div class="ds-setup-block">
+            <h3>Leverage Policy</h3>
+            <div class="ds-leverage-policy">
+              <span class="ds-lev-badge">100x</span>
+              <span class="ds-lev-badge">125x</span>
+              <span class="ds-lev-badge">150x</span>
+              <span class="ds-lev-badge">200x</span>
+            </div>
+          </div>
+
+          <!-- 9. Launch / Reset -->
+          <div class="ds-setup-block ds-launch-block">
+            <div class="ds-launch-buttons">
+              <button class="ds-btn ds-btn-start" onclick="launchSession()">🚀 Launch</button>
+              <button class="ds-btn ds-btn-secondary" onclick="resetForm()">🔄 Reset</button>
+            </div>
+            <div id="dsLaunchResult" class="ds-cmd-result" style="display:none"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Execution Control (below setup) -->
+      <div class="ds-card" id="dsControls" style="display:none">
+        <div class="ds-card-header"><h2>Execution Control</h2></div>
+        <div class="ds-control-buttons">
+          <button class="ds-btn ds-btn-continue" onclick="sendCommand('continue')">▶ Continue</button>
+          <button class="ds-btn ds-btn-tighten" onclick="sendCommand('tighten')">🔒 Tighten</button>
+          <button class="ds-btn ds-btn-reduce" onclick="sendCommand('reduce')">📉 Reduce</button>
+          <button class="ds-btn ds-btn-pause" onclick="sendCommand('pause')">⏸ Pause</button>
+          <button class="ds-btn ds-btn-close" onclick="sendCommand('close_all')">✖ Close All</button>
+        </div>
+        <div id="dsCmdResult" class="ds-cmd-result" style="display:none"></div>
+      </div>
+    </aside>
+
+    <!-- ═══ CENTER COLUMN: Session & Performance (P0) ═══ -->
+    <main class="ds3-center">
+      <!-- Session Selector -->
+      <div class="ds-card ds-selector-card" id="dsSelectorCard" style="display:none">
+        <div class="ds-selector-row">
+          <label>Session:</label>
+          <select id="dsSessionSelector" onchange="selectSession(this.value)"></select>
+          <button class="ds-btn ds-btn-secondary" onclick="loadSessionList()">🔄</button>
+        </div>
+      </div>
+
+      <!-- 1. Session Summary Card -->
+      <div class="ds-card" id="dsHeader" style="display:none">
+        <div class="ds-card-header">
+          <h2>Session</h2>
+          <div class="ds-header-right">
+            <span class="ds-pipeline-label">BTCUSDT · HTX</span>
+            <span class="ds-status-badge" id="dsStatusBadge">—</span>
+          </div>
+        </div>
+        <div class="ds-grid-4">
+          <div class="ds-stat"><label>ID</label><span id="dsId">—</span></div>
+          <div class="ds-stat"><label>Status</label><span id="dsStatus">—</span></div>
+          <div class="ds-stat"><label>Direction</label><span id="dsDirection">—</span></div>
+          <div class="ds-stat"><label>Horizon</label><span id="dsHorizon">—</span></div>
+          <div class="ds-stat"><label>Risk Mode</label><span id="dsRiskMode">—</span></div>
+          <div class="ds-stat"><label>Plan v</label><span id="dsPlanVer">—</span></div>
+          <div class="ds-stat"><label>Start</label><span id="dsStart">—</span></div>
+          <div class="ds-stat"><label>End</label><span id="dsEnd">—</span></div>
+          <div class="ds-stat"><label>Target / Trade</label><span id="dsTargetProfit">—</span></div>
+          <div class="ds-stat"><label>Max Duration</label><span id="dsMaxDuration">—</span></div>
+          <div class="ds-stat"><label>Last Command</label><span id="dsLastCmd">—</span></div>
+          <div class="ds-stat"><label>Open Positions</label><span id="dsOpenPos">0</span></div>
+        </div>
+      </div>
+
+      <!-- No active session placeholder -->
+      <div class="ds-card ds-empty-card" id="dsEmpty">
+        <div class="ds-empty-msg">
+          <p>No active session. Launch one from the left panel.</p>
+        </div>
+      </div>
+
+      <!-- 2. Session Health Grid (Metrics + Risk combined) -->
+      <div class="ds-card" id="dsHealth" style="display:none">
+        <div class="ds-card-header"><h2>Session Health</h2></div>
+        <div class="ds-health-grid">
+          <div class="ds-health-kpi ds-kpi-primary">
+            <label>Net PnL (after costs)</label>
+            <span id="dsNetPnl" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Total PnL</label>
+            <span id="dsPnl" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>PnL %</label>
+            <span id="dsPnlPct" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi ds-kpi-risk">
+            <label>Max Drawdown</label>
+            <span id="dsMaxDd" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Profit Factor</label>
+            <span id="dsPf" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Time in Market</label>
+            <span id="dsTim" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Trades</label>
+            <span id="dsTrades" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Win / Loss</label>
+            <span id="dsWL" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Liquidations</label>
+            <span id="dsLiq" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Gross PnL</label>
+            <span id="dsGrossPnl" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Fees</label>
+            <span id="dsFees" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Slippage</label>
+            <span id="dsSlip" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Avg Trade Duration</label>
+            <span id="dsAvgDur" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Cost Rejections</label>
+            <span id="dsCostRej" class="ds-kpi-value">—</span>
+          </div>
+          <div class="ds-health-kpi">
+            <label>Target Hits</label>
+            <span id="dsTargetHits" class="ds-kpi-value">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Plan & Revision (combined card) -->
+      <div class="ds-card" id="dsPlanRevision" style="display:none">
+        <div class="ds-card-header">
+          <h2>Active Plan & Revision</h2>
+          <div class="ds-rev-badge" id="dsRevBadge" style="display:none"></div>
+        </div>
+        <div id="dsPlanBody"></div>
+        <div class="ds-revision-divider" id="dsRevDivider" style="display:none"></div>
+        <div id="dsRevisionBody" style="display:none"></div>
+      </div>
+
+      <!-- 4. Session Status Timeline (compact) -->
+      <div class="ds-card" id="dsTimeline" style="display:none">
+        <div class="ds-card-header"><h2>Session Timeline</h2></div>
+        <div class="ds-timeline" id="dsTimelineBody"></div>
+      </div>
+    </main>
+
+    <!-- ═══ RIGHT COLUMN: Orders, Events, Diagnostics (P2) ═══ -->
+    <aside class="ds3-right">
+      <div class="ds-card ds-orders-panel" id="dsOrdersPanel" style="display:none">
+        <div class="ds-card-header">
+          <h2>Execution</h2>
+          <div class="ds-tab-bar">
+            <button class="ds-tab active" onclick="switchTab('positions')">Positions</button>
+            <button class="ds-tab" onclick="switchTab('orders')">Orders</button>
+            <button class="ds-tab" onclick="switchTab('events')">Events</button>
           </div>
         </div>
 
-        <!-- 3.2.4 Profit Target & Costs -->
-        <div class="ds-setup-block">
-          <h3>Profit Target & Costs</h3>
-          <div class="ds-form-grid">
-            <div class="ds-form-row">
-              <label>Target Net Profit / Trade (USDT)</label>
-              <input type="number" id="dsFTarget" value="1.5" min="0.5" max="50" step="0.5">
-            </div>
-            <div class="ds-form-row">
-              <label>Cost Filter Enabled</label>
-              <input type="checkbox" id="dsFCostFilter" checked>
-            </div>
-            <div class="ds-form-row">
-              <label>Est. Taker Fee (%)</label>
-              <input type="text" value="0.046%" readonly>
-            </div>
-            <div class="ds-form-row">
-              <label>Est. Slippage (bps)</label>
-              <input type="number" id="dsFSlippage" value="2" min="0" max="10" step="1">
-            </div>
-            <div class="ds-form-row">
-              <label>Min Expected Net Profit</label>
-              <span id="dsFMinNet" class="ds-calc-value">$1.50</span>
-            </div>
+        <!-- Positions Tab -->
+        <div id="dsTabPositions" class="ds-tab-content">
+          <table class="ds-table ds-table-compact">
+            <thead><tr>
+              <th>#</th><th>Side</th><th>Lev</th><th>Entry</th>
+              <th>PnL</th><th>Status</th>
+            </tr></thead>
+            <tbody id="dsPositionsBody"></tbody>
+          </table>
+        </div>
+
+        <!-- Orders Tab -->
+        <div id="dsTabOrders" class="ds-tab-content" style="display:none">
+          <div class="ds-tab-filter">
+            <select id="dsOrdersFilter" onchange="renderOrders()">
+              <option value="">All</option>
+              <option value="PLANNED">Planned</option>
+              <option value="TRIGGERED">Triggered</option>
+              <option value="EXPIRED">Expired</option>
+              <option value="CANCELLED">Cancelled</option>
+            </select>
           </div>
+          <table class="ds-table ds-table-compact">
+            <thead><tr>
+              <th>Side</th><th>Zone</th><th>SL</th><th>Lev</th><th>Share</th><th>Status</th>
+            </tr></thead>
+            <tbody id="dsOrdersBody"></tbody>
+          </table>
         </div>
 
-        <!-- 3.2.5 Review & Launch -->
-        <div class="ds-setup-block ds-launch-block">
-          <h3>Review & Launch</h3>
-          <div id="dsReviewSummary" class="ds-review-summary"></div>
-          <div class="ds-launch-buttons">
-            <button class="ds-btn ds-btn-start" onclick="launchSession()">🚀 Launch Session</button>
-            <button class="ds-btn ds-btn-secondary" onclick="savePreset()">💾 Save Preset</button>
-            <button class="ds-btn ds-btn-secondary" onclick="resetForm()">🔄 Reset</button>
+        <!-- Events Tab (collapsed by default) -->
+        <div id="dsTabEvents" class="ds-tab-content" style="display:none">
+          <div class="ds-tab-filter">
+            <select id="dsEventsFilter" onchange="loadEvents()">
+              <option value="">All Events</option>
+              <option value="position_opened">Position Opened</option>
+              <option value="position_closed">Position Closed</option>
+              <option value="entry_rejected_cost_filter">Cost Rejection</option>
+              <option value="revision_continue">Rev: Continue</option>
+              <option value="revision_tighten">Rev: Tighten</option>
+              <option value="revision_pause">Rev: Pause</option>
+              <option value="session_stopped">Session Stopped</option>
+            </select>
+            <span class="ds-live-indicator" id="dsLiveIndicator">LIVE</span>
           </div>
-          <div id="dsLaunchResult" class="ds-cmd-result" style="display:none"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══ Session Selector ═══ -->
-    <div class="ds-card ds-selector-card" id="dsSelectorCard" style="display:none">
-      <div class="ds-selector-row">
-        <label>Active Session:</label>
-        <select id="dsSessionSelector" onchange="selectSession(this.value)"></select>
-        <button class="ds-btn ds-btn-secondary" onclick="loadSessionList()">🔄 Refresh</button>
-      </div>
-    </div>
-
-    <!-- ═══ ZONE 2: SESSION MONITOR PANEL ═══ -->
-
-    <!-- 4.2.1 Session Card -->
-    <div class="ds-card" id="dsHeader" style="display:none">
-      <div class="ds-card-header">
-        <h2>Session</h2>
-        <div class="ds-header-right">
-          <span class="ds-pipeline-label">BTCUSDT Perpetual · HTX · 8h Pipeline</span>
-          <span class="ds-status-badge" id="dsStatusBadge">—</span>
-        </div>
-      </div>
-      <div class="ds-grid-4">
-        <div class="ds-stat"><label>ID</label><span id="dsId">—</span></div>
-        <div class="ds-stat"><label>Symbol</label><span id="dsSymbol">—</span></div>
-        <div class="ds-stat"><label>Exchange</label><span id="dsExchange">HTX</span></div>
-        <div class="ds-stat"><label>Status</label><span id="dsStatus">—</span></div>
-        <div class="ds-stat"><label>Direction</label><span id="dsDirection">—</span></div>
-        <div class="ds-stat"><label>Horizon</label><span id="dsHorizon">—</span></div>
-        <div class="ds-stat"><label>Risk Mode</label><span id="dsRiskMode">—</span></div>
-        <div class="ds-stat"><label>Plan Version</label><span id="dsPlanVer">—</span></div>
-        <div class="ds-stat"><label>Start</label><span id="dsStart">—</span></div>
-        <div class="ds-stat"><label>End</label><span id="dsEnd">—</span></div>
-        <div class="ds-stat"><label>Target Profit / Trade</label><span id="dsTargetProfit">—</span></div>
-        <div class="ds-stat"><label>Max Duration</label><span id="dsMaxDuration">—</span></div>
-        <div class="ds-stat"><label>Max Session DD</label><span id="dsMaxSessionDD">—</span></div>
-        <div class="ds-stat"><label>Failed Entries</label><span id="dsFailedEntries">—</span></div>
-        <div class="ds-stat"><label>Last Command</label><span id="dsLastCmd">—</span></div>
-        <div class="ds-stat"><label>Goal Profile</label><span id="dsGoalProfile">—</span></div>
-      </div>
-    </div>
-
-    <!-- Control Buttons (ТЗ 5.3) -->
-    <div class="ds-card" id="dsControls" style="display:none">
-      <div class="ds-card-header"><h2>Execution Control</h2></div>
-      <div class="ds-control-buttons">
-        <button class="ds-btn ds-btn-continue" onclick="sendCommand('continue')">▶ Continue</button>
-        <button class="ds-btn ds-btn-tighten" onclick="sendCommand('tighten')">🔒 Tighten</button>
-        <button class="ds-btn ds-btn-reduce" onclick="sendCommand('reduce')">📉 Reduce</button>
-        <button class="ds-btn ds-btn-pause" onclick="sendCommand('pause')">⏸ Pause</button>
-        <button class="ds-btn ds-btn-close" onclick="sendCommand('close_all')">✖ Close All</button>
-      </div>
-      <div id="dsCmdResult" class="ds-cmd-result" style="display:none"></div>
-    </div>
-
-    <!-- 4.2.2 Metrics Grid -->
-    <div class="ds-card" id="dsMetrics" style="display:none">
-      <div class="ds-card-header"><h2>Metrics</h2></div>
-      <div class="ds-grid-4">
-        <div class="ds-stat"><label>Trades</label><span id="dsTrades">—</span></div>
-        <div class="ds-stat"><label>Win / Loss</label><span id="dsWL">—</span></div>
-        <div class="ds-stat"><label>Liquidations</label><span id="dsLiq">—</span></div>
-        <div class="ds-stat"><label>Total PnL</label><span id="dsPnl">—</span></div>
-        <div class="ds-stat"><label>PnL %</label><span id="dsPnlPct">—</span></div>
-        <div class="ds-stat"><label>Net PnL (after costs)</label><span id="dsNetPnl">—</span></div>
-        <div class="ds-stat"><label>Gross PnL</label><span id="dsGrossPnl">—</span></div>
-        <div class="ds-stat"><label>Fees</label><span id="dsFees">—</span></div>
-        <div class="ds-stat"><label>Slippage</label><span id="dsSlip">—</span></div>
-        <div class="ds-stat"><label>Max Drawdown</label><span id="dsMaxDd">—</span></div>
-        <div class="ds-stat"><label>Profit Factor</label><span id="dsPf">—</span></div>
-        <div class="ds-stat"><label>Time in Market</label><span id="dsTim">—</span></div>
-        <div class="ds-stat"><label>Avg Trade Duration</label><span id="dsAvgDur">—</span></div>
-        <div class="ds-stat"><label>Cost Filter Rejections</label><span id="dsCostRej">—</span></div>
-        <div class="ds-stat"><label>Target Hits</label><span id="dsTargetHits">—</span></div>
-      </div>
-    </div>
-
-    <!-- 4.2.3 Active Plan Card -->
-    <div class="ds-card" id="dsPlan" style="display:none">
-      <div class="ds-card-header"><h2>Active Plan</h2></div>
-      <div id="dsPlanBody"></div>
-    </div>
-
-    <!-- Planned Entries -->
-    <div class="ds-card" id="dsEntries" style="display:none">
-      <div class="ds-card-header"><h2>Planned Entries</h2></div>
-      <table class="ds-table" id="dsEntriesTable">
-        <thead><tr><th>#</th><th>Side</th><th>Zone</th><th>SL</th><th>TP</th><th>Lev</th><th>Share</th><th>Status</th></tr></thead>
-        <tbody id="dsEntriesBody"></tbody>
-      </table>
-    </div>
-
-    <!-- Last Revision -->
-    <div class="ds-card" id="dsRevision" style="display:none">
-      <div class="ds-card-header"><h2>Last Revision</h2></div>
-      <div id="dsRevisionBody"></div>
-    </div>
-
-    <!-- ═══ ZONE 3: ORDERS & EVENTS PANEL ═══ -->
-    <div class="ds-card ds-orders-panel" id="dsOrdersPanel" style="display:none">
-      <div class="ds-card-header">
-        <h2>Orders & Events</h2>
-        <div class="ds-tab-bar">
-          <button class="ds-tab active" onclick="switchTab('positions')">Positions</button>
-          <button class="ds-tab" onclick="switchTab('orders')">Orders</button>
-          <button class="ds-tab" onclick="switchTab('events')">Execution Events</button>
+          <div class="ds-event-log ds-event-log-collapsed" id="dsEventsBody"></div>
+          <button class="ds-expand-btn" id="dsExpandEvents" onclick="toggleEventsExpand()">▼ Expand</button>
         </div>
       </div>
 
-      <!-- Positions Tab -->
-      <div id="dsTabPositions" class="ds-tab-content">
-        <table class="ds-table ds-table-wide">
-          <thead><tr>
-            <th>#</th><th>Symbol</th><th>Side</th><th>Margin</th><th>Lev</th>
-            <th>Entry</th><th>Mark</th><th>Size</th><th>Margin Used</th>
-            <th>Unreal. PnL</th><th>Real. PnL</th><th>Fees</th><th>Slip</th>
-            <th>Net PnL</th><th>Status</th><th>Open Time</th><th>Horizon</th>
-          </tr></thead>
-          <tbody id="dsPositionsBody"></tbody>
-        </table>
-      </div>
-
-      <!-- Orders Tab -->
-      <div id="dsTabOrders" class="ds-tab-content" style="display:none">
-        <div class="ds-tab-filter">
-          <select id="dsOrdersFilter" onchange="renderOrders()">
-            <option value="">All Statuses</option>
-            <option value="PLANNED">Planned</option>
-            <option value="TRIGGERED">Triggered</option>
-            <option value="EXPIRED">Expired</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
+      <!-- Debug Drawer (advanced mode only) -->
+      <div class="ds-card ds-debug-card" id="dsDebugCard" style="display:none">
+        <div class="ds-card-header">
+          <h2>Debug</h2>
+          <label class="ds-checkbox-row">
+            <input type="checkbox" id="dsAdvancedToggle" onchange="toggleAdvanced()">
+            <span>Advanced</span>
+          </label>
         </div>
-        <table class="ds-table ds-table-wide">
-          <thead><tr>
-            <th>Order ID</th><th>Type</th><th>Side</th><th>Price From</th><th>Price To</th>
-            <th>SL</th><th>TP</th><th>Lev</th><th>Share</th><th>Status</th><th>Reason</th>
-          </tr></thead>
-          <tbody id="dsOrdersBody"></tbody>
-        </table>
+        <div id="dsDebugBody" class="ds-debug-body" style="display:none"></div>
       </div>
-
-      <!-- Events Tab -->
-      <div id="dsTabEvents" class="ds-tab-content" style="display:none">
-        <div class="ds-tab-filter">
-          <select id="dsEventsFilter" onchange="loadEvents()">
-            <option value="">All Events</option>
-            <option value="position_opened">Position Opened</option>
-            <option value="position_closed">Position Closed</option>
-            <option value="entry_rejected_cost_filter">Cost Filter Rejection</option>
-            <option value="revision_continue">Revision: Continue</option>
-            <option value="revision_tighten">Revision: Tighten</option>
-            <option value="revision_pause">Revision: Pause</option>
-            <option value="session_stopped">Session Stopped</option>
-          </select>
-          <span class="ds-live-indicator" id="dsLiveIndicator">LIVE</span>
-        </div>
-        <div class="ds-event-log" id="dsEventsBody"></div>
-      </div>
-    </div>
+    </aside>
 
   </div>
 </section>
@@ -356,62 +360,27 @@ const RISK_DEFAULTS = {
 let currentSessionId = null;
 let allOrders = [];
 let allPositions = [];
+let allEvents = [];
+let advancedMode = false;
 
 function fmtPrice(v) { return v ? '$' + Number(v).toLocaleString('en', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '—'; }
 function fmtPnl(v) { if (v === null || v === undefined) return '—'; const n = Number(v); return (n >= 0 ? '+' : '') + n.toFixed(4); }
 
 // ─── Setup Panel ───
-function toggleSetupPanel() {
-  const body = document.getElementById('dsSetupBody');
-  const toggle = document.querySelector('.ds-setup-toggle');
-  if (body.style.display === 'none') { body.style.display = ''; toggle.textContent = '▼'; }
-  else { body.style.display = 'none'; toggle.textContent = '▶'; }
-}
-
 function updateHorizonDefaults() {
   const h = document.querySelector('input[name="dsFHorizon"]:checked').value;
   const d = HORIZON_DEFAULTS[h];
   document.getElementById('dsFTarget').value = d.target;
   document.getElementById('dsFMaxDur').value = d.max_dur;
-  updateReviewSummary();
 }
 
 function updateRiskDefaults() {
-  const r = document.getElementById('dsFRisk').value;
-  const d = RISK_DEFAULTS[r];
-  document.getElementById('dsFMaxDD').value = d.max_dd;
-  document.getElementById('dsFMaxFails').value = d.max_fails;
-  updateReviewSummary();
+  // risk defaults are informational; actual values come from backend
 }
 
 function updateBudgetSlider() {
   const v = document.getElementById('dsFBudget').value;
   document.getElementById('dsFBudgetSlider').value = Math.min(v, 500);
-  updateReviewSummary();
-}
-
-function updateReviewSummary() {
-  const dir = document.querySelector('input[name="dsFDirection"]:checked').value;
-  const hzn = document.querySelector('input[name="dsFHorizon"]:checked').value;
-  const risk = document.getElementById('dsFRisk').value;
-  const budget = document.getElementById('dsFBudget').value;
-  const target = document.getElementById('dsFTarget').value;
-  const dur = document.getElementById('dsFDuration').value;
-  const costFilter = document.getElementById('dsFCostFilter').checked;
-
-  document.getElementById('dsFMinNet').textContent = '$' + Number(target).toFixed(2);
-  document.getElementById('dsReviewSummary').innerHTML = `
-    <div class="ds-summary-grid">
-      <div><label>Instrument</label><span>BTCUSDT Perp · HTX</span></div>
-      <div><label>Direction</label><span>${dir.toUpperCase()}</span></div>
-      <div><label>Horizon</label><span>${hzn.toUpperCase()}</span></div>
-      <div><label>Duration</label><span>${dur}h</span></div>
-      <div><label>Risk</label><span>${risk}</span></div>
-      <div><label>Budget</label><span>$${budget}</span></div>
-      <div><label>Target Profit</label><span>$${target}</span></div>
-      <div><label>Cost Filter</label><span>${costFilter ? 'ON' : 'OFF'}</span></div>
-    </div>
-  `;
 }
 
 async function launchSession() {
@@ -451,23 +420,6 @@ async function launchSession() {
   }
 }
 
-function savePreset() {
-  const preset = {
-    direction: document.querySelector('input[name="dsFDirection"]:checked').value,
-    horizon: document.querySelector('input[name="dsFHorizon"]:checked').value,
-    risk: document.getElementById('dsFRisk').value,
-    budget: document.getElementById('dsFBudget').value,
-    target: document.getElementById('dsFTarget').value,
-    duration: document.getElementById('dsFDuration').value,
-  };
-  localStorage.setItem('wored_session_preset', JSON.stringify(preset));
-  const result = document.getElementById('dsLaunchResult');
-  result.style.display = '';
-  result.textContent = '✓ Preset saved';
-  result.className = 'ds-cmd-result ds-cmd-success';
-  setTimeout(() => { result.style.display = 'none'; }, 2000);
-}
-
 function resetForm() {
   document.querySelector('input[name="dsFDirection"][value="auto"]').checked = true;
   document.querySelector('input[name="dsFHorizon"][value="fast"]').checked = true;
@@ -475,11 +427,10 @@ function resetForm() {
   document.getElementById('dsFBudget').value = 100;
   document.getElementById('dsFBudgetSlider').value = 100;
   document.getElementById('dsFTarget').value = 1.5;
+  document.getElementById('dsFMaxDur').value = 15;
   document.getElementById('dsFDuration').value = 8;
   document.getElementById('dsFCostFilter').checked = true;
   updateHorizonDefaults();
-  updateRiskDefaults();
-  updateReviewSummary();
 }
 
 // ─── Session Selector ───
@@ -514,69 +465,89 @@ async function loadSession() {
     const data = await res.json();
 
     if (!data.session) {
-      document.querySelectorAll('.ds-card:not(#dsSetupPanel):not(#dsSelectorCard)').forEach(c => c.style.display = 'none');
+      document.getElementById('dsEmpty').style.display = '';
+      document.getElementById('dsHeader').style.display = 'none';
+      document.getElementById('dsHealth').style.display = 'none';
+      document.getElementById('dsPlanRevision').style.display = 'none';
+      document.getElementById('dsTimeline').style.display = 'none';
+      document.getElementById('dsOrdersPanel').style.display = 'none';
+      document.getElementById('dsControls').style.display = 'none';
       currentSessionId = null;
       return;
     }
 
     const s = data.session;
     currentSessionId = s.id;
+    document.getElementById('dsEmpty').style.display = 'none';
 
-    // Session Card
+    // Session Summary
     document.getElementById('dsHeader').style.display = '';
     document.getElementById('dsId').textContent = s.id.slice(0, 8);
-    document.getElementById('dsSymbol').textContent = s.symbol;
     document.getElementById('dsStatus').textContent = s.status;
     document.getElementById('dsDirection').textContent = s.tradedirection || 'auto';
     document.getElementById('dsHorizon').textContent = s.tradehorizon || 'fast';
     document.getElementById('dsRiskMode').textContent = s.riskmode || '—';
     document.getElementById('dsPlanVer').textContent = s.activeplanversion ?? '—';
-    document.getElementById('dsStart').textContent = s.sessionstart ? new Date(s.sessionstart).toLocaleString() : '—';
-    document.getElementById('dsEnd').textContent = s.sessionend ? new Date(s.sessionend).toLocaleString() : '—';
+    document.getElementById('dsStart').textContent = s.sessionstart ? new Date(s.sessionstart).toLocaleTimeString() : '—';
+    document.getElementById('dsEnd').textContent = s.sessionend ? new Date(s.sessionend).toLocaleTimeString() : '—';
     document.getElementById('dsTargetProfit').textContent = s.targetnetprofitusdt != null ? '$' + s.targetnetprofitusdt : '—';
     document.getElementById('dsMaxDuration').textContent = s.maxtradedurationminutes ? s.maxtradedurationminutes + 'm' : '—';
-    document.getElementById('dsMaxSessionDD').textContent = '—';
-    document.getElementById('dsFailedEntries').textContent = s.failedentries ?? '—';
     document.getElementById('dsLastCmd').textContent = s.lastcommand || '—';
-    document.getElementById('dsGoalProfile').textContent = s.sessiongoalprofile || '—';
+    document.getElementById('dsOpenPos').textContent = (data.trades || []).filter(t => t.status === 'open').length;
     const badge = document.getElementById('dsStatusBadge');
     badge.textContent = s.status;
     badge.style.color = STATUS_COLORS[s.status] || '#6b7280';
 
-    // Controls
+    // Execution Control
     if (s.status !== 'STOPPED' && s.status !== 'COMPLETED') {
       document.getElementById('dsControls').style.display = '';
     } else {
       document.getElementById('dsControls').style.display = 'none';
     }
 
-    // Metrics
+    // Health KPI Grid
     if (data.metrics) {
-      document.getElementById('dsMetrics').style.display = '';
+      document.getElementById('dsHealth').style.display = '';
       const m = data.metrics;
-      document.getElementById('dsTrades').textContent = m.tradecount;
-      document.getElementById('dsWL').textContent = m.wincount + '/' + m.losscount;
-      document.getElementById('dsLiq').textContent = m.liquidationcount;
+      const setVal = (id, val, isPct) => {
+        const el = document.getElementById(id);
+        el.textContent = val !== null && val !== undefined ? val : '—';
+        if (isPct && val !== null) el.textContent = val + '%';
+      };
+      document.getElementById('dsNetPnl').textContent = fmtPnl(m.netpnaftercostsusdt);
       document.getElementById('dsPnl').textContent = fmtPnl(m.totalpnlusdt);
       document.getElementById('dsPnlPct').textContent = fmtPnl(m.totalpnlpct) + '%';
-      document.getElementById('dsNetPnl').textContent = fmtPnl(m.netpnaftercostsusdt);
-      document.getElementById('dsGrossPnl').textContent = fmtPnl(m.grosspnlusdt);
-      document.getElementById('dsFees').textContent = fmtPnl(m.feesusdt);
-      document.getElementById('dsSlip').textContent = fmtPnl(m.slippageusdt);
       document.getElementById('dsMaxDd').textContent = Number(m.maxdrawdownpct).toFixed(2) + '%';
       document.getElementById('dsPf').textContent = m.profitfactor ? Number(m.profitfactor).toFixed(2) : 'N/A';
       document.getElementById('dsTim').textContent = m.timeinmarketpct ? Number(m.timeinmarketpct).toFixed(1) + '%' : '—';
+      document.getElementById('dsTrades').textContent = m.tradecount;
+      document.getElementById('dsWL').textContent = m.wincount + '/' + m.losscount;
+      document.getElementById('dsLiq').textContent = m.liquidationcount;
+      document.getElementById('dsGrossPnl').textContent = fmtPnl(m.grosspnlusdt);
+      document.getElementById('dsFees').textContent = fmtPnl(m.feesusdt);
+      document.getElementById('dsSlip').textContent = fmtPnl(m.slippageusdt);
       document.getElementById('dsAvgDur').textContent = m.avgtradedurationminutes ? Number(m.avgtradedurationminutes).toFixed(1) + 'm' : '—';
       document.getElementById('dsCostRej').textContent = m.rejectedbycostfiltercount ?? 0;
       document.getElementById('dsTargetHits').textContent = m.targethitscount ?? 0;
+
+      // Color PnL values
+      const colorize = (id, val) => {
+        const el = document.getElementById(id);
+        el.classList.remove('ds-profit', 'ds-loss');
+        if (val > 0) el.classList.add('ds-profit');
+        else if (val < 0) el.classList.add('ds-loss');
+      };
+      colorize('dsNetPnl', m.netpnaftercostsusdt);
+      colorize('dsPnl', m.totalpnlusdt);
     }
 
-    // Plan
+    // Plan & Revision (combined card)
+    if (data.plan || data.revision) {
+      document.getElementById('dsPlanRevision').style.display = '';
+    }
     if (data.plan) {
-      document.getElementById('dsPlan').style.display = '';
       const p = data.plan;
       const body = document.getElementById('dsPlanBody');
-      const tpArr = p.entries && p.entries[0] ? (p.entries[0].takeprofit || []) : [];
       body.innerHTML = `
         <div class="ds-grid-2">
           <div><label>Regime</label><span>${p.marketregime || '—'}</span></div>
@@ -595,43 +566,50 @@ async function loadSession() {
           <div class="ds-stat"><label>Max Positions</label><span>${p.sessionrisk.maxsimultaneouspositions}</span></div>
         </div>` : ''}
       `;
-
-      // Entries
-      if (p.entries && p.entries.length) {
-        document.getElementById('dsEntries').style.display = '';
-        const tbody = document.getElementById('dsEntriesBody');
-        tbody.innerHTML = p.entries.map((e, i) => `
-          <tr>
-            <td>${i + 1}</td>
-            <td class="${e.side === 'long' ? 'ds-long' : 'ds-short'}">${e.side.toUpperCase()}</td>
-            <td>${fmtPrice(e.entryzonefrom)} - ${fmtPrice(e.entryzoneto)}</td>
-            <td>${fmtPrice(e.stoploss)}</td>
-            <td>${(e.takeprofit || []).map(fmtPrice).join(', ')}</td>
-            <td>${e.leverage}x</td>
-            <td>${e.budgetsharepct}%</td>
-            <td class="ds-status-${e.status}">${e.status}</td>
-          </tr>
-        `).join('');
-      }
     }
-
-    // Revision
     if (data.revision) {
-      document.getElementById('dsRevision').style.display = '';
       const r = data.revision;
+      document.getElementById('dsRevDivider').style.display = '';
+      document.getElementById('dsRevisionBody').style.display = '';
+      document.getElementById('dsRevBadge').style.display = '';
+      document.getElementById('dsRevBadge').textContent = r.executioncommand;
       document.getElementById('dsRevisionBody').innerHTML = `
         <div class="ds-revision-item">
           <span class="ds-rev-cmd">${r.executioncommand}</span>
           <span class="ds-rev-time">${r.createdat ? new Date(r.createdat).toLocaleString() : ''}</span>
         </div>
       `;
+    } else {
+      document.getElementById('dsRevDivider').style.display = 'none';
+      document.getElementById('dsRevisionBody').style.display = 'none';
+      document.getElementById('dsRevBadge').style.display = 'none';
     }
 
-    // Orders & Events Panel
+    // Timeline (compact, from events)
+    if (data.events && data.events.length) {
+      document.getElementById('dsTimeline').style.display = '';
+      const body = document.getElementById('dsTimelineBody');
+      body.innerHTML = data.events.slice(0, 8).map(e => `
+        <div class="ds-timeline-item">
+          <span class="ds-timeline-dot ${e.eventtype}"></span>
+          <span class="ds-timeline-type">${e.eventtype.replace('revision_','').replace('position_','')}</span>
+          <span class="ds-timeline-states">${e.statebefore || ''} → ${e.stateafter || ''}</span>
+          <span class="ds-timeline-time">${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</span>
+        </div>
+      `).join('');
+    } else {
+      document.getElementById('dsTimeline').style.display = 'none';
+    }
+
+    // Right column: Execution panel
     document.getElementById('dsOrdersPanel').style.display = '';
     loadPositions();
     loadOrders();
     loadEvents();
+
+    // Debug
+    document.getElementById('dsDebugCard').style.display = '';
+    if (advancedMode) renderDebug(data);
 
     // SSE
     if (currentSessionId && !window.dsSSE) { startEventStream(currentSessionId); }
@@ -653,26 +631,15 @@ async function loadPositions() {
 
 function renderPositions() {
   const tbody = document.getElementById('dsPositionsBody');
-  if (!allPositions.length) { tbody.innerHTML = '<tr><td colspan="17" style="text-align:center;color:#7291a5">No positions</td></tr>'; return; }
+  if (!allPositions.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#7291a5;padding:12px">No positions</td></tr>'; return; }
   tbody.innerHTML = allPositions.map((p, i) => `
     <tr>
       <td>${i + 1}</td>
-      <td>${p.symbol}</td>
       <td class="${p.side === 'LONG' ? 'ds-long' : 'ds-short'}">${p.side}</td>
-      <td>${p.marginmode || '—'}</td>
       <td>${p.leverage}x</td>
       <td>${fmtPrice(p.entryprice)}</td>
-      <td>${fmtPrice(p.markprice)}</td>
-      <td>${p.sizeusdt ? '$' + p.sizeusdt.toFixed(2) : '—'}</td>
-      <td>${p.marginused ? '$' + p.marginused.toFixed(2) : '—'}</td>
-      <td class="${(p.unrealizedpnl || 0) >= 0 ? 'ds-profit' : 'ds-loss'}">${fmtPnl(p.unrealizedpnl)}</td>
-      <td class="${(p.realizedpnl || 0) >= 0 ? 'ds-profit' : 'ds-loss'}">${fmtPnl(p.realizedpnl)}</td>
-      <td>${fmtPnl(p.feesusdt)}</td>
-      <td>${fmtPnl(p.slippageusdt)}</td>
-      <td class="${(p.netpnl || 0) >= 0 ? 'ds-profit' : 'ds-loss'}">${fmtPnl(p.netpnl)}</td>
+      <td class="${(p.unrealizedpnl || p.realizedpnl || 0) >= 0 ? 'ds-profit' : 'ds-loss'}">${fmtPnl(p.unrealizedpnl || p.realizedpnl)}</td>
       <td class="ds-status-${p.status.toLowerCase()}">${p.status}</td>
-      <td>${p.opentime ? new Date(p.opentime).toLocaleTimeString() : '—'}</td>
-      <td>${p.tradehorizon || '—'}</td>
     </tr>
   `).join('');
 }
@@ -692,20 +659,15 @@ function renderOrders() {
   const filter = document.getElementById('dsOrdersFilter')?.value || '';
   const filtered = filter ? allOrders.filter(o => o.status === filter) : allOrders;
   const tbody = document.getElementById('dsOrdersBody');
-  if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:#7291a5">No orders</td></tr>'; return; }
+  if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#7291a5;padding:12px">No orders</td></tr>'; return; }
   tbody.innerHTML = filtered.map(o => `
     <tr>
-      <td>${o.id.slice(0, 8)}</td>
-      <td>${o.type}</td>
       <td class="${o.side === 'LONG' ? 'ds-long' : 'ds-short'}">${o.side}</td>
-      <td>${fmtPrice(o.pricefrom)}</td>
-      <td>${fmtPrice(o.priceto)}</td>
+      <td>${fmtPrice(o.pricefrom)} - ${fmtPrice(o.priceto)}</td>
       <td>${fmtPrice(o.stoploss)}</td>
-      <td>${(o.takeprofit || []).map(fmtPrice).join(', ')}</td>
       <td>${o.leverage}x</td>
       <td>${o.budgetsharepct}%</td>
       <td class="ds-status-${o.status.toLowerCase()}">${o.status}</td>
-      <td>${o.reason || '—'}</td>
     </tr>
   `).join('');
 }
@@ -718,18 +680,57 @@ async function loadEvents() {
     const url = `/api/daily-session/events?session_id=${currentSessionId}&limit=100` + (filter ? `&event_type=${filter}` : '');
     const res = await fetch(url);
     const data = await res.json();
-    const body = document.getElementById('dsEventsBody');
-    const events = data.events || [];
-    if (!events.length) { body.innerHTML = '<div style="text-align:center;color:#7291a5;padding:20px">No events</div>'; return; }
-    body.innerHTML = events.map(e => `
-      <div class="ds-event-item">
-        <span class="ds-event-type">${e.eventtype}</span>
-        <span class="ds-event-states">${e.statebefore || ''} → ${e.stateafter || ''}</span>
-        ${e.payloadsummary ? `<span class="ds-event-payload">${e.payloadsummary}</span>` : ''}
-        <span class="ds-event-time">${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</span>
-      </div>
-    `).join('');
+    allEvents = data.events || [];
+    renderEvents();
   } catch (err) { console.error('Events error:', err); }
+}
+
+function renderEvents() {
+  const body = document.getElementById('dsEventsBody');
+  if (!allEvents.length) { body.innerHTML = '<div style="text-align:center;color:#7291a5;padding:12px">No events</div>'; return; }
+  body.innerHTML = allEvents.map(e => `
+    <div class="ds-event-item">
+      <span class="ds-event-type">${e.eventtype.replace('revision_','').replace('position_','pos_')}</span>
+      <span class="ds-event-states">${e.statebefore || ''} → ${e.stateafter || ''}</span>
+      ${e.payloadsummary && advancedMode ? `<span class="ds-event-payload">${e.payloadsummary}</span>` : ''}
+      <span class="ds-event-time">${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</span>
+    </div>
+  `).join('');
+}
+
+function toggleEventsExpand() {
+  const log = document.getElementById('dsEventsBody');
+  const btn = document.getElementById('dsExpandEvents');
+  if (log.classList.contains('ds-event-log-collapsed')) {
+    log.classList.remove('ds-event-log-collapsed');
+    btn.textContent = '▲ Collapse';
+  } else {
+    log.classList.add('ds-event-log-collapsed');
+    btn.textContent = '▼ Expand';
+  }
+}
+
+// ─── Advanced / Debug ───
+function toggleAdvanced() {
+  advancedMode = document.getElementById('dsAdvancedToggle').checked;
+  document.getElementById('dsDebugBody').style.display = advancedMode ? '' : 'none';
+  if (advancedMode) loadSession(); // reload to show payload data
+  renderEvents(); // re-render events with/without payload
+}
+
+function renderDebug(data) {
+  const body = document.getElementById('dsDebugBody');
+  const debugData = {
+    session_id: data.session?.id,
+    status: data.session?.status,
+    plan_version: data.plan?.version,
+    events_count: data.events?.length,
+    trades_count: data.trades?.length,
+    raw_session: data.session,
+    raw_plan: data.plan,
+    raw_metrics: data.metrics,
+  };
+  body.innerHTML = `<pre class="ds-debug-pre">${JSON.stringify(debugData, null, 2)}</pre>`;
 }
 
 // ─── Tab Switching ───
@@ -786,7 +787,6 @@ function startEventStream(sessionId) {
 }
 
 // ─── Init ───
-updateReviewSummary();
 loadSessionList();
 loadSession();
 setInterval(loadSession, 10000);
