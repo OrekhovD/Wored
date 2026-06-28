@@ -2803,8 +2803,9 @@ async def api_daily_session_events(
     session_id: str = Query(...),
     limit: int = Query(50, ge=1, le=200),
     after: str | None = Query(None),
+    event_type: str | None = Query(None),
 ):
-    """ТЗ 5.4 — polling fallback for execution events."""
+    """ТЗ §5.2.3 — polling fallback for execution events with type filter."""
     require_api_auth(request)
 
     pool = request.app.state.pg_pool
@@ -2812,14 +2813,33 @@ async def api_daily_session_events(
         return JSONResponse({"session_id": session_id, "events": []}, status_code=503)
 
     async with pool.acquire() as conn:
-        if after:
+        if after and event_type:
+            events = await conn.fetch(
+                """
+                SELECT id, event_type, state_before, state_after, event_payload, created_at
+                FROM execution_events
+                WHERE session_id = $1 AND created_at > $2 AND event_type = $3
+                ORDER BY created_at DESC LIMIT $4
+                """,
+                session_id, after, event_type, limit,
+            )
+        elif event_type:
+            events = await conn.fetch(
+                """
+                SELECT id, event_type, state_before, state_after, event_payload, created_at
+                FROM execution_events
+                WHERE session_id = $1 AND event_type = $2
+                ORDER BY created_at DESC LIMIT $3
+                """,
+                session_id, event_type, limit,
+            )
+        elif after:
             events = await conn.fetch(
                 """
                 SELECT id, event_type, state_before, state_after, event_payload, created_at
                 FROM execution_events
                 WHERE session_id = $1 AND created_at > $2
-                ORDER BY created_at DESC
-                LIMIT $3
+                ORDER BY created_at DESC LIMIT $3
                 """,
                 session_id, after, limit,
             )
@@ -2829,8 +2849,7 @@ async def api_daily_session_events(
                 SELECT id, event_type, state_before, state_after, event_payload, created_at
                 FROM execution_events
                 WHERE session_id = $1
-                ORDER BY created_at DESC
-                LIMIT $2
+                ORDER BY created_at DESC LIMIT $2
                 """,
                 session_id, limit,
             )
@@ -2842,6 +2861,20 @@ async def api_daily_session_events(
             return json.loads(val)
         return dict(val)
 
+    def payload_summary(payload):
+        """Extract human-readable summary from event payload."""
+        if not payload:
+            return ""
+        p = safe_jsonb(payload)
+        if not p or not isinstance(p, dict):
+            return ""
+        parts = []
+        for k in ("side", "leverage", "entry_price", "reason_code", "close_reason",
+                     "expected_net_profit", "new_status", "command"):
+            if k in p:
+                parts.append(f"{k}={p[k]}")
+        return " | ".join(parts)
+
     return {
         "session_id": session_id,
         "events": [
@@ -2852,6 +2885,7 @@ async def api_daily_session_events(
                 "statebefore": (e["state_before"] or "").upper(),
                 "stateafter": (e["state_after"] or "").upper(),
                 "eventpayload": safe_jsonb(e["event_payload"]),
+                "payloadsummary": payload_summary(e["event_payload"]),
             }
             for e in events
         ],
@@ -2980,3 +3014,179 @@ async def unauthorized_handler(request: Request, exc: HTTPException):
     if request.url.path.startswith("/api/"):
         return JSONResponse(status_code=401, content={"detail": exc.detail})
     return RedirectResponse(url="/login", status_code=303)
+
+
+# ─── ТЗ Dashboard v2 — New API endpoints ─────────────────────────────
+
+@app.get("/api/daily-session/list")
+async def api_daily_session_list(
+    request: Request,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """ТЗ §6.2.3 — list sessions for selector."""
+    require_api_auth(request)
+
+    pool = request.app.state.pg_pool
+    if pool is None:
+        return JSONResponse({"sessions": [], "total": 0}, status_code=503)
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, status, risk_mode, symbol, session_start, session_end,
+                   active_plan_version, initial_budget_usdt, created_at,
+                   trade_direction, trade_horizon, target_net_profit_usdt,
+                   session_goal_profile
+            FROM trading_sessions
+            ORDER BY created_at DESC
+            LIMIT $1 OFFSET $2
+            """,
+            limit, offset,
+        )
+        total_row = await conn.fetchrow("SELECT count(*) as cnt FROM trading_sessions")
+
+    return {
+        "sessions": [
+            {
+                "id": str(r["id"]),
+                "status": r["status"].upper(),
+                "riskmode": r["risk_mode"],
+                "symbol": r["symbol"],
+                "sessionstart": serialize_dt(r["session_start"]),
+                "sessionend": serialize_dt(r["session_end"]),
+                "activeplanversion": r["active_plan_version"],
+                "budget": float(r["initial_budget_usdt"]),
+                "createdat": serialize_dt(r["created_at"]),
+                "tradedirection": r.get("trade_direction", "auto"),
+                "tradehorizon": r.get("trade_horizon", "fast"),
+                "targetnetprofitusdt": float(r.get("target_net_profit_usdt") or 1.5),
+                "sessiongoalprofile": r.get("session_goal_profile", "fast_profit"),
+            }
+            for r in rows
+        ],
+        "total": int(total_row["cnt"]) if total_row else 0,
+    }
+
+
+@app.get("/api/daily-session/positions")
+async def api_daily_session_positions(
+    request: Request,
+    session_id: str = Query(...),
+):
+    """ТЗ §5.2.1 — positions tab data."""
+    require_api_auth(request)
+
+    pool = request.app.state.pg_pool
+    if pool is None:
+        return JSONResponse({"positions": []}, status_code=503)
+
+    async with pool.acquire() as conn:
+        trades = await conn.fetch(
+            """
+            SELECT id, side, margin_mode, leverage, entry_price, exit_price,
+                   position_qty, position_notional_usdt, margin_used_usdt,
+                   open_fee_usdt, close_fee_usdt, realised_pnl_usdt,
+                   status, opened_at, closed_at, close_reason,
+                   trade_horizon, trade_direction, target_net_profit_usdt,
+                   expected_total_fees_usdt, expected_slippage_usdt,
+                   expected_net_profit_usdt, actual_trade_duration_minutes
+            FROM executed_trades
+            WHERE session_id = $1
+            ORDER BY opened_at DESC
+            """,
+            session_id,
+        )
+
+    def safe_float(v):
+        return float(v) if v is not None else None
+
+    return {
+        "session_id": session_id,
+        "positions": [
+            {
+                "id": str(t["id"]),
+                "symbol": "BTCUSDT",
+                "side": t["side"].upper(),
+                "marginmode": t["margin_mode"],
+                "leverage": t["leverage"],
+                "entryprice": safe_float(t["entry_price"]),
+                "exitprice": safe_float(t["exit_price"]),
+                "markprice": safe_float(t["exit_price"]) if t["status"] == "closed" else None,
+                "sizeusdt": safe_float(t["position_notional_usdt"]),
+                "marginused": safe_float(t["margin_used_usdt"]),
+                "unrealizedpnl": None if t["status"] == "closed" else safe_float(t["realised_pnl_usdt"]),
+                "realizedpnl": safe_float(t["realised_pnl_usdt"]) if t["status"] == "closed" else None,
+                "openfee": safe_float(t["open_fee_usdt"]),
+                "closefee": safe_float(t["close_fee_usdt"]),
+                "feesusdt": (safe_float(t["open_fee_usdt"]) or 0) + (safe_float(t["close_fee_usdt"]) or 0),
+                "slippageusdt": safe_float(t.get("expected_slippage_usdt")),
+                "netpnl": safe_float(t.get("expected_net_profit_usdt")),
+                "liquidationprice": None,
+                "status": t["status"].upper(),
+                "opentime": serialize_dt(t["opened_at"]),
+                "closetime": serialize_dt(t["closed_at"]),
+                "tradehorizon": t.get("trade_horizon"),
+                "targetnetprofit": safe_float(t.get("target_net_profit_usdt")),
+                "closereason": t["close_reason"],
+            }
+            for t in trades
+        ],
+    }
+
+
+@app.get("/api/daily-session/orders")
+async def api_daily_session_orders(
+    request: Request,
+    session_id: str = Query(...),
+):
+    """ТЗ §5.2.2 — orders tab data (from planned_entries)."""
+    require_api_auth(request)
+
+    pool = request.app.state.pg_pool
+    if pool is None:
+        return JSONResponse({"orders": []}, status_code=503)
+
+    async with pool.acquire() as conn:
+        entries = await conn.fetch(
+            """
+            SELECT id, side, status, entry_zone_from, entry_zone_to,
+                   stop_loss, take_profit_json, recommended_leverage,
+                   budget_share_pct, margin_mode, confirmation_rule,
+                   reason_code, created_at
+            FROM planned_entries
+            WHERE session_id = $1
+            ORDER BY created_at DESC
+            """,
+            session_id,
+        )
+
+    def safe_jsonb(val):
+        if val is None:
+            return None
+        if isinstance(val, str):
+            return json.loads(val)
+        return dict(val)
+
+    return {
+        "session_id": session_id,
+        "orders": [
+            {
+                "id": str(e["id"]),
+                "type": "conditional",
+                "side": e["side"].upper(),
+                "pricefrom": float(e["entry_zone_from"]),
+                "priceto": float(e["entry_zone_to"]),
+                "stoploss": float(e["stop_loss"]),
+                "takeprofit": safe_jsonb(e["take_profit_json"]),
+                "leverage": e["recommended_leverage"],
+                "budgetsharepct": float(e["budget_share_pct"]),
+                "marginmode": e["margin_mode"],
+                "status": e["status"].upper(),
+                "reason": e.get("reason_code"),
+                "confirmationrule": e["confirmation_rule"],
+                "createdat": serialize_dt(e["created_at"]),
+            }
+            for e in entries
+        ],
+    }

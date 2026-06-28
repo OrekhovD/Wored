@@ -1476,3 +1476,53 @@ a:focus-visible {
 .ds-event-new { background: rgba(34,197,94,0.1); border-left: 3px solid #22c55e; }
 .ds-no-trade { padding: 8px 12px; background: rgba(239,68,68,0.1); border-radius: 4px; margin-top: 8px; }
 .ds-no-trade label { color: #ef4444; font-weight: 600; }
+
+/* ─── ТЗ Dashboard v2 — Setup Panel, Tabs, Orders ─── */
+.ds-setup-panel { margin-bottom: 16px; }
+.ds-setup-toggle { cursor: pointer; font-size: 0.8rem; color: var(--muted,#7291a5); }
+.ds-setup-body { display: flex; flex-direction: column; gap: 16px; }
+.ds-setup-block { background: rgba(10,20,28,0.3); border-radius: 8px; padding: 14px 16px; }
+.ds-setup-block h3 { font-size: 0.82rem; font-weight: 600; color: #c5d4dd; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+.ds-form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.ds-form-row { display: flex; flex-direction: column; gap: 4px; }
+.ds-form-row label { font-size: 0.72rem; color: var(--muted,#7291a5); text-transform: uppercase; letter-spacing: 0.03em; }
+.ds-form-row input, .ds-form-row select { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; padding: 6px 10px; font-size: 0.85rem; color: #d3e0e8; }
+.ds-form-row input[readonly] { opacity: 0.6; }
+.ds-form-row input[type="range"] { padding: 0; }
+.ds-radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
+.ds-radio { font-size: 0.78rem; color: #a8c0ce; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+.ds-radio input { accent-color: #36c9dd; }
+.ds-leverage-policy { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.ds-leverage-policy label { font-size: 0.72rem; color: var(--muted,#7291a5); text-transform: uppercase; }
+.ds-lev-badge { font-size: 0.72rem; font-weight: 700; padding: 3px 8px; border-radius: 4px; background: rgba(54,201,221,0.15); color: #36c9dd; }
+.ds-launch-block { background: rgba(54,201,221,0.05); border: 1px solid rgba(54,201,221,0.15); }
+.ds-launch-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.ds-btn-start { background: #22c55e; }
+.ds-btn-start:hover { background: #16a34a; }
+.ds-btn-secondary { background: #475569; }
+.ds-btn-secondary:hover { background: #334155; }
+.ds-review-summary { margin: 8px 0; }
+.ds-summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+.ds-summary-grid > div { display: flex; flex-direction: column; gap: 2px; }
+.ds-summary-grid label { font-size: 0.68rem; color: var(--muted,#7291a5); text-transform: uppercase; }
+.ds-summary-grid span { font-size: 0.85rem; color: #d3e0e8; font-weight: 600; }
+.ds-calc-value { font-size: 0.9rem; font-weight: 700; color: #36c9dd; }
+.ds-header-right { display: flex; align-items: center; gap: 12px; }
+.ds-pipeline-label { font-size: 0.7rem; color: var(--muted,#7291a5); }
+.ds-selector-card { padding: 10px 20px; }
+.ds-selector-row { display: flex; align-items: center; gap: 10px; }
+.ds-selector-row label { font-size: 0.78rem; color: var(--muted,#7291a5); }
+.ds-selector-row select { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; padding: 4px 8px; font-size: 0.82rem; color: #d3e0e8; }
+.ds-orders-panel { margin-top: 16px; }
+.ds-tab-bar { display: flex; gap: 4px; }
+.ds-tab { padding: 4px 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.78rem; font-weight: 600; background: rgba(255,255,255,0.04); color: #7291a5; transition: all 0.15s; }
+.ds-tab.active { background: rgba(54,201,221,0.15); color: #36c9dd; }
+.ds-tab:hover { color: #c5d4dd; }
+.ds-tab-content { margin-top: 12px; }
+.ds-tab-filter { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ds-tab-filter select { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; padding: 4px 8px; font-size: 0.78rem; color: #d3e0e8; }
+.ds-table-wide { font-size: 0.78rem; }
+.ds-table-wide th { font-size: 0.68rem; white-space: nowrap; }
+.ds-table-wide td { white-space: nowrap; }
+.ds-event-payload { color: #f8b64c; font-size: 0.72rem; flex: 1; }
+@media (max-width:768px) { .ds-form-grid{grid-template-columns:1fr;} .ds-summary-grid{grid-template-columns:repeat(2,1fr);} }

@@ -2,84 +2,216 @@
 {% block content %}
 <section class="page-section">
   <div class="section-header">
-    <h1>Daily Trading Session</h1>
-    <div class="section-subtitle">BTCUSDT Perpetual · HTX · 8h Pipeline</div>
+    <h1>Daily Trading Session Dashboard</h1>
+    <div class="section-subtitle">BTCUSDT Perpetual · HTX · 8h Pipeline · Simulation</div>
   </div>
 
   <div id="dsContainer" class="ds-container">
-    <!-- §7 — Start Session Form (shown when no active session) -->
-    <div class="ds-card" id="dsStartForm" style="display:none">
-      <div class="ds-card-header"><h2>Start New Session</h2></div>
-      <div class="ds-start-form">
-        <div class="ds-form-row">
-          <label>Budget (USDT)</label>
-          <input type="number" id="dsFormBudget" value="100" min="10" max="1000" step="10">
+
+    <!-- ═══ ZONE 1: SESSION SETUP PANEL ═══ -->
+    <div class="ds-card ds-setup-panel" id="dsSetupPanel">
+      <div class="ds-card-header">
+        <h2>Session Setup</h2>
+        <span class="ds-setup-toggle" onclick="toggleSetupPanel()">▼</span>
+      </div>
+
+      <div id="dsSetupBody" class="ds-setup-body">
+        <!-- 3.2.1 Instrument & Market -->
+        <div class="ds-setup-block">
+          <h3>Instrument & Market</h3>
+          <div class="ds-form-grid">
+            <div class="ds-form-row">
+              <label>Symbol</label>
+              <select id="dsFSymbol" disabled>
+                <option value="BTCUSDT">BTCUSDT Perpetual (HTX)</option>
+              </select>
+            </div>
+            <div class="ds-form-row">
+              <label>Exchange</label>
+              <input type="text" value="HTX" readonly>
+            </div>
+            <div class="ds-form-row">
+              <label>Contract Type</label>
+              <input type="text" value="USDT-M Perpetual" readonly>
+            </div>
+            <div class="ds-form-row">
+              <label>Position Mode</label>
+              <input type="text" value="One-way" readonly>
+            </div>
+            <div class="ds-form-row">
+              <label>Margin Mode</label>
+              <select id="dsFMarginMode">
+                <option value="isolated">Isolated</option>
+                <option value="cross">Cross</option>
+              </select>
+            </div>
+          </div>
         </div>
-        <div class="ds-form-row">
-          <label>Risk Mode</label>
-          <select id="dsFormRisk">
-            <option value="balanced">Balanced</option>
-            <option value="defensive">Defensive</option>
-            <option value="aggressive">Aggressive</option>
-          </select>
+
+        <!-- 3.2.2 Trade Style & Horizon -->
+        <div class="ds-setup-block">
+          <h3>Trade Style & Horizon</h3>
+          <div class="ds-form-grid">
+            <div class="ds-form-row">
+              <label>Trade Direction</label>
+              <div class="ds-radio-group">
+                <label class="ds-radio"><input type="radio" name="dsFDirection" value="auto" checked> AUTO</label>
+                <label class="ds-radio"><input type="radio" name="dsFDirection" value="long"> LONG</label>
+                <label class="ds-radio"><input type="radio" name="dsFDirection" value="short"> SHORT</label>
+                <label class="ds-radio"><input type="radio" name="dsFDirection" value="both"> BOTH</label>
+              </div>
+            </div>
+            <div class="ds-form-row">
+              <label>Trade Horizon</label>
+              <div class="ds-radio-group">
+                <label class="ds-radio"><input type="radio" name="dsFHorizon" value="fast" checked onchange="updateHorizonDefaults()"> FAST</label>
+                <label class="ds-radio"><input type="radio" name="dsFHorizon" value="medium" onchange="updateHorizonDefaults()"> MEDIUM</label>
+                <label class="ds-radio"><input type="radio" name="dsFHorizon" value="long" onchange="updateHorizonDefaults()"> LONG</label>
+              </div>
+            </div>
+            <div class="ds-form-row">
+              <label>Session Duration</label>
+              <select id="dsFDuration">
+                <option value="4">4h</option>
+                <option value="8" selected>8h</option>
+                <option value="12">12h</option>
+              </select>
+            </div>
+            <div class="ds-form-row">
+              <label>Start Time</label>
+              <select id="dsFStartTime">
+                <option value="now" selected>Now</option>
+                <option value="schedule">Schedule</option>
+              </select>
+            </div>
+            <div class="ds-form-row">
+              <label>Execution Mode</label>
+              <input type="text" value="Simulation only" readonly>
+            </div>
+          </div>
         </div>
-        <div class="ds-form-row">
-          <label>Trade Direction</label>
-          <select id="dsFormDirection">
-            <option value="auto">Auto</option>
-            <option value="long">Long only</option>
-            <option value="short">Short only</option>
-            <option value="both">Both</option>
-          </select>
+
+        <!-- 3.2.3 Budget & Risk -->
+        <div class="ds-setup-block">
+          <h3>Budget & Risk</h3>
+          <div class="ds-form-grid">
+            <div class="ds-form-row">
+              <label>Budget (USDT)</label>
+              <input type="number" id="dsFBudget" value="100" min="25" max="1000" step="25" oninput="updateBudgetSlider()">
+              <input type="range" id="dsFBudgetSlider" min="25" max="500" step="25" value="100" oninput="document.getElementById('dsFBudget').value=this.value">
+            </div>
+            <div class="ds-form-row">
+              <label>Risk Mode</label>
+              <select id="dsFRisk" onchange="updateRiskDefaults()">
+                <option value="defensive">Defensive</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="aggressive">Aggressive</option>
+              </select>
+            </div>
+            <div class="ds-form-row">
+              <label>Max Session Drawdown %</label>
+              <input type="number" id="dsFMaxDD" value="6.0" step="0.5" readonly>
+            </div>
+            <div class="ds-form-row">
+              <label>Max Failed Entries</label>
+              <input type="number" id="dsFMaxFails" value="3" readonly>
+            </div>
+            <div class="ds-form-row">
+              <label>Max Simultaneous Positions</label>
+              <input type="number" id="dsFMaxPos" value="1" readonly>
+            </div>
+            <div class="ds-form-row">
+              <label>Max Trade Duration (min)</label>
+              <input type="number" id="dsFMaxDur" value="15" min="5" max="480" step="5">
+            </div>
+          </div>
+          <div class="ds-leverage-policy">
+            <label>Leverage Policy:</label>
+            <span class="ds-lev-badge">100x</span>
+            <span class="ds-lev-badge">125x</span>
+            <span class="ds-lev-badge">150x</span>
+            <span class="ds-lev-badge">200x</span>
+          </div>
         </div>
-        <div class="ds-form-row">
-          <label>Trade Horizon</label>
-          <select id="dsFormHorizon">
-            <option value="fast">Fast (15min, target 1.5 USDT)</option>
-            <option value="medium">Medium (90min, target 3.0 USDT)</option>
-            <option value="long">Long (8h, target 5.0 USDT)</option>
-          </select>
+
+        <!-- 3.2.4 Profit Target & Costs -->
+        <div class="ds-setup-block">
+          <h3>Profit Target & Costs</h3>
+          <div class="ds-form-grid">
+            <div class="ds-form-row">
+              <label>Target Net Profit / Trade (USDT)</label>
+              <input type="number" id="dsFTarget" value="1.5" min="0.5" max="50" step="0.5">
+            </div>
+            <div class="ds-form-row">
+              <label>Cost Filter Enabled</label>
+              <input type="checkbox" id="dsFCostFilter" checked>
+            </div>
+            <div class="ds-form-row">
+              <label>Est. Taker Fee (%)</label>
+              <input type="text" value="0.046%" readonly>
+            </div>
+            <div class="ds-form-row">
+              <label>Est. Slippage (bps)</label>
+              <input type="number" id="dsFSlippage" value="2" min="0" max="10" step="1">
+            </div>
+            <div class="ds-form-row">
+              <label>Min Expected Net Profit</label>
+              <span id="dsFMinNet" class="ds-calc-value">$1.50</span>
+            </div>
+          </div>
         </div>
-        <div class="ds-form-row">
-          <label>Target Net Profit (USDT)</label>
-          <input type="number" id="dsFormTarget" value="1.5" min="0.5" max="50" step="0.5">
+
+        <!-- 3.2.5 Review & Launch -->
+        <div class="ds-setup-block ds-launch-block">
+          <h3>Review & Launch</h3>
+          <div id="dsReviewSummary" class="ds-review-summary"></div>
+          <div class="ds-launch-buttons">
+            <button class="ds-btn ds-btn-start" onclick="launchSession()">🚀 Launch Session</button>
+            <button class="ds-btn ds-btn-secondary" onclick="savePreset()">💾 Save Preset</button>
+            <button class="ds-btn ds-btn-secondary" onclick="resetForm()">🔄 Reset</button>
+          </div>
+          <div id="dsLaunchResult" class="ds-cmd-result" style="display:none"></div>
         </div>
-        <div class="ds-form-row">
-          <label>Max Trade Duration (min)</label>
-          <input type="number" id="dsFormMaxDur" value="15" min="5" max="480" step="5">
-        </div>
-        <div class="ds-form-row ds-form-check">
-          <input type="checkbox" id="dsFormCostFilter" checked>
-          <label for="dsFormCostFilter">Cost Filter Enabled</label>
-        </div>
-        <button class="ds-btn ds-btn-start" onclick="startSessionFromForm()">🚀 Start Session</button>
-        <div id="dsStartResult" class="ds-cmd-result" style="display:none"></div>
       </div>
     </div>
 
-    <div class="ds-empty" id="dsEmpty">
-      <p>No active session. Start one via Telegram (<code>старт сессии</code>) or the form above.</p>
+    <!-- ═══ Session Selector ═══ -->
+    <div class="ds-card ds-selector-card" id="dsSelectorCard" style="display:none">
+      <div class="ds-selector-row">
+        <label>Active Session:</label>
+        <select id="dsSessionSelector" onchange="selectSession(this.value)"></select>
+        <button class="ds-btn ds-btn-secondary" onclick="loadSessionList()">🔄 Refresh</button>
+      </div>
     </div>
 
-    <!-- Session Header -->
+    <!-- ═══ ZONE 2: SESSION MONITOR PANEL ═══ -->
+
+    <!-- 4.2.1 Session Card -->
     <div class="ds-card" id="dsHeader" style="display:none">
       <div class="ds-card-header">
         <h2>Session</h2>
-        <span class="ds-status-badge" id="dsStatusBadge">—</span>
+        <div class="ds-header-right">
+          <span class="ds-pipeline-label">BTCUSDT Perpetual · HTX · 8h Pipeline</span>
+          <span class="ds-status-badge" id="dsStatusBadge">—</span>
+        </div>
       </div>
       <div class="ds-grid-4">
         <div class="ds-stat"><label>ID</label><span id="dsId">—</span></div>
         <div class="ds-stat"><label>Symbol</label><span id="dsSymbol">—</span></div>
-        <div class="ds-stat"><label>Risk Mode</label><span id="dsRiskMode">—</span></div>
-        <div class="ds-stat"><label>Failed Entries</label><span id="dsFailedEntries">—</span></div>
-        <div class="ds-stat"><label>Start</label><span id="dsStart">—</span></div>
-        <div class="ds-stat"><label>End</label><span id="dsEnd">—</span></div>
-        <div class="ds-stat"><label>Plan v</label><span id="dsPlanVer">—</span></div>
-        <div class="ds-stat"><label>Last Command</label><span id="dsLastCmd">—</span></div>
+        <div class="ds-stat"><label>Exchange</label><span id="dsExchange">HTX</span></div>
+        <div class="ds-stat"><label>Status</label><span id="dsStatus">—</span></div>
         <div class="ds-stat"><label>Direction</label><span id="dsDirection">—</span></div>
         <div class="ds-stat"><label>Horizon</label><span id="dsHorizon">—</span></div>
-        <div class="ds-stat"><label>Target Profit</label><span id="dsTargetProfit">—</span></div>
+        <div class="ds-stat"><label>Risk Mode</label><span id="dsRiskMode">—</span></div>
+        <div class="ds-stat"><label>Plan Version</label><span id="dsPlanVer">—</span></div>
+        <div class="ds-stat"><label>Start</label><span id="dsStart">—</span></div>
+        <div class="ds-stat"><label>End</label><span id="dsEnd">—</span></div>
+        <div class="ds-stat"><label>Target Profit / Trade</label><span id="dsTargetProfit">—</span></div>
         <div class="ds-stat"><label>Max Duration</label><span id="dsMaxDuration">—</span></div>
+        <div class="ds-stat"><label>Max Session DD</label><span id="dsMaxSessionDD">—</span></div>
+        <div class="ds-stat"><label>Failed Entries</label><span id="dsFailedEntries">—</span></div>
+        <div class="ds-stat"><label>Last Command</label><span id="dsLastCmd">—</span></div>
+        <div class="ds-stat"><label>Goal Profile</label><span id="dsGoalProfile">—</span></div>
       </div>
     </div>
 
@@ -96,29 +228,29 @@
       <div id="dsCmdResult" class="ds-cmd-result" style="display:none"></div>
     </div>
 
-    <!-- Metrics -->
+    <!-- 4.2.2 Metrics Grid -->
     <div class="ds-card" id="dsMetrics" style="display:none">
       <div class="ds-card-header"><h2>Metrics</h2></div>
       <div class="ds-grid-4">
         <div class="ds-stat"><label>Trades</label><span id="dsTrades">—</span></div>
-        <div class="ds-stat"><label>W/L</label><span id="dsWL">—</span></div>
+        <div class="ds-stat"><label>Win / Loss</label><span id="dsWL">—</span></div>
         <div class="ds-stat"><label>Liquidations</label><span id="dsLiq">—</span></div>
         <div class="ds-stat"><label>Total PnL</label><span id="dsPnl">—</span></div>
         <div class="ds-stat"><label>PnL %</label><span id="dsPnlPct">—</span></div>
-        <div class="ds-stat"><label>Max DD</label><span id="dsMaxDd">—</span></div>
-        <div class="ds-stat"><label>Profit Factor</label><span id="dsPf">—</span></div>
-        <div class="ds-stat"><label>Time in Market</label><span id="dsTim">—</span></div>
         <div class="ds-stat"><label>Net PnL (after costs)</label><span id="dsNetPnl">—</span></div>
         <div class="ds-stat"><label>Gross PnL</label><span id="dsGrossPnl">—</span></div>
         <div class="ds-stat"><label>Fees</label><span id="dsFees">—</span></div>
         <div class="ds-stat"><label>Slippage</label><span id="dsSlip">—</span></div>
+        <div class="ds-stat"><label>Max Drawdown</label><span id="dsMaxDd">—</span></div>
+        <div class="ds-stat"><label>Profit Factor</label><span id="dsPf">—</span></div>
+        <div class="ds-stat"><label>Time in Market</label><span id="dsTim">—</span></div>
         <div class="ds-stat"><label>Avg Trade Duration</label><span id="dsAvgDur">—</span></div>
         <div class="ds-stat"><label>Cost Filter Rejections</label><span id="dsCostRej">—</span></div>
         <div class="ds-stat"><label>Target Hits</label><span id="dsTargetHits">—</span></div>
       </div>
     </div>
 
-    <!-- Plan -->
+    <!-- 4.2.3 Active Plan Card -->
     <div class="ds-card" id="dsPlan" style="display:none">
       <div class="ds-card-header"><h2>Active Plan</h2></div>
       <div id="dsPlanBody"></div>
@@ -133,29 +265,75 @@
       </table>
     </div>
 
-    <!-- Trades -->
-    <div class="ds-card" id="dsTradesCard" style="display:none">
-      <div class="ds-card-header"><h2>Executed Trades</h2></div>
-      <table class="ds-table" id="dsTradesTable">
-        <thead><tr><th>ID</th><th>Side</th><th>Lev</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Reason</th><th>Status</th></tr></thead>
-        <tbody id="dsTradesBody"></tbody>
-      </table>
-    </div>
-
     <!-- Last Revision -->
     <div class="ds-card" id="dsRevision" style="display:none">
       <div class="ds-card-header"><h2>Last Revision</h2></div>
       <div id="dsRevisionBody"></div>
     </div>
 
-    <!-- Event Log (live SSE) -->
-    <div class="ds-card" id="dsEvents" style="display:none">
+    <!-- ═══ ZONE 3: ORDERS & EVENTS PANEL ═══ -->
+    <div class="ds-card ds-orders-panel" id="dsOrdersPanel" style="display:none">
       <div class="ds-card-header">
-        <h2>Execution Event Log</h2>
-        <span class="ds-live-indicator" id="dsLiveIndicator">LIVE</span>
+        <h2>Orders & Events</h2>
+        <div class="ds-tab-bar">
+          <button class="ds-tab active" onclick="switchTab('positions')">Positions</button>
+          <button class="ds-tab" onclick="switchTab('orders')">Orders</button>
+          <button class="ds-tab" onclick="switchTab('events')">Execution Events</button>
+        </div>
       </div>
-      <div class="ds-event-log" id="dsEventsBody"></div>
+
+      <!-- Positions Tab -->
+      <div id="dsTabPositions" class="ds-tab-content">
+        <table class="ds-table ds-table-wide">
+          <thead><tr>
+            <th>#</th><th>Symbol</th><th>Side</th><th>Margin</th><th>Lev</th>
+            <th>Entry</th><th>Mark</th><th>Size</th><th>Margin Used</th>
+            <th>Unreal. PnL</th><th>Real. PnL</th><th>Fees</th><th>Slip</th>
+            <th>Net PnL</th><th>Status</th><th>Open Time</th><th>Horizon</th>
+          </tr></thead>
+          <tbody id="dsPositionsBody"></tbody>
+        </table>
+      </div>
+
+      <!-- Orders Tab -->
+      <div id="dsTabOrders" class="ds-tab-content" style="display:none">
+        <div class="ds-tab-filter">
+          <select id="dsOrdersFilter" onchange="renderOrders()">
+            <option value="">All Statuses</option>
+            <option value="PLANNED">Planned</option>
+            <option value="TRIGGERED">Triggered</option>
+            <option value="EXPIRED">Expired</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+        </div>
+        <table class="ds-table ds-table-wide">
+          <thead><tr>
+            <th>Order ID</th><th>Type</th><th>Side</th><th>Price From</th><th>Price To</th>
+            <th>SL</th><th>TP</th><th>Lev</th><th>Share</th><th>Status</th><th>Reason</th>
+          </tr></thead>
+          <tbody id="dsOrdersBody"></tbody>
+        </table>
+      </div>
+
+      <!-- Events Tab -->
+      <div id="dsTabEvents" class="ds-tab-content" style="display:none">
+        <div class="ds-tab-filter">
+          <select id="dsEventsFilter" onchange="loadEvents()">
+            <option value="">All Events</option>
+            <option value="position_opened">Position Opened</option>
+            <option value="position_closed">Position Closed</option>
+            <option value="entry_rejected_cost_filter">Cost Filter Rejection</option>
+            <option value="revision_continue">Revision: Continue</option>
+            <option value="revision_tighten">Revision: Tighten</option>
+            <option value="revision_pause">Revision: Pause</option>
+            <option value="session_stopped">Session Stopped</option>
+          </select>
+          <span class="ds-live-indicator" id="dsLiveIndicator">LIVE</span>
+        </div>
+        <div class="ds-event-log" id="dsEventsBody"></div>
+      </div>
     </div>
+
   </div>
 </section>
 
@@ -164,52 +342,212 @@ const STATUS_COLORS = {
   IDLE: '#6b7280', ARMED: '#f59e0b', IN_POSITION: '#10b981',
   COOLDOWN: '#3b82f6', PAUSED: '#a855f7', STOPPED: '#ef4444', COMPLETED: '#22c55e'
 };
+const HORIZON_DEFAULTS = {
+  fast:   { target: 1.5, max_dur: 15 },
+  medium: { target: 3.0, max_dur: 90 },
+  long:   { target: 5.0, max_dur: 480 }
+};
+const RISK_DEFAULTS = {
+  defensive: { max_dd: 4.0, max_fails: 2 },
+  balanced:  { max_dd: 6.0, max_fails: 3 },
+  aggressive:{ max_dd: 8.0, max_fails: 4 }
+};
+
+let currentSessionId = null;
+let allOrders = [];
+let allPositions = [];
 
 function fmtPrice(v) { return v ? '$' + Number(v).toLocaleString('en', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '—'; }
 function fmtPnl(v) { if (v === null || v === undefined) return '—'; const n = Number(v); return (n >= 0 ? '+' : '') + n.toFixed(4); }
 
-let currentSessionId = null;
+// ─── Setup Panel ───
+function toggleSetupPanel() {
+  const body = document.getElementById('dsSetupBody');
+  const toggle = document.querySelector('.ds-setup-toggle');
+  if (body.style.display === 'none') { body.style.display = ''; toggle.textContent = '▼'; }
+  else { body.style.display = 'none'; toggle.textContent = '▶'; }
+}
 
+function updateHorizonDefaults() {
+  const h = document.querySelector('input[name="dsFHorizon"]:checked').value;
+  const d = HORIZON_DEFAULTS[h];
+  document.getElementById('dsFTarget').value = d.target;
+  document.getElementById('dsFMaxDur').value = d.max_dur;
+  updateReviewSummary();
+}
+
+function updateRiskDefaults() {
+  const r = document.getElementById('dsFRisk').value;
+  const d = RISK_DEFAULTS[r];
+  document.getElementById('dsFMaxDD').value = d.max_dd;
+  document.getElementById('dsFMaxFails').value = d.max_fails;
+  updateReviewSummary();
+}
+
+function updateBudgetSlider() {
+  const v = document.getElementById('dsFBudget').value;
+  document.getElementById('dsFBudgetSlider').value = Math.min(v, 500);
+  updateReviewSummary();
+}
+
+function updateReviewSummary() {
+  const dir = document.querySelector('input[name="dsFDirection"]:checked').value;
+  const hzn = document.querySelector('input[name="dsFHorizon"]:checked').value;
+  const risk = document.getElementById('dsFRisk').value;
+  const budget = document.getElementById('dsFBudget').value;
+  const target = document.getElementById('dsFTarget').value;
+  const dur = document.getElementById('dsFDuration').value;
+  const costFilter = document.getElementById('dsFCostFilter').checked;
+
+  document.getElementById('dsFMinNet').textContent = '$' + Number(target).toFixed(2);
+  document.getElementById('dsReviewSummary').innerHTML = `
+    <div class="ds-summary-grid">
+      <div><label>Instrument</label><span>BTCUSDT Perp · HTX</span></div>
+      <div><label>Direction</label><span>${dir.toUpperCase()}</span></div>
+      <div><label>Horizon</label><span>${hzn.toUpperCase()}</span></div>
+      <div><label>Duration</label><span>${dur}h</span></div>
+      <div><label>Risk</label><span>${risk}</span></div>
+      <div><label>Budget</label><span>$${budget}</span></div>
+      <div><label>Target Profit</label><span>$${target}</span></div>
+      <div><label>Cost Filter</label><span>${costFilter ? 'ON' : 'OFF'}</span></div>
+    </div>
+  `;
+}
+
+async function launchSession() {
+  const result = document.getElementById('dsLaunchResult');
+  result.style.display = '';
+  result.textContent = 'Launching...';
+  result.className = 'ds-cmd-result ds-cmd-pending';
+
+  const body = {
+    budget_usdt: parseFloat(document.getElementById('dsFBudget').value) || 100,
+    risk_mode: document.getElementById('dsFRisk').value,
+    duration_hours: parseInt(document.getElementById('dsFDuration').value) || 8,
+    trade_direction: document.querySelector('input[name="dsFDirection"]:checked').value,
+    trade_horizon: document.querySelector('input[name="dsFHorizon"]:checked').value,
+    target_net_profit_usdt: parseFloat(document.getElementById('dsFTarget').value) || 1.5,
+    max_trade_duration_minutes: parseInt(document.getElementById('dsFMaxDur').value) || 15,
+    cost_filter_enabled: document.getElementById('dsFCostFilter').checked,
+  };
+
+  try {
+    const res = await fetch('/api/daily-session/start', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.ok) {
+      result.textContent = `✓ Session ${data.session_id.slice(0, 8)} — ${data.status}`;
+      result.className = 'ds-cmd-result ds-cmd-success';
+      setTimeout(() => { loadSessionList(); loadSession(); }, 1500);
+    } else {
+      result.textContent = `✗ ${data.error || 'failed'}`;
+      result.className = 'ds-cmd-result ds-cmd-error';
+    }
+  } catch (err) {
+    result.textContent = `✗ ${err.message}`;
+    result.className = 'ds-cmd-result ds-cmd-error';
+  }
+}
+
+function savePreset() {
+  const preset = {
+    direction: document.querySelector('input[name="dsFDirection"]:checked').value,
+    horizon: document.querySelector('input[name="dsFHorizon"]:checked').value,
+    risk: document.getElementById('dsFRisk').value,
+    budget: document.getElementById('dsFBudget').value,
+    target: document.getElementById('dsFTarget').value,
+    duration: document.getElementById('dsFDuration').value,
+  };
+  localStorage.setItem('wored_session_preset', JSON.stringify(preset));
+  const result = document.getElementById('dsLaunchResult');
+  result.style.display = '';
+  result.textContent = '✓ Preset saved';
+  result.className = 'ds-cmd-result ds-cmd-success';
+  setTimeout(() => { result.style.display = 'none'; }, 2000);
+}
+
+function resetForm() {
+  document.querySelector('input[name="dsFDirection"][value="auto"]').checked = true;
+  document.querySelector('input[name="dsFHorizon"][value="fast"]').checked = true;
+  document.getElementById('dsFRisk').value = 'balanced';
+  document.getElementById('dsFBudget').value = 100;
+  document.getElementById('dsFBudgetSlider').value = 100;
+  document.getElementById('dsFTarget').value = 1.5;
+  document.getElementById('dsFDuration').value = 8;
+  document.getElementById('dsFCostFilter').checked = true;
+  updateHorizonDefaults();
+  updateRiskDefaults();
+  updateReviewSummary();
+}
+
+// ─── Session Selector ───
+async function loadSessionList() {
+  try {
+    const res = await fetch('/api/daily-session/list?limit=20');
+    const data = await res.json();
+    const sel = document.getElementById('dsSessionSelector');
+    if (data.sessions && data.sessions.length > 0) {
+      document.getElementById('dsSelectorCard').style.display = '';
+      sel.innerHTML = data.sessions.map(s =>
+        `<option value="${s.id}" ${s.id === currentSessionId ? 'selected' : ''}>${s.id.slice(0,8)} · ${s.status} · ${s.riskmode}</option>`
+      ).join('');
+    } else {
+      document.getElementById('dsSelectorCard').style.display = 'none';
+    }
+  } catch (err) { console.error('Session list error:', err); }
+}
+
+function selectSession(sessionId) {
+  currentSessionId = sessionId;
+  loadSession();
+}
+
+// ─── Session Monitor ───
 async function loadSession() {
   try {
-    const res = await fetch('/api/daily-session/active');
+    const url = currentSessionId
+      ? `/api/daily-session/active?session_id=${currentSessionId}`
+      : '/api/daily-session/active';
+    const res = await fetch(url);
     const data = await res.json();
 
     if (!data.session) {
-      document.getElementById('dsEmpty').style.display = '';
-      document.getElementById('dsStartForm').style.display = '';
-      document.querySelectorAll('.ds-card:not(#dsStartForm)').forEach(c => c.style.display = 'none');
+      document.querySelectorAll('.ds-card:not(#dsSetupPanel):not(#dsSelectorCard)').forEach(c => c.style.display = 'none');
       currentSessionId = null;
       return;
     }
 
-    document.getElementById('dsEmpty').style.display = 'none';
-    document.getElementById('dsStartForm').style.display = 'none';
     const s = data.session;
     currentSessionId = s.id;
 
-    // Header
+    // Session Card
     document.getElementById('dsHeader').style.display = '';
     document.getElementById('dsId').textContent = s.id.slice(0, 8);
     document.getElementById('dsSymbol').textContent = s.symbol;
-    document.getElementById('dsRiskMode').textContent = s.riskmode || '—';
-    document.getElementById('dsFailedEntries').textContent = s.failedentries ?? '—';
-    document.getElementById('dsStart').textContent = s.sessionstart ? new Date(s.sessionstart).toLocaleString() : '—';
-    document.getElementById('dsEnd').textContent = s.sessionend ? new Date(s.sessionend).toLocaleString() : '—';
-    document.getElementById('dsPlanVer').textContent = s.activeplanversion ?? '—';
-    document.getElementById('dsLastCmd').textContent = s.lastcommand || '—';
-    // §7 — Trade profile fields
+    document.getElementById('dsStatus').textContent = s.status;
     document.getElementById('dsDirection').textContent = s.tradedirection || 'auto';
     document.getElementById('dsHorizon').textContent = s.tradehorizon || 'fast';
+    document.getElementById('dsRiskMode').textContent = s.riskmode || '—';
+    document.getElementById('dsPlanVer').textContent = s.activeplanversion ?? '—';
+    document.getElementById('dsStart').textContent = s.sessionstart ? new Date(s.sessionstart).toLocaleString() : '—';
+    document.getElementById('dsEnd').textContent = s.sessionend ? new Date(s.sessionend).toLocaleString() : '—';
     document.getElementById('dsTargetProfit').textContent = s.targetnetprofitusdt != null ? '$' + s.targetnetprofitusdt : '—';
     document.getElementById('dsMaxDuration').textContent = s.maxtradedurationminutes ? s.maxtradedurationminutes + 'm' : '—';
+    document.getElementById('dsMaxSessionDD').textContent = '—';
+    document.getElementById('dsFailedEntries').textContent = s.failedentries ?? '—';
+    document.getElementById('dsLastCmd').textContent = s.lastcommand || '—';
+    document.getElementById('dsGoalProfile').textContent = s.sessiongoalprofile || '—';
     const badge = document.getElementById('dsStatusBadge');
     badge.textContent = s.status;
     badge.style.color = STATUS_COLORS[s.status] || '#6b7280';
 
-    // Controls (show unless stopped/completed)
+    // Controls
     if (s.status !== 'STOPPED' && s.status !== 'COMPLETED') {
       document.getElementById('dsControls').style.display = '';
+    } else {
+      document.getElementById('dsControls').style.display = 'none';
     }
 
     // Metrics
@@ -221,14 +559,13 @@ async function loadSession() {
       document.getElementById('dsLiq').textContent = m.liquidationcount;
       document.getElementById('dsPnl').textContent = fmtPnl(m.totalpnlusdt);
       document.getElementById('dsPnlPct').textContent = fmtPnl(m.totalpnlpct) + '%';
-      document.getElementById('dsMaxDd').textContent = Number(m.maxdrawdownpct).toFixed(2) + '%';
-      document.getElementById('dsPf').textContent = m.profitfactor ? Number(m.profitfactor).toFixed(2) : 'N/A';
-      document.getElementById('dsTim').textContent = m.timeinmarketpct ? Number(m.timeinmarketpct).toFixed(1) + '%' : '—';
-      // §7 — Fast-mode metrics
       document.getElementById('dsNetPnl').textContent = fmtPnl(m.netpnaftercostsusdt);
       document.getElementById('dsGrossPnl').textContent = fmtPnl(m.grosspnlusdt);
       document.getElementById('dsFees').textContent = fmtPnl(m.feesusdt);
       document.getElementById('dsSlip').textContent = fmtPnl(m.slippageusdt);
+      document.getElementById('dsMaxDd').textContent = Number(m.maxdrawdownpct).toFixed(2) + '%';
+      document.getElementById('dsPf').textContent = m.profitfactor ? Number(m.profitfactor).toFixed(2) : 'N/A';
+      document.getElementById('dsTim').textContent = m.timeinmarketpct ? Number(m.timeinmarketpct).toFixed(1) + '%' : '—';
       document.getElementById('dsAvgDur').textContent = m.avgtradedurationminutes ? Number(m.avgtradedurationminutes).toFixed(1) + 'm' : '—';
       document.getElementById('dsCostRej').textContent = m.rejectedbycostfiltercount ?? 0;
       document.getElementById('dsTargetHits').textContent = m.targethitscount ?? 0;
@@ -258,45 +595,27 @@ async function loadSession() {
           <div class="ds-stat"><label>Max Positions</label><span>${p.sessionrisk.maxsimultaneouspositions}</span></div>
         </div>` : ''}
       `;
+
+      // Entries
+      if (p.entries && p.entries.length) {
+        document.getElementById('dsEntries').style.display = '';
+        const tbody = document.getElementById('dsEntriesBody');
+        tbody.innerHTML = p.entries.map((e, i) => `
+          <tr>
+            <td>${i + 1}</td>
+            <td class="${e.side === 'long' ? 'ds-long' : 'ds-short'}">${e.side.toUpperCase()}</td>
+            <td>${fmtPrice(e.entryzonefrom)} - ${fmtPrice(e.entryzoneto)}</td>
+            <td>${fmtPrice(e.stoploss)}</td>
+            <td>${(e.takeprofit || []).map(fmtPrice).join(', ')}</td>
+            <td>${e.leverage}x</td>
+            <td>${e.budgetsharepct}%</td>
+            <td class="ds-status-${e.status}">${e.status}</td>
+          </tr>
+        `).join('');
+      }
     }
 
-    // Entries
-    if (data.plan && data.plan.entries && data.plan.entries.length) {
-      document.getElementById('dsEntries').style.display = '';
-      const tbody = document.getElementById('dsEntriesBody');
-      tbody.innerHTML = data.plan.entries.map((e, i) => `
-        <tr>
-          <td>${i + 1}</td>
-          <td class="${e.side === 'long' ? 'ds-long' : 'ds-short'}">${e.side.toUpperCase()}</td>
-          <td>${fmtPrice(e.entryzonefrom)} - ${fmtPrice(e.entryzoneto)}</td>
-          <td>${fmtPrice(e.stoploss)}</td>
-          <td>${(e.takeprofit || []).map(fmtPrice).join(', ')}</td>
-          <td>${e.leverage}x</td>
-          <td>${e.budgetsharepct}%</td>
-          <td class="ds-status-${e.status}">${e.status}</td>
-        </tr>
-      `).join('');
-    }
-
-    // Trades
-    if (data.trades && data.trades.length) {
-      document.getElementById('dsTradesCard').style.display = '';
-      const tbody = document.getElementById('dsTradesBody');
-      tbody.innerHTML = data.trades.map(t => `
-        <tr>
-          <td>${t.id.slice(0, 8)}</td>
-          <td class="${t.side === 'long' ? 'ds-long' : 'ds-short'}">${t.side.toUpperCase()}</td>
-          <td>${t.leverage}x</td>
-          <td>${fmtPrice(t.entryprice)}</td>
-          <td>${fmtPrice(t.exitprice)}</td>
-          <td class="${t.pnl >= 0 ? 'ds-profit' : 'ds-loss'}">${fmtPnl(t.pnl)}</td>
-          <td>${t.close_reason || '—'}</td>
-          <td class="ds-status-${t.status}">${t.status}</td>
-        </tr>
-      `).join('');
-    }
-
-    // Last Revision
+    // Revision
     if (data.revision) {
       document.getElementById('dsRevision').style.display = '';
       const r = data.revision;
@@ -308,39 +627,130 @@ async function loadSession() {
       `;
     }
 
-    // Events
-    if (data.events && data.events.length) {
-      document.getElementById('dsEvents').style.display = '';
-      const body = document.getElementById('dsEventsBody');
-      body.innerHTML = data.events.map(e => `
-        <div class="ds-event-item">
-          <span class="ds-event-type">${e.eventtype}</span>
-          <span class="ds-event-states">${e.statebefore || ''} → ${e.stateafter || ''}</span>
-          <span class="ds-event-time">${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</span>
-        </div>
-      `).join('');
-    }
+    // Orders & Events Panel
+    document.getElementById('dsOrdersPanel').style.display = '';
+    loadPositions();
+    loadOrders();
+    loadEvents();
 
-    // Start SSE stream for live events
-    if (currentSessionId && !window.dsSSE) {
-      startEventStream(currentSessionId);
-    }
+    // SSE
+    if (currentSessionId && !window.dsSSE) { startEventStream(currentSessionId); }
   } catch (err) {
-    console.error('Daily session load error:', err);
+    console.error('Session load error:', err);
   }
 }
 
+// ─── Positions Tab ───
+async function loadPositions() {
+  if (!currentSessionId) return;
+  try {
+    const res = await fetch(`/api/daily-session/positions?session_id=${currentSessionId}`);
+    const data = await res.json();
+    allPositions = data.positions || [];
+    renderPositions();
+  } catch (err) { console.error('Positions error:', err); }
+}
+
+function renderPositions() {
+  const tbody = document.getElementById('dsPositionsBody');
+  if (!allPositions.length) { tbody.innerHTML = '<tr><td colspan="17" style="text-align:center;color:#7291a5">No positions</td></tr>'; return; }
+  tbody.innerHTML = allPositions.map((p, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${p.symbol}</td>
+      <td class="${p.side === 'LONG' ? 'ds-long' : 'ds-short'}">${p.side}</td>
+      <td>${p.marginmode || '—'}</td>
+      <td>${p.leverage}x</td>
+      <td>${fmtPrice(p.entryprice)}</td>
+      <td>${fmtPrice(p.markprice)}</td>
+      <td>${p.sizeusdt ? '$' + p.sizeusdt.toFixed(2) : '—'}</td>
+      <td>${p.marginused ? '$' + p.marginused.toFixed(2) : '—'}</td>
+      <td class="${(p.unrealizedpnl || 0) >= 0 ? 'ds-profit' : 'ds-loss'}">${fmtPnl(p.unrealizedpnl)}</td>
+      <td class="${(p.realizedpnl || 0) >= 0 ? 'ds-profit' : 'ds-loss'}">${fmtPnl(p.realizedpnl)}</td>
+      <td>${fmtPnl(p.feesusdt)}</td>
+      <td>${fmtPnl(p.slippageusdt)}</td>
+      <td class="${(p.netpnl || 0) >= 0 ? 'ds-profit' : 'ds-loss'}">${fmtPnl(p.netpnl)}</td>
+      <td class="ds-status-${p.status.toLowerCase()}">${p.status}</td>
+      <td>${p.opentime ? new Date(p.opentime).toLocaleTimeString() : '—'}</td>
+      <td>${p.tradehorizon || '—'}</td>
+    </tr>
+  `).join('');
+}
+
+// ─── Orders Tab ───
+async function loadOrders() {
+  if (!currentSessionId) return;
+  try {
+    const res = await fetch(`/api/daily-session/orders?session_id=${currentSessionId}`);
+    const data = await res.json();
+    allOrders = data.orders || [];
+    renderOrders();
+  } catch (err) { console.error('Orders error:', err); }
+}
+
+function renderOrders() {
+  const filter = document.getElementById('dsOrdersFilter')?.value || '';
+  const filtered = filter ? allOrders.filter(o => o.status === filter) : allOrders;
+  const tbody = document.getElementById('dsOrdersBody');
+  if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:#7291a5">No orders</td></tr>'; return; }
+  tbody.innerHTML = filtered.map(o => `
+    <tr>
+      <td>${o.id.slice(0, 8)}</td>
+      <td>${o.type}</td>
+      <td class="${o.side === 'LONG' ? 'ds-long' : 'ds-short'}">${o.side}</td>
+      <td>${fmtPrice(o.pricefrom)}</td>
+      <td>${fmtPrice(o.priceto)}</td>
+      <td>${fmtPrice(o.stoploss)}</td>
+      <td>${(o.takeprofit || []).map(fmtPrice).join(', ')}</td>
+      <td>${o.leverage}x</td>
+      <td>${o.budgetsharepct}%</td>
+      <td class="ds-status-${o.status.toLowerCase()}">${o.status}</td>
+      <td>${o.reason || '—'}</td>
+    </tr>
+  `).join('');
+}
+
+// ─── Events Tab ───
+async function loadEvents() {
+  if (!currentSessionId) return;
+  const filter = document.getElementById('dsEventsFilter')?.value || '';
+  try {
+    const url = `/api/daily-session/events?session_id=${currentSessionId}&limit=100` + (filter ? `&event_type=${filter}` : '');
+    const res = await fetch(url);
+    const data = await res.json();
+    const body = document.getElementById('dsEventsBody');
+    const events = data.events || [];
+    if (!events.length) { body.innerHTML = '<div style="text-align:center;color:#7291a5;padding:20px">No events</div>'; return; }
+    body.innerHTML = events.map(e => `
+      <div class="ds-event-item">
+        <span class="ds-event-type">${e.eventtype}</span>
+        <span class="ds-event-states">${e.statebefore || ''} → ${e.stateafter || ''}</span>
+        ${e.payloadsummary ? `<span class="ds-event-payload">${e.payloadsummary}</span>` : ''}
+        <span class="ds-event-time">${e.timestamp ? new Date(e.timestamp).toLocaleTimeString() : ''}</span>
+      </div>
+    `).join('');
+  } catch (err) { console.error('Events error:', err); }
+}
+
+// ─── Tab Switching ───
+function switchTab(tab) {
+  document.querySelectorAll('.ds-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.ds-tab-content').forEach(c => c.style.display = 'none');
+  if (tab === 'positions') { document.querySelector('.ds-tab[onclick*="positions"]').classList.add('active'); document.getElementById('dsTabPositions').style.display = ''; }
+  if (tab === 'orders') { document.querySelector('.ds-tab[onclick*="orders"]').classList.add('active'); document.getElementById('dsTabOrders').style.display = ''; }
+  if (tab === 'events') { document.querySelector('.ds-tab[onclick*="events"]').classList.add('active'); document.getElementById('dsTabEvents').style.display = ''; }
+}
+
+// ─── Execution Control ───
 async function sendCommand(cmd) {
   if (!currentSessionId) return;
   const result = document.getElementById('dsCmdResult');
   result.style.display = '';
   result.textContent = 'Sending...';
   result.className = 'ds-cmd-result ds-cmd-pending';
-
   try {
     const res = await fetch('/api/daily-session/revision', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({session_id: currentSessionId, command: cmd})
     });
     const data = await res.json();
@@ -352,87 +762,32 @@ async function sendCommand(cmd) {
       result.className = 'ds-cmd-result ds-cmd-error';
     }
     setTimeout(() => { result.style.display = 'none'; }, 3000);
-    loadSession(); // refresh
+    loadSession();
   } catch (err) {
     result.textContent = `✗ ${err.message}`;
     result.className = 'ds-cmd-result ds-cmd-error';
   }
 }
 
-async function startSessionFromForm() {
-  const result = document.getElementById('dsStartResult');
-  result.style.display = '';
-  result.textContent = 'Starting...';
-  result.className = 'ds-cmd-result ds-cmd-pending';
-
-  const body = {
-    budget_usdt: parseFloat(document.getElementById('dsFormBudget').value) || 100,
-    risk_mode: document.getElementById('dsFormRisk').value,
-    trade_direction: document.getElementById('dsFormDirection').value,
-    trade_horizon: document.getElementById('dsFormHorizon').value,
-    target_net_profit_usdt: parseFloat(document.getElementById('dsFormTarget').value) || 1.5,
-    max_trade_duration_minutes: parseInt(document.getElementById('dsFormMaxDur').value) || 15,
-    cost_filter_enabled: document.getElementById('dsFormCostFilter').checked,
-  };
-
-  try {
-    const res = await fetch('/api/daily-session/start', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body)
-    });
-    const data = await res.json();
-    if (data.ok) {
-      result.textContent = '✓ Session created: ' + data.session_id.slice(0, 8);
-      result.className = 'ds-cmd-result ds-cmd-success';
-      setTimeout(() => { loadSession(); }, 1000);
-    } else {
-      result.textContent = '✗ ' + (data.error || 'failed');
-      result.className = 'ds-cmd-result ds-cmd-error';
-    }
-  } catch (err) {
-    result.textContent = '✗ ' + err.message;
-    result.className = 'ds-cmd-result ds-cmd-error';
-  }
-}
-
+// ─── SSE ───
 function startEventStream(sessionId) {
   const url = `/api/daily-session/events/stream?session_id=${sessionId}`;
   const es = new EventSource(url);
   window.dsSSE = es;
-
   es.addEventListener('execution_event', (e) => {
     const data = JSON.parse(e.data);
-    const body = document.getElementById('dsEventsBody');
-    if (!body) return;
-    document.getElementById('dsEvents').style.display = '';
-    const item = document.createElement('div');
-    item.className = 'ds-event-item ds-event-new';
-    item.innerHTML = `
-      <span class="ds-event-type">${data.eventtype}</span>
-      <span class="ds-event-states">${data.statebefore || ''} → ${data.stateafter || ''}</span>
-      <span class="ds-event-time">${data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : ''}</span>
-    `;
-    body.prepend(item);
-    // Remove highlight after 2s
-    setTimeout(() => item.classList.remove('ds-event-new'), 2000);
-    // Reload session to update state
     loadSession();
   });
-
   es.addEventListener('heartbeat', () => {
     const ind = document.getElementById('dsLiveIndicator');
-    if (ind) {
-      ind.style.opacity = '0.5';
-      setTimeout(() => { if (ind) ind.style.opacity = '1'; }, 300);
-    }
+    if (ind) { ind.style.opacity = '0.5'; setTimeout(() => { if (ind) ind.style.opacity = '1'; }, 300); }
   });
-
-  es.onerror = () => {
-    console.log('SSE disconnected, will retry...');
-  };
+  es.onerror = () => { console.log('SSE disconnected, will retry...'); };
 }
 
+// ─── Init ───
+updateReviewSummary();
+loadSessionList();
 loadSession();
 setInterval(loadSession, 10000);
 </script>
