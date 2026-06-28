@@ -308,7 +308,7 @@ async def update_session_status(session_id: str, status: str, final_reason: str 
 
 PLAN_GENERATION_PROMPT = """Ты — Crypto Trader Agent (Analyst), эксперт по BTCUSDT perpetual futures на HTX.
 
-Тебе передан Market Context Snapshot в JSON. На основе этих данных сформируй 8-часовой торговый план.
+Тебе передан Market Context Snapshot в JSON. На основе этих данных сформируй торговый план.
 
 Верни СТРОГО JSON (без markdown, без ```json) следующей структуры:
 {{
@@ -336,12 +336,29 @@ PLAN_GENERATION_PROMPT = """Ты — Crypto Trader Agent (Analyst), экспер
 }}
 
 ПРАВИЛА:
-- leverate только из [100, 125, 150, 200]
+- leverage ТОЛЬКО из [100, 125, 150, 200] — это high-leverage бот, низкие плечи запрещены
 - budget_share_pct: 5-10 для defensive, 10-20 для balanced, 20-30 для aggressive
 - Не более 3 entry в плане
 - stop_loss должен быть дальше invalidation_price
 - take_profit[0] ближе чем take_profit[1]
 - Все цены — реальные числа из market context, не нули
+- МИНИМУМ 1 entry обязателен, если режим != "no_trade"
+- no_trade разрешён ТОЛЬКО при явной неопределённости рынка (RSI 45-55, MACD ~0, низкая волатильность)
+- В range режиме используй range_trade сценарий с range_bound entries, а не no_trade
+- При aggressive режиме — обязательно минимум 1 entry, preferably 2-3
+
+Trade Direction: {trade_direction}
+- auto: выбери направление на основе market context
+- long: только long позиции
+- short: только short позиции
+- both: минимум 1 long и 1 short
+
+Trade Horizon: {trade_horizon}
+- fast: tight entries (entry_zone 0.3-0.5% шириной), target profit 0.5-1.5%, leverage 125-200
+- medium: medium entries (entry_zone 0.5-1% шириной), target profit 1-3%, leverage 100-150
+- long: wide entries (entry_zone 1-2% шириной), target profit 3-5%, leverage 100-125
+
+Target Net Profit: {target_net_profit_usdt} USDT — каждый entry должен иметь expected net profit >= этой величины
 
 Рыночный контекст:
 {market_context}
@@ -374,6 +391,9 @@ async def generate_initial_plan(session_id: str) -> dict:
         market_context=json.dumps(market_ctx, indent=2, ensure_ascii=False),
         risk_mode=risk_mode,
         budget_usdt=budget,
+        trade_direction=session.get("trade_direction", "auto"),
+        trade_horizon=session.get("trade_horizon", "fast"),
+        target_net_profit_usdt=float(session.get("target_net_profit_usdt", 1.5)),
     )
 
     plan_json = None
