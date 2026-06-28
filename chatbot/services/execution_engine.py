@@ -37,6 +37,37 @@ LIQUIDATION_MARGIN = 0.005   # 0.5% margin threshold
 ALLOWED_LEVERAGE = [100, 125, 150, 200]
 MAX_SIMULTANEOUS_POSITIONS = 1
 
+# ─── §8 Межфайловые константы (ТЗ fast_modes_WORED v1.1) ──────────────
+
+TRADE_DIRECTIONS = ('long', 'short', 'both', 'auto')
+TRADE_HORIZONS = ('fast', 'medium', 'long')
+SESSION_GOAL_PROFILES = ('fast_profit', 'balanced_intraday', 'session_swing')
+
+DEFAULT_TRADE_DIRECTION = 'auto'
+DEFAULT_TRADE_HORIZON = 'fast'
+DEFAULT_TARGET_NET_PROFIT_USDT = 1.5
+DEFAULT_MAX_TRADE_DURATION_MINUTES = 15
+DEFAULT_COST_FILTER_ENABLED = True
+DEFAULT_SESSION_GOAL_PROFILE = 'fast_profit'
+
+TRADE_HORIZON_DEFAULTS = {
+    "fast": {
+        "target_net_profit_usdt": 1.5,
+        "max_trade_duration_minutes": 15,
+        "session_goal_profile": "fast_profit",
+    },
+    "medium": {
+        "target_net_profit_usdt": 3.0,
+        "max_trade_duration_minutes": 90,
+        "session_goal_profile": "balanced_intraday",
+    },
+    "long": {
+        "target_net_profit_usdt": 5.0,
+        "max_trade_duration_minutes": 480,
+        "session_goal_profile": "session_swing",
+    },
+}
+
 
 class SessionState(str, Enum):
     """ТЗ 6.1 — 7 состояний."""
@@ -408,3 +439,108 @@ def validate_budget_share(budget_share_pct: float, risk_mode: str) -> bool:
     params = get_risk_params(risk_mode)
     lo, hi = params["budget_share_range"]
     return lo <= budget_share_pct <= hi
+
+
+# ─── §4 Cost Filter & Trade Economics (ТЗ fast_modes_WORED v1.1) ──────
+
+def estimate_expected_total_fees(notional: float) -> float:
+    """Оценка общих комиссий за сделку (open + close)."""
+    open_fee = notional * TAKER_FEE_RATE
+    close_fee = notional * TAKER_FEE_RATE
+    return round(open_fee + close_fee, 8)
+
+
+def estimate_expected_slippage(notional: float, bps: int = DEFAULT_SLIPPAGE_BPS) -> float:
+    """Оценка slippage в USDT для входа и выхода."""
+    slip = bps / 10000.0
+    # Entry + exit slippage
+    return round(notional * slip * 2, 8)
+
+
+def estimate_expected_gross_profit(
+    side: str,
+    entry_price: float,
+    take_profit: float,
+    position_qty: float,
+) -> float:
+    """Оценка валовой прибыли до комиссий."""
+    if side.lower() == "long":
+        gross = position_qty * (take_profit - entry_price)
+    else:
+        gross = position_qty * (entry_price - take_profit)
+    return round(gross, 8)
+
+
+def estimate_expected_net_profit(
+    side: str,
+    entry_price: float,
+    take_profit: float,
+    position_qty: float,
+    notional: float,
+) -> dict:
+    """Полная оценка экономики сделки: gross - fees - slippage."""
+    gross = estimate_expected_gross_profit(side, entry_price, take_profit, position_qty)
+    fees = estimate_expected_total_fees(notional)
+    slip = estimate_expected_slippage(notional)
+    net = gross - fees - slip
+    return {
+        "expected_gross_profit_usdt": gross,
+        "expected_total_fees_usdt": fees,
+        "expected_slippage_usdt": slip,
+        "expected_net_profit_usdt": round(net, 8),
+    }
+
+
+def should_reject_by_cost_filter(
+    expected_net_profit: float,
+    target_net_profit: float,
+    cost_filter_enabled: bool = True,
+) -> tuple[bool, str]:
+    """Решение: блокировать ли вход по cost filter."""
+    if not cost_filter_enabled:
+        return False, "cost_filter_disabled"
+    if expected_net_profit < target_net_profit:
+        return True, "entry_rejected_cost_filter"
+    return False, "approved"
+
+
+def evaluate_entry_economics(
+    side: str,
+    entry_price: float,
+    take_profit: float,
+    position_qty: float,
+    notional: float,
+    target_net_profit: float,
+    cost_filter_enabled: bool = True,
+) -> dict:
+    """Комплексная оценка: economics + decision."""
+    econ = estimate_expected_net_profit(side, entry_price, take_profit, position_qty, notional)
+    reject, reason = should_reject_by_cost_filter(
+        econ["expected_net_profit_usdt"],
+        target_net_profit,
+        cost_filter_enabled,
+    )
+    return {
+        **econ,
+        "rejected": reject,
+        "reject_reason": reason,
+        "target_net_profit_usdt": target_net_profit,
+    }
+
+
+def enforce_trade_horizon_timeout(
+    opened_at: datetime,
+    max_duration_minutes: int,
+) -> tuple[bool, int]:
+    """Для trade_horizon='fast': проверить, не истекло ли max_trade_duration.
+
+    Returns: (should_close, elapsed_minutes)
+    """
+    now = _now_utc()
+    if opened_at.tzinfo is None:
+        opened_at = opened_at.replace(tzinfo=timezone.utc)
+    elapsed = (now - opened_at).total_seconds() / 60.0
+    elapsed_int = int(elapsed)
+    if elapsed >= max_duration_minutes:
+        return True, elapsed_int
+    return False, elapsed_int

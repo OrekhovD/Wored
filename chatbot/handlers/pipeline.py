@@ -182,7 +182,9 @@ async def msg_portfolio_commands(message: Message):
 @router.callback_query(F.data == "pipeline_start")
 async def cb_start(callback):
     await callback.answer()
-    text, kb = await _handle_start_safe(callback.from_user.id, {"intent": "pipeline_start", "budget": 100.0, "risk_mode": "balanced"})
+    intent = {"intent": "pipeline_start", "budget": 100.0, "risk_mode": "balanced",
+              "trade_profile": {"trade_direction": "auto", "trade_horizon": "fast"}}
+    text, kb = await _handle_start_safe(callback.from_user.id, intent)
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 
@@ -228,21 +230,86 @@ async def cb_review(callback):
     await callback.message.answer(text, parse_mode="HTML")
 
 
+def parse_session_start_text(text: str) -> dict:
+    """§5 — Parse natural language session start for trade profile.
+    
+    Examples:
+        "старт сессии 100 usdt агрессивно fast long"
+        "старт сессии 50$ defensive medium target 3"
+        "запусти сессию fast short"
+    """
+    msg = (text or "").lower().strip()
+    
+    # Budget
+    budget_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:usdt|\$|дол|бакс)", msg)
+    budget = float(budget_match.group(1)) if budget_match else 100.0
+
+    # Risk mode
+    risk = "balanced"
+    if "агрессив" in msg or "aggressive" in msg:
+        risk = "aggressive"
+    elif "защит" in msg or "defensive" in msg or "консерват" in msg:
+        risk = "defensive"
+
+    # §5 — Trade direction
+    direction = "auto"
+    if re.search(r"\b(long|лонг|вверх|быч)\b", msg):
+        direction = "long"
+    elif re.search(r"\b(short|шорт|вниз|медв)\b", msg):
+        direction = "short"
+    elif re.search(r"\b(both|оба|двусторон)\b", msg):
+        direction = "both"
+
+    # §5 — Trade horizon
+    horizon = "fast"
+    if re.search(r"\b(medium|средн|внутридневн)\b", msg):
+        horizon = "medium"
+    elif re.search(r"\b(long|длинн|свинг|swing)\b", msg) and direction == "auto":
+        # "long" could mean direction or horizon — check context
+        if "свинг" in msg or "swing" in msg or "длинн" in msg:
+            horizon = "long"
+    elif re.search(r"\b(swing|свинг|длинный горизонт)\b", msg):
+        horizon = "long"
+
+    # §5 — Target net profit
+    target_match = re.search(r"(?:target|цель|таргет)\s*(\d+(?:\.\d+)?)", msg)
+    target_net_profit = float(target_match.group(1)) if target_match else None
+
+    # §5 — Max duration
+    dur_match = re.search(r"(?:dur|длительность|duration)\s*(\d+)", msg)
+    max_duration = int(dur_match.group(1)) if dur_match else None
+
+    # §5 — Cost filter
+    cost_filter = True
+    if "no cost filter" in msg or "без cost filter" in msg or "disable cost" in msg:
+        cost_filter = False
+
+    profile = {
+        "trade_direction": direction,
+        "trade_horizon": horizon,
+        "cost_filter_enabled": cost_filter,
+    }
+    if target_net_profit is not None:
+        profile["target_net_profit_usdt"] = target_net_profit
+    if max_duration is not None:
+        profile["max_trade_duration_minutes"] = max_duration
+
+    return {
+        "intent": "pipeline_start",
+        "budget": budget,
+        "risk_mode": risk,
+        "trade_profile": profile,
+    }
+
+
 # ── Intent classifier (ТЗ §10.1 — intent-first, regex-first) ──
 
 def classify_pipeline_intent(message: str) -> dict | None:
     msg = message.lower().strip()
 
-    # Start session (ТЗ §10.2 — regex-first)
+    # Start session (ТЗ §10.2 — regex-first, §5 — trade profile parsing)
     if any(p in msg for p in ["старт сессии", "начать сессию", "daily session", "старт торговли", "запусти сессию", "запусти дневную"]):
-        budget_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:usdt|\$|дол|бакс)", msg)
-        budget = float(budget_match.group(1)) if budget_match else 100.0
-        risk = "balanced"
-        if "агрессив" in msg or "aggressive" in msg:
-            risk = "aggressive"
-        elif "защит" in msg or "defensive" in msg or "консерват" in msg:
-            risk = "defensive"
-        return {"intent": "pipeline_start", "budget": budget, "risk_mode": risk}
+        return parse_session_start_text(message)
 
     # Stop session
     if any(p in msg for p in ["остановить сессию", "стоп сессия", "stop session", "закрыть сессию"]):
@@ -296,7 +363,7 @@ def classify_pipeline_intent(message: str) -> dict | None:
 # ── Safe handlers (ТЗ §7.4 — normalized errors, §8 — templates) ──
 
 async def _handle_start_safe(user_id: int, intent: dict) -> tuple[str, InlineKeyboardMarkup | None]:
-    """ТЗ §8.5 — старт сессии, безопасный ответ."""
+    """ТЗ §8.5 — старт сессии, безопасный ответ. §5 — trade profile support."""
     try:
         from services.session_manager import create_session, generate_initial_plan, get_active_session
 
@@ -308,33 +375,51 @@ async def _handle_start_safe(user_id: int, intent: dict) -> tuple[str, InlineKey
 
         budget = intent.get("budget", 100.0)
         risk = intent.get("risk_mode", "balanced")
+        trade_profile = intent.get("trade_profile")
 
-        result = await create_session(user_id=user_id, budget_usdt=budget, duration_hours=8, risk_mode=risk)
+        result = await create_session(
+            user_id=user_id, budget_usdt=budget, duration_hours=8,
+            risk_mode=risk, trade_profile=trade_profile,
+        )
 
         if "error" in result:
             return ERR_BACKEND, None
 
         plan = await generate_initial_plan(result["session_id"])
         if "error" in plan:
+            profile_str = (
+                f"Направление: {result.get('trade_direction', 'auto')}\n"
+                f"Горизонт: {result.get('trade_horizon', 'fast')}\n"
+            ) if trade_profile else ""
             return (
                 f"🚀 <b>Сессия запущена</b>\n"
                 f"ID: <code>{result['session_id'][:8]}</code>\n"
                 f"Статус: ARMED\n"
                 f"Режим риска: {risk}\n"
                 f"Бюджет: {budget:.0f} USDT\n"
+                f"{profile_str}"
                 f"Горизонт: 8 часов\n"
                 f"Инструмент: BTCUSDT\n\n"
                 f"⚠️ План генерируется…",
                 _start_kb()
             )
 
-        # ТЗ §8.5 — шаблон подтверждения
+        # ТЗ §8.5 + §5 — шаблон подтверждения с trade profile
+        profile_lines = ""
+        if trade_profile:
+            tp = trade_profile
+            profile_lines = (
+                f"Направление: {tp.get('trade_direction', 'auto')}\n"
+                f"Горизонт: {tp.get('trade_horizon', 'fast')}\n"
+                f"Target profit: {tp.get('target_net_profit_usdt', 1.5)} USDT\n"
+            )
         text = (
             f"🚀 <b>Сессия запущена</b>\n"
             f"ID: <code>{result['session_id'][:8]}</code>\n"
             f"Статус: ARMED\n"
             f"Режим риска: {risk}\n"
             f"Бюджет: {budget:.0f} USDT\n"
+            f"{profile_lines}"
             f"Горизонт: 8 часов\n"
             f"Инструмент: BTCUSDT\n"
             f"План: v{plan.get('version', 1)} · {plan.get('market_regime', '—')}"

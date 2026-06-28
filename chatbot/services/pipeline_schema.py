@@ -167,7 +167,7 @@ CREATE INDEX IF NOT EXISTS idx_daily_reviews_session ON daily_reviews (session_i
 
 
 async def ensure_pipeline_tables():
-    """Create daily pipeline tables if they don't exist."""
+    """Create daily pipeline tables if they don't exist + auto-migrate new columns."""
     from storage.postgres_client import get_pool
     pool = await get_pool()
     if not pool:
@@ -175,4 +175,35 @@ async def ensure_pipeline_tables():
         return
     async with pool.acquire() as conn:
         await conn.execute(PIPELINE_TABLES_SQL)
-    log.info("Pipeline tables ensured (8 tables)")
+
+        # §2 — Auto-migration: add new columns if missing (backward-compatible)
+        migrations = [
+            # trading_sessions
+            ("trading_sessions", "trade_direction", "TEXT NOT NULL DEFAULT 'auto'"),
+            ("trading_sessions", "trade_horizon", "TEXT NOT NULL DEFAULT 'fast'"),
+            ("trading_sessions", "target_net_profit_usdt", "NUMERIC(20,8) NOT NULL DEFAULT 1.5"),
+            ("trading_sessions", "max_trade_duration_minutes", "INT NOT NULL DEFAULT 15"),
+            ("trading_sessions", "cost_filter_enabled", "BOOLEAN NOT NULL DEFAULT TRUE"),
+            ("trading_sessions", "session_goal_profile", "TEXT NOT NULL DEFAULT 'fast_profit'"),
+            # session_metrics
+            ("session_metrics", "gross_pnl_usdt", "NUMERIC(20,8) NOT NULL DEFAULT 0"),
+            ("session_metrics", "fees_usdt", "NUMERIC(20,8) NOT NULL DEFAULT 0"),
+            ("session_metrics", "slippage_usdt", "NUMERIC(20,8) NOT NULL DEFAULT 0"),
+            ("session_metrics", "net_pnl_after_costs_usdt", "NUMERIC(20,8) NOT NULL DEFAULT 0"),
+            ("session_metrics", "avg_trade_duration_minutes", "NUMERIC(20,8)"),
+            ("session_metrics", "rejected_by_cost_filter_count", "INT NOT NULL DEFAULT 0"),
+            ("session_metrics", "target_hits_count", "INT NOT NULL DEFAULT 0"),
+            # executed_trades
+            ("executed_trades", "trade_horizon", "TEXT"),
+            ("executed_trades", "trade_direction", "TEXT"),
+            ("executed_trades", "target_net_profit_usdt", "NUMERIC(20,8)"),
+            ("executed_trades", "expected_total_fees_usdt", "NUMERIC(20,8)"),
+            ("executed_trades", "expected_slippage_usdt", "NUMERIC(20,8)"),
+            ("executed_trades", "expected_net_profit_usdt", "NUMERIC(20,8)"),
+            ("executed_trades", "actual_trade_duration_minutes", "NUMERIC(20,8)"),
+        ]
+        for table, col, coldef in migrations:
+            await conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {coldef}"
+            )
+    log.info("Pipeline tables ensured (8 tables + fast-mode migrations)")

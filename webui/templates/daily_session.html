@@ -7,8 +7,58 @@
   </div>
 
   <div id="dsContainer" class="ds-container">
+    <!-- §7 — Start Session Form (shown when no active session) -->
+    <div class="ds-card" id="dsStartForm" style="display:none">
+      <div class="ds-card-header"><h2>Start New Session</h2></div>
+      <div class="ds-start-form">
+        <div class="ds-form-row">
+          <label>Budget (USDT)</label>
+          <input type="number" id="dsFormBudget" value="100" min="10" max="1000" step="10">
+        </div>
+        <div class="ds-form-row">
+          <label>Risk Mode</label>
+          <select id="dsFormRisk">
+            <option value="balanced">Balanced</option>
+            <option value="defensive">Defensive</option>
+            <option value="aggressive">Aggressive</option>
+          </select>
+        </div>
+        <div class="ds-form-row">
+          <label>Trade Direction</label>
+          <select id="dsFormDirection">
+            <option value="auto">Auto</option>
+            <option value="long">Long only</option>
+            <option value="short">Short only</option>
+            <option value="both">Both</option>
+          </select>
+        </div>
+        <div class="ds-form-row">
+          <label>Trade Horizon</label>
+          <select id="dsFormHorizon">
+            <option value="fast">Fast (15min, target 1.5 USDT)</option>
+            <option value="medium">Medium (90min, target 3.0 USDT)</option>
+            <option value="long">Long (8h, target 5.0 USDT)</option>
+          </select>
+        </div>
+        <div class="ds-form-row">
+          <label>Target Net Profit (USDT)</label>
+          <input type="number" id="dsFormTarget" value="1.5" min="0.5" max="50" step="0.5">
+        </div>
+        <div class="ds-form-row">
+          <label>Max Trade Duration (min)</label>
+          <input type="number" id="dsFormMaxDur" value="15" min="5" max="480" step="5">
+        </div>
+        <div class="ds-form-row ds-form-check">
+          <input type="checkbox" id="dsFormCostFilter" checked>
+          <label for="dsFormCostFilter">Cost Filter Enabled</label>
+        </div>
+        <button class="ds-btn ds-btn-start" onclick="startSessionFromForm()">🚀 Start Session</button>
+        <div id="dsStartResult" class="ds-cmd-result" style="display:none"></div>
+      </div>
+    </div>
+
     <div class="ds-empty" id="dsEmpty">
-      <p>No active session. Start one via Telegram (<code>старт сессии</code>) or API.</p>
+      <p>No active session. Start one via Telegram (<code>старт сессии</code>) or the form above.</p>
     </div>
 
     <!-- Session Header -->
@@ -26,6 +76,10 @@
         <div class="ds-stat"><label>End</label><span id="dsEnd">—</span></div>
         <div class="ds-stat"><label>Plan v</label><span id="dsPlanVer">—</span></div>
         <div class="ds-stat"><label>Last Command</label><span id="dsLastCmd">—</span></div>
+        <div class="ds-stat"><label>Direction</label><span id="dsDirection">—</span></div>
+        <div class="ds-stat"><label>Horizon</label><span id="dsHorizon">—</span></div>
+        <div class="ds-stat"><label>Target Profit</label><span id="dsTargetProfit">—</span></div>
+        <div class="ds-stat"><label>Max Duration</label><span id="dsMaxDuration">—</span></div>
       </div>
     </div>
 
@@ -54,6 +108,13 @@
         <div class="ds-stat"><label>Max DD</label><span id="dsMaxDd">—</span></div>
         <div class="ds-stat"><label>Profit Factor</label><span id="dsPf">—</span></div>
         <div class="ds-stat"><label>Time in Market</label><span id="dsTim">—</span></div>
+        <div class="ds-stat"><label>Net PnL (after costs)</label><span id="dsNetPnl">—</span></div>
+        <div class="ds-stat"><label>Gross PnL</label><span id="dsGrossPnl">—</span></div>
+        <div class="ds-stat"><label>Fees</label><span id="dsFees">—</span></div>
+        <div class="ds-stat"><label>Slippage</label><span id="dsSlip">—</span></div>
+        <div class="ds-stat"><label>Avg Trade Duration</label><span id="dsAvgDur">—</span></div>
+        <div class="ds-stat"><label>Cost Filter Rejections</label><span id="dsCostRej">—</span></div>
+        <div class="ds-stat"><label>Target Hits</label><span id="dsTargetHits">—</span></div>
       </div>
     </div>
 
@@ -116,12 +177,14 @@ async function loadSession() {
 
     if (!data.session) {
       document.getElementById('dsEmpty').style.display = '';
-      document.querySelectorAll('.ds-card').forEach(c => c.style.display = 'none');
+      document.getElementById('dsStartForm').style.display = '';
+      document.querySelectorAll('.ds-card:not(#dsStartForm)').forEach(c => c.style.display = 'none');
       currentSessionId = null;
       return;
     }
 
     document.getElementById('dsEmpty').style.display = 'none';
+    document.getElementById('dsStartForm').style.display = 'none';
     const s = data.session;
     currentSessionId = s.id;
 
@@ -135,6 +198,11 @@ async function loadSession() {
     document.getElementById('dsEnd').textContent = s.sessionend ? new Date(s.sessionend).toLocaleString() : '—';
     document.getElementById('dsPlanVer').textContent = s.activeplanversion ?? '—';
     document.getElementById('dsLastCmd').textContent = s.lastcommand || '—';
+    // §7 — Trade profile fields
+    document.getElementById('dsDirection').textContent = s.tradedirection || 'auto';
+    document.getElementById('dsHorizon').textContent = s.tradehorizon || 'fast';
+    document.getElementById('dsTargetProfit').textContent = s.targetnetprofitusdt != null ? '$' + s.targetnetprofitusdt : '—';
+    document.getElementById('dsMaxDuration').textContent = s.maxtradedurationminutes ? s.maxtradedurationminutes + 'm' : '—';
     const badge = document.getElementById('dsStatusBadge');
     badge.textContent = s.status;
     badge.style.color = STATUS_COLORS[s.status] || '#6b7280';
@@ -156,6 +224,14 @@ async function loadSession() {
       document.getElementById('dsMaxDd').textContent = Number(m.maxdrawdownpct).toFixed(2) + '%';
       document.getElementById('dsPf').textContent = m.profitfactor ? Number(m.profitfactor).toFixed(2) : 'N/A';
       document.getElementById('dsTim').textContent = m.timeinmarketpct ? Number(m.timeinmarketpct).toFixed(1) + '%' : '—';
+      // §7 — Fast-mode metrics
+      document.getElementById('dsNetPnl').textContent = fmtPnl(m.netpnaftercostsusdt);
+      document.getElementById('dsGrossPnl').textContent = fmtPnl(m.grosspnlusdt);
+      document.getElementById('dsFees').textContent = fmtPnl(m.feesusdt);
+      document.getElementById('dsSlip').textContent = fmtPnl(m.slippageusdt);
+      document.getElementById('dsAvgDur').textContent = m.avgtradedurationminutes ? Number(m.avgtradedurationminutes).toFixed(1) + 'm' : '—';
+      document.getElementById('dsCostRej').textContent = m.rejectedbycostfiltercount ?? 0;
+      document.getElementById('dsTargetHits').textContent = m.targethitscount ?? 0;
     }
 
     // Plan
@@ -279,6 +355,43 @@ async function sendCommand(cmd) {
     loadSession(); // refresh
   } catch (err) {
     result.textContent = `✗ ${err.message}`;
+    result.className = 'ds-cmd-result ds-cmd-error';
+  }
+}
+
+async function startSessionFromForm() {
+  const result = document.getElementById('dsStartResult');
+  result.style.display = '';
+  result.textContent = 'Starting...';
+  result.className = 'ds-cmd-result ds-cmd-pending';
+
+  const body = {
+    budget_usdt: parseFloat(document.getElementById('dsFormBudget').value) || 100,
+    risk_mode: document.getElementById('dsFormRisk').value,
+    trade_direction: document.getElementById('dsFormDirection').value,
+    trade_horizon: document.getElementById('dsFormHorizon').value,
+    target_net_profit_usdt: parseFloat(document.getElementById('dsFormTarget').value) || 1.5,
+    max_trade_duration_minutes: parseInt(document.getElementById('dsFormMaxDur').value) || 15,
+    cost_filter_enabled: document.getElementById('dsFormCostFilter').checked,
+  };
+
+  try {
+    const res = await fetch('/api/daily-session/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.ok) {
+      result.textContent = '✓ Session created: ' + data.session_id.slice(0, 8);
+      result.className = 'ds-cmd-result ds-cmd-success';
+      setTimeout(() => { loadSession(); }, 1000);
+    } else {
+      result.textContent = '✗ ' + (data.error || 'failed');
+      result.className = 'ds-cmd-result ds-cmd-error';
+    }
+  } catch (err) {
+    result.textContent = '✗ ' + err.message;
     result.className = 'ds-cmd-result ds-cmd-error';
   }
 }

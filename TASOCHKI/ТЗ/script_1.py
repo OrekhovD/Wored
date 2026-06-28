@@ -5,21 +5,14 @@ content = dedent('''
 ## WORED — внедрение trade_direction + trade_horizon + fast profit-first режима
 
 **Дата:** 28.06.2026
-**Версия:** 1.0
+**Версия:** 1.1
 **Статус:** Implementation-ready specification
-
----
 
 ## 1. Цель
 
-Подготовить реализацию, после которой можно заменить целевые файлы проекта и получить рабочий режим старта сессии с выбором:
+Подготовить реализацию, после которой можно заменить целевые файлы проекта и получить рабочий режим старта сессии с выбором направления торговли `long / short / both / auto`, горизонта `fast / medium / long` и целевой чистой прибыли на сделку после fees/slippage.
 
-- направления торговли: `long / short / both / auto`
-- горизонта торговли: `fast / medium / long`
-- целевой чистой прибыли на сделку после fees/slippage
-
-Изменения должны быть внесены в следующие runtime-файлы:
-
+Целевые файлы:
 - `chatbot/services/pipeline_schema.py`
 - `chatbot/services/session_manager.py`
 - `chatbot/services/execution_engine.py`
@@ -27,14 +20,11 @@ content = dedent('''
 - `webui/app.py`
 - Mini App frontend файл
 
----
+## 2. pipeline_schema.py
 
-## 2. Изменения по файлам
+Добавить backward-compatible auto-migration.
 
-### 2.1. `chatbot/services/pipeline_schema.py`
-
-Добавить backward-compatible auto-migration:
-
+### trading_sessions
 - `trade_direction TEXT NOT NULL DEFAULT 'auto'`
 - `trade_horizon TEXT NOT NULL DEFAULT 'fast'`
 - `target_net_profit_usdt NUMERIC(20,8) NOT NULL DEFAULT 1.5`
@@ -42,8 +32,7 @@ content = dedent('''
 - `cost_filter_enabled BOOLEAN NOT NULL DEFAULT TRUE`
 - `session_goal_profile TEXT NOT NULL DEFAULT 'fast_profit'`
 
-В `session_metrics` добавить:
-
+### session_metrics
 - `gross_pnl_usdt`
 - `fees_usdt`
 - `slippage_usdt`
@@ -52,8 +41,7 @@ content = dedent('''
 - `rejected_by_cost_filter_count`
 - `target_hits_count`
 
-В `executed_trades` добавить:
-
+### executed_trades
 - `trade_horizon`
 - `trade_direction`
 - `target_net_profit_usdt`
@@ -62,14 +50,12 @@ content = dedent('''
 - `expected_net_profit_usdt`
 - `actual_trade_duration_minutes`
 
-В `execution_events` оставить схему без ломки, но в `event_payload` поддержать новый тип события:
+### execution_events
+Структуру не ломать; в `event_payload` поддержать `entry_rejected_cost_filter`.
 
-- `entry_rejected_cost_filter`
+## 3. session_manager.py
 
-### 2.2. `chatbot/services/session_manager.py`
-
-Добавить обработку и сохранение новых полей:
-
+Добавить обработку и сохранение полей:
 - `trade_direction`
 - `trade_horizon`
 - `target_net_profit_usdt`
@@ -77,8 +63,13 @@ content = dedent('''
 - `cost_filter_enabled`
 - `session_goal_profile`
 
-Добавить helper-функции:
+Добавить helper'ы:
+- `normalize_trade_profile(payload)`
+- `build_trade_profile_from_horizon(...)`
+- `apply_trade_profile_to_session(...)`
+- обновлённый `build_active_snapshot(session_id)`
 
+### mapping
 ```python
 TRADE_HORIZON_DEFAULTS = {
     "fast": {"target_net_profit_usdt": 1.5, "max_trade_duration_minutes": 15, "session_goal_profile": "fast_profit"},
@@ -87,19 +78,11 @@ TRADE_HORIZON_DEFAULTS = {
 }
 ```
 
-Нужно реализовать:
-
-- `normalize_trade_profile(payload)`
-- `build_trade_profile_from_horizon(...)`
-- `apply_trade_profile_to_session(...)`
-- обновлённый `build_active_snapshot(session_id)`
-
 `build_active_snapshot` обязан возвращать новые поля в `session`, `plan`, `metrics`, `revision`.
 
-### 2.3. `chatbot/services/execution_engine.py`
+## 4. execution_engine.py
 
 Перед открытием позиции engine обязан:
-
 1. Проверять соответствие `entry.side` выбранному `trade_direction`.
 2. Считать `expected_gross_profit_usdt`.
 3. Считать `expected_total_fees_usdt`.
@@ -108,7 +91,6 @@ TRADE_HORIZON_DEFAULTS = {
 6. Блокировать вход, если `expected_net_profit_usdt < target_net_profit_usdt` при `cost_filter_enabled=True`.
 
 Добавить helper-функции:
-
 - `estimate_expected_total_fees(...)`
 - `estimate_expected_slippage(...)`
 - `estimate_expected_gross_profit(...)`
@@ -117,10 +99,9 @@ TRADE_HORIZON_DEFAULTS = {
 - `should_reject_by_cost_filter(...)`
 - `enforce_trade_horizon_timeout(...)`
 
-Для `trade_horizon == "fast"` реализовать принудительное закрытие позиции по timeout при превышении `max_trade_duration_minutes`.
+Для `trade_horizon == "fast"` реализовать закрытие позиции по timeout при превышении `max_trade_duration_minutes`.
 
-В events/trades/metrics записывать:
-
+Записывать в trades/events/metrics:
 - `trade_horizon`
 - `trade_direction`
 - `target_net_profit_usdt`
@@ -128,49 +109,45 @@ TRADE_HORIZON_DEFAULTS = {
 - `expected_slippage_usdt`
 - `expected_net_profit_usdt`
 
-### 2.4. `chatbot/handlers/pipeline.py`
+## 5. pipeline.py
 
 Переделать запуск сессии в Telegram в guided flow:
+1. выбор направления
+2. выбор горизонта
+3. выбор бюджета
+4. выбор risk mode
+5. подтверждение старта
 
-1. выбор направления;
-2. выбор горизонта;
-3. выбор бюджета;
-4. выбор risk mode;
-5. подтверждение старта.
-
-Добавить кнопки:
-
-**Direction**
+### кнопки
+Direction:
 - `🟢 LONG`
 - `🔴 SHORT`
 - `↕ BOTH`
 - `🤖 AUTO`
 
-**Horizon**
+Horizon:
 - `⚡ FAST`
 - `📈 MEDIUM`
 - `🕰 LONG`
 
-**Risk**
+Risk:
 - `🛡 defensive`
 - `⚖ balanced`
 - `🔥 aggressive`
 
-**Budget**
+Budget:
 - `25 USDT`
 - `50 USDT`
 - `100 USDT`
 - `Ввести вручную`
 
 Добавить regex-first parser `parse_session_start_text(...)` для фраз:
-
 - `старт сессии fast`
 - `старт сессии long fast`
 - `старт сессии short medium`
 - `старт сессии auto fast бюджет 50`
 
 Шаблон подтверждения:
-
 ```text
 🚀 Сессия запущена
 ID: <id>
@@ -182,10 +159,9 @@ Risk mode: balanced
 Бюджет: 50 USDT
 ```
 
-### 2.5. `webui/app.py`
+## 6. webui/app.py
 
-Расширить request schema `POST /api/daily-session/start` полями:
-
+Расширить `POST /api/daily-session/start` полями:
 - `trade_direction: Literal['long','short','both','auto']`
 - `trade_horizon: Literal['fast','medium','long']`
 - `target_net_profit_usdt: float`
@@ -193,7 +169,6 @@ Risk mode: balanced
 - `cost_filter_enabled: bool`
 
 Расширить `GET /api/daily-session/active`, чтобы в `session`, `plan`, `metrics` возвращались:
-
 ```json
 {
   "trade_direction": "auto",
@@ -206,7 +181,6 @@ Risk mode: balanced
 ```
 
 В `metrics` вернуть:
-
 ```json
 {
   "gross_pnl_usdt": 0,
@@ -219,10 +193,9 @@ Risk mode: balanced
 }
 ```
 
-### 2.6. Mini App frontend
+## 7. Mini App frontend
 
 Добавить экран `Start Session` с полями:
-
 - Direction selector
 - Horizon selector
 - Budget input
@@ -231,7 +204,6 @@ Risk mode: balanced
 - Start button
 
 В active session card добавить:
-
 - `Trade Direction`
 - `Trade Horizon`
 - `Goal Profile`
@@ -240,7 +212,6 @@ Risk mode: balanced
 - `Cost Filter`
 
 В metrics panel добавить:
-
 - `Gross PnL`
 - `Fees`
 - `Slippage`
@@ -249,11 +220,9 @@ Risk mode: balanced
 - `Target Hits`
 - `Avg Duration`
 
-В event feed добавить отдельный визуальный стиль для `entry_rejected_cost_filter`.
+В event feed добавить стиль для `entry_rejected_cost_filter`.
 
----
-
-## 3. Межфайловые константы
+## 8. Межфайловые константы
 
 ```python
 TRADE_DIRECTIONS = ('long', 'short', 'both', 'auto')
@@ -268,9 +237,7 @@ DEFAULT_COST_FILTER_ENABLED = True
 DEFAULT_SESSION_GOAL_PROFILE = 'fast_profit'
 ```
 
----
-
-## 4. Acceptance plan
+## 9. Acceptance plan
 
 - `pipeline_schema.py`: миграции проходят повторно и не падают.
 - `session_manager.py`: новые поля сохраняются и попадают в active snapshot.
@@ -279,9 +246,7 @@ DEFAULT_SESSION_GOAL_PROFILE = 'fast_profit'
 - `webui/app.py`: start/active принимают и отдают новые поля.
 - Mini App: показывает profile, costs и rejected entries.
 
----
-
-## 5. Smoke test
+## 10. Smoke test
 
 1. `make build`
 2. `docker compose up -d`
@@ -291,6 +256,6 @@ DEFAULT_SESSION_GOAL_PROFILE = 'fast_profit'
 6. Проверить, что сделка с `expected_net_profit_usdt < target` не открывается и пишет `entry_rejected_cost_filter`
 ''')
 Path('output').mkdir(exist_ok=True)
-path = Path('output/TZ_implementation_by_files_fast_modes_WORED.md')
+path = Path('output/TZ_implementation_by_files_fast_modes_WORED_v11.md')
 path.write_text(content, encoding='utf-8')
 print(path.resolve())

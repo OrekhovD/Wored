@@ -114,6 +114,80 @@ async def build_market_context(symbol: str = "btcusdt") -> dict:
 
 # ─── Session CRUD ──────────────────────────────────────────────────────
 
+# ─── §3 Trade Profile Helpers (ТЗ fast_modes_WORED v1.1) ─────────────
+
+def normalize_trade_profile(payload: dict | None = None) -> dict:
+    """Нормализовать trade profile из payload, заполнить defaults."""
+    from services.execution_engine import (
+        TRADE_HORIZON_DEFAULTS,
+        DEFAULT_TRADE_DIRECTION,
+        DEFAULT_TRADE_HORIZON,
+        DEFAULT_TARGET_NET_PROFIT_USDT,
+        DEFAULT_MAX_TRADE_DURATION_MINUTES,
+        DEFAULT_COST_FILTER_ENABLED,
+        DEFAULT_SESSION_GOAL_PROFILE,
+    )
+    payload = payload or {}
+    horizon = payload.get("trade_horizon", DEFAULT_TRADE_HORIZON)
+    defaults = TRADE_HORIZON_DEFAULTS.get(horizon, TRADE_HORIZON_DEFAULTS[DEFAULT_TRADE_HORIZON])
+    return {
+        "trade_direction": payload.get("trade_direction", DEFAULT_TRADE_DIRECTION),
+        "trade_horizon": horizon,
+        "target_net_profit_usdt": float(payload.get("target_net_profit_usdt", defaults["target_net_profit_usdt"])),
+        "max_trade_duration_minutes": int(payload.get("max_trade_duration_minutes", defaults["max_trade_duration_minutes"])),
+        "cost_filter_enabled": bool(payload.get("cost_filter_enabled", DEFAULT_COST_FILTER_ENABLED)),
+        "session_goal_profile": payload.get("session_goal_profile", defaults["session_goal_profile"]),
+    }
+
+
+def build_trade_profile_from_horizon(
+    trade_horizon: str,
+    trade_direction: str = "auto",
+    target_net_profit_usdt: float | None = None,
+) -> dict:
+    """Построить profile из horizon + direction."""
+    from services.execution_engine import TRADE_HORIZON_DEFAULTS, DEFAULT_COST_FILTER_ENABLED
+    defaults = TRADE_HORIZON_DEFAULTS.get(trade_horizon, TRADE_HORIZON_DEFAULTS["fast"])
+    return {
+        "trade_direction": trade_direction,
+        "trade_horizon": trade_horizon,
+        "target_net_profit_usdt": target_net_profit_usdt or defaults["target_net_profit_usdt"],
+        "max_trade_duration_minutes": defaults["max_trade_duration_minutes"],
+        "cost_filter_enabled": DEFAULT_COST_FILTER_ENABLED,
+        "session_goal_profile": defaults["session_goal_profile"],
+    }
+
+
+async def apply_trade_profile_to_session(session_id: str, profile: dict) -> bool:
+    """Записать trade profile в trading_sessions."""
+    from storage.postgres_client import get_pool
+    pool = await get_pool()
+    if not pool:
+        return False
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE trading_sessions SET
+                trade_direction = $2,
+                trade_horizon = $3,
+                target_net_profit_usdt = $4,
+                max_trade_duration_minutes = $5,
+                cost_filter_enabled = $6,
+                session_goal_profile = $7,
+                updated_at = NOW()
+            WHERE id = $1
+            """,
+            session_id,
+            profile["trade_direction"],
+            profile["trade_horizon"],
+            profile["target_net_profit_usdt"],
+            profile["max_trade_duration_minutes"],
+            profile["cost_filter_enabled"],
+            profile["session_goal_profile"],
+        )
+    return True
+
+
 async def create_session(
     user_id: int,
     budget_usdt: float = 100.0,
@@ -121,11 +195,16 @@ async def create_session(
     risk_mode: str = "balanced",
     symbol: str = "BTCUSDT",
     source: str = "telegram",
+    trade_profile: dict | None = None,
 ) -> dict:
     """
     ТЗ 5.1 — создать торговую сессию.
+    §3 — с поддержкой trade_profile (direction, horizon, target_net_profit, etc).
     """
     from storage.postgres_client import get_pool
+
+    # §3 — normalize trade profile
+    profile = normalize_trade_profile(trade_profile)
 
     session_id = _uuid()
     now = _now_utc()
@@ -140,15 +219,26 @@ async def create_session(
             """
             INSERT INTO trading_sessions
                 (id, user_id, symbol, exchange, session_start, session_end,
-                 forecast_horizon_hours, initial_budget_usdt, risk_mode, status, created_at, updated_at)
-            VALUES ($1, $2, $3, 'HTX', $4, $5, $6, $7, $8, 'idle', NOW(), NOW())
+                 forecast_horizon_hours, initial_budget_usdt, risk_mode, status,
+                 trade_direction, trade_horizon, target_net_profit_usdt,
+                 max_trade_duration_minutes, cost_filter_enabled, session_goal_profile,
+                 created_at, updated_at)
+            VALUES ($1, $2, $3, 'HTX', $4, $5, $6, $7, $8, 'idle',
+                    $9, $10, $11, $12, $13, $14, NOW(), NOW())
             """,
             session_id, user_id, symbol, now, session_end,
             duration_hours, budget_usdt, risk_mode,
+            profile["trade_direction"],
+            profile["trade_horizon"],
+            profile["target_net_profit_usdt"],
+            profile["max_trade_duration_minutes"],
+            profile["cost_filter_enabled"],
+            profile["session_goal_profile"],
         )
 
-    log.info("Session %s created for user %d: %s %dh %s budget=%.2f",
-             session_id, user_id, symbol, duration_hours, risk_mode, budget_usdt)
+    log.info("Session %s created for user %d: %s %dh %s budget=%.2f dir=%s horizon=%s",
+             session_id, user_id, symbol, duration_hours, risk_mode, budget_usdt,
+             profile["trade_direction"], profile["trade_horizon"])
 
     return {
         "session_id": session_id,
@@ -160,6 +250,7 @@ async def create_session(
         "status": "idle",
         "session_start": now.isoformat(),
         "session_end": session_end.isoformat(),
+        **profile,
     }
 
 
@@ -679,6 +770,68 @@ async def execute_entry(
     fees = calc_fees(notional)
     position_qty = notional / entry_price
 
+    # §4 — Cost filter: evaluate entry economics before opening
+    from services.execution_engine import evaluate_entry_economics, enforce_trade_horizon_timeout
+    # Get session trade profile
+    session = await get_session(session_id)
+    target_net_profit = float(session.get("target_net_profit_usdt", 1.5)) if session else 1.5
+    cost_filter_enabled = bool(session.get("cost_filter_enabled", True)) if session else True
+    trade_horizon = session.get("trade_horizon", "fast") if session else "fast"
+    trade_direction = session.get("trade_direction", "auto") if session else "auto"
+
+    # §4.1 — Check trade_direction filter
+    if trade_direction != "auto" and trade_direction != "both":
+        if side != trade_direction:
+            log.info("Entry rejected: side=%s but trade_direction=%s", side, trade_direction)
+            return {"executed": False, "reason": "entry_rejected_direction_filter",
+                    "side": side, "trade_direction": trade_direction}
+
+    # §4.2 — Evaluate economics + cost filter
+    tp_list = entry.get("take_profit_json", [])
+    if isinstance(tp_list, str):
+        tp_list = json.loads(tp_list)
+    tp1 = float(tp_list[0]) if tp_list else entry_price * (1.02 if side == "long" else 0.98)
+
+    economics = evaluate_entry_economics(
+        side, entry_price, tp1, position_qty, notional,
+        target_net_profit, cost_filter_enabled,
+    )
+
+    if economics["rejected"]:
+        log.info("Entry rejected by cost filter: net=%.4f < target=%.4f",
+                 economics["expected_net_profit_usdt"], target_net_profit)
+        # Log rejection event
+        pool_reject = await get_pool()
+        if pool_reject:
+            async with pool_reject.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO execution_events
+                        (id, session_id, entry_id, event_type, state_before, state_after, event_payload)
+                    VALUES ($1, $2, $3, 'entry_rejected_cost_filter', 'armed', 'armed', $4)
+                    """,
+                    _uuid(), session_id, entry.get("id"),
+                    json.dumps({
+                        "side": side,
+                        "entry_price": entry_price,
+                        "expected_net_profit": economics["expected_net_profit_usdt"],
+                        "target_net_profit": target_net_profit,
+                        "expected_fees": economics["expected_total_fees_usdt"],
+                        "expected_slippage": economics["expected_slippage_usdt"],
+                    }),
+                )
+                # Increment rejected counter in metrics
+                await conn.execute(
+                    """
+                    INSERT INTO session_metrics (session_id, rejected_by_cost_filter_count)
+                    VALUES ($1, 1)
+                    ON CONFLICT (session_id) DO UPDATE
+                    SET rejected_by_cost_filter_count = session_metrics.rejected_by_cost_filter_count + 1
+                    """,
+                    session_id,
+                )
+        return {"executed": False, "reason": "entry_rejected_cost_filter", "economics": economics}
+
     trade_id = _uuid()
     pool = await get_pool()
     if not pool:
@@ -690,12 +843,19 @@ async def execute_entry(
             INSERT INTO executed_trades
                 (id, session_id, entry_id, side, margin_mode, leverage,
                  opened_at, entry_price, position_qty, position_notional_usdt,
-                 margin_used_usdt, open_fee_usdt, status)
-            VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9, $10, $11, 'open')
+                 margin_used_usdt, open_fee_usdt, status,
+                 trade_horizon, trade_direction, target_net_profit_usdt,
+                 expected_total_fees_usdt, expected_slippage_usdt, expected_net_profit_usdt)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9, $10, $11, 'open',
+                    $12, $13, $14, $15, $16, $17)
             """,
             trade_id, session_id, entry.get("id"),
             side, entry.get("margin_mode", "isolated"), leverage,
             entry_price, position_qty, notional, margin_used, fees["open_fee_usdt"],
+            trade_horizon, trade_direction, target_net_profit,
+            economics["expected_total_fees_usdt"],
+            economics["expected_slippage_usdt"],
+            economics["expected_net_profit_usdt"],
         )
 
         # Mark entry as triggered
@@ -969,6 +1129,20 @@ async def execution_watch_loop(session_id: str) -> dict:
                 actions.append({"action": "entry", "entry_id": str(pe["id"]), "result": result})
                 break  # ТЗ 7.4: only 1 position at a time
 
+    # 2.5 §4 — Fast timeout: close positions exceeding max_trade_duration_minutes
+    from services.execution_engine import enforce_trade_horizon_timeout
+    if session.get("trade_horizon") == "fast" and open_trades:
+        max_dur = int(session.get("max_trade_duration_minutes") or 15)
+        for trade in open_trades:
+            should_close, elapsed = enforce_trade_horizon_timeout(trade["opened_at"], max_dur)
+            if should_close:
+                result = await execute_exit(session_id, str(trade["id"]), current_price, "fast_timeout")
+                actions.append({"action": "fast_timeout", "trade_id": str(trade["id"]),
+                               "elapsed_minutes": elapsed, "result": result})
+                log.info("Fast timeout: trade %s closed after %d min (max %d)",
+                         trade["id"], elapsed, max_dur)
+                break  # only 1 position at a time
+
     # 3. Check session window completion
     session_end = session["session_end"]
     if session_end.tzinfo is None:
@@ -1182,6 +1356,13 @@ async def build_active_snapshot(session_id: str) -> dict:
             "failedentries": failed_entries,
             "lastcommand": last_rev["execution_command"] if last_rev else None,
             "activeplanversion": session["active_plan_version"],
+            # §3 — trade profile fields
+            "tradedirection": session.get("trade_direction", "auto"),
+            "tradehorizon": session.get("trade_horizon", "fast"),
+            "targetnetprofitusdt": float(session.get("target_net_profit_usdt") or 1.5),
+            "maxtradedurationminutes": int(session.get("max_trade_duration_minutes") or 15),
+            "costfilterenabled": bool(session.get("cost_filter_enabled", True)),
+            "sessiongoalprofile": session.get("session_goal_profile", "fast_profit"),
         },
         "plan": {
             "id": str(plan["id"]),
@@ -1219,6 +1400,14 @@ async def build_active_snapshot(session_id: str) -> dict:
             "maxdrawdownpct": float(metrics["max_drawdown_pct"]),
             "profitfactor": float(metrics["profit_factor"]) if metrics["profit_factor"] else None,
             "timeinmarketpct": float(metrics["time_in_market_pct"]) if metrics["time_in_market_pct"] else None,
+            # §3 — fast-mode metrics
+            "grosspnlusdt": float(metrics.get("gross_pnl_usdt") or 0),
+            "feesusdt": float(metrics.get("fees_usdt") or 0),
+            "slippageusdt": float(metrics.get("slippage_usdt") or 0),
+            "netpnaftercostsusdt": float(metrics.get("net_pnl_after_costs_usdt") or 0),
+            "avgtradedurationminutes": float(metrics["avg_trade_duration_minutes"]) if metrics.get("avg_trade_duration_minutes") else None,
+            "rejectedbycostfiltercount": int(metrics.get("rejected_by_cost_filter_count") or 0),
+            "targethitscount": int(metrics.get("target_hits_count") or 0),
         } if metrics else None,
         "trades": [
             {

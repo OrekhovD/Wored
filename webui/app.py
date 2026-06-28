@@ -2481,6 +2481,13 @@ async def api_daily_session_active(request: Request):
             "failedentries": failed_entries,
             "lastcommand": last_rev["execution_command"] if last_rev else None,
             "activeplanversion": session["active_plan_version"],
+            # §6 — trade profile fields
+            "tradedirection": session.get("trade_direction", "auto"),
+            "tradehorizon": session.get("trade_horizon", "fast"),
+            "targetnetprofitusdt": float(session.get("target_net_profit_usdt") or 1.5),
+            "maxtradedurationminutes": int(session.get("max_trade_duration_minutes") or 15),
+            "costfilterenabled": bool(session.get("cost_filter_enabled", True)),
+            "sessiongoalprofile": session.get("session_goal_profile", "fast_profit"),
         },
         "plan": {
             "id": str(plan["id"]),
@@ -2518,6 +2525,14 @@ async def api_daily_session_active(request: Request):
             "maxdrawdownpct": float(metrics["max_drawdown_pct"]),
             "profitfactor": float(metrics["profit_factor"]) if metrics["profit_factor"] else None,
             "timeinmarketpct": float(metrics["time_in_market_pct"]) if metrics["time_in_market_pct"] else None,
+            # §6 — fast-mode metrics
+            "grosspnlusdt": float(metrics.get("gross_pnl_usdt") or 0),
+            "feesusdt": float(metrics.get("fees_usdt") or 0),
+            "slippageusdt": float(metrics.get("slippage_usdt") or 0),
+            "netpnaftercostsusdt": float(metrics.get("net_pnl_after_costs_usdt") or 0),
+            "avgtradedurationminutes": float(metrics["avg_trade_duration_minutes"]) if metrics.get("avg_trade_duration_minutes") else None,
+            "rejectedbycostfiltercount": int(metrics.get("rejected_by_cost_filter_count") or 0),
+            "targethitscount": int(metrics.get("target_hits_count") or 0),
         } if metrics else {
             "tradecount": 0,
             "wincount": 0,
@@ -2528,6 +2543,13 @@ async def api_daily_session_active(request: Request):
             "maxdrawdownpct": 0.0,
             "profitfactor": None,
             "timeinmarketpct": 0.0,
+            "grosspnlusdt": 0.0,
+            "feesusdt": 0.0,
+            "slippageusdt": 0.0,
+            "netpnaftercostsusdt": 0.0,
+            "avgtradedurationminutes": None,
+            "rejectedbycostfiltercount": 0,
+            "targethitscount": 0,
         },
         "trades": [
             {
@@ -2565,7 +2587,7 @@ async def api_daily_session_active(request: Request):
 
 @app.post("/api/daily-session/start")
 async def api_daily_session_start(request: Request, body: dict = Body(...)):
-    """ТЗ 5.1 — start new daily trading session. Direct SQL."""
+    """ТЗ 5.1 + §6 — start new daily trading session with trade profile."""
     require_api_auth(request)
 
     pool = request.app.state.pg_pool
@@ -2577,8 +2599,21 @@ async def api_daily_session_start(request: Request, body: dict = Body(...)):
     duration = int(body.get("duration_hours", 8))
     user_id = int(body.get("user_id", 5249526259))
 
+    # §6 — Trade profile from body
+    trade_direction = body.get("trade_direction", "auto")
+    trade_horizon = body.get("trade_horizon", "fast")
+    target_net_profit = float(body.get("target_net_profit_usdt", 1.5))
+    max_trade_duration = int(body.get("max_trade_duration_minutes", 15))
+    cost_filter_enabled = bool(body.get("cost_filter_enabled", True))
+
     if risk_mode not in ("defensive", "balanced", "aggressive"):
         return JSONResponse({"ok": False, "error": "invalid_risk_mode", "message": "risk_mode must be defensive/balanced/aggressive"}, status_code=400)
+
+    # Validate trade_direction/trade_horizon
+    if trade_direction not in ("long", "short", "both", "auto"):
+        return JSONResponse({"ok": False, "error": "invalid_trade_direction"}, status_code=400)
+    if trade_horizon not in ("fast", "medium", "long"):
+        return JSONResponse({"ok": False, "error": "invalid_trade_horizon"}, status_code=400)
 
     # Check for existing active session (ТЗ 11.2)
     async with pool.acquire() as conn:
@@ -2596,15 +2631,25 @@ async def api_daily_session_start(request: Request, body: dict = Body(...)):
     now = datetime.now(timezone.utc)
     session_end = now + timedelta(hours=duration)
 
+    # Determine session_goal_profile from horizon
+    goal_profiles = {"fast": "fast_profit", "medium": "balanced_intraday", "long": "session_swing"}
+    session_goal_profile = goal_profiles.get(trade_horizon, "fast_profit")
+
     async with pool.acquire() as conn:
         await conn.execute(
             """
             INSERT INTO trading_sessions
                 (id, user_id, symbol, exchange, session_start, session_end,
-                 forecast_horizon_hours, initial_budget_usdt, risk_mode, status, created_at, updated_at)
-            VALUES ($1, $2, 'BTCUSDT', 'HTX', $3, $4, $5, $6, $7, 'idle', NOW(), NOW())
+                 forecast_horizon_hours, initial_budget_usdt, risk_mode, status,
+                 trade_direction, trade_horizon, target_net_profit_usdt,
+                 max_trade_duration_minutes, cost_filter_enabled, session_goal_profile,
+                 created_at, updated_at)
+            VALUES ($1, $2, 'BTCUSDT', 'HTX', $3, $4, $5, $6, $7, 'idle',
+                    $8, $9, $10, $11, $12, $13, NOW(), NOW())
             """,
             session_id, user_id, now, session_end, duration, budget, risk_mode,
+            trade_direction, trade_horizon, target_net_profit,
+            max_trade_duration, cost_filter_enabled, session_goal_profile,
         )
 
     return JSONResponse({
@@ -2612,6 +2657,14 @@ async def api_daily_session_start(request: Request, body: dict = Body(...)):
         "session_id": session_id,
         "status": "idle",
         "message": "session created — plan generation requires chatbot analyst trigger",
+        "trade_profile": {
+            "trade_direction": trade_direction,
+            "trade_horizon": trade_horizon,
+            "target_net_profit_usdt": target_net_profit,
+            "max_trade_duration_minutes": max_trade_duration,
+            "cost_filter_enabled": cost_filter_enabled,
+            "session_goal_profile": session_goal_profile,
+        },
     }, status_code=201)
 
 
