@@ -17,7 +17,7 @@ from storage.postgres_client import get_latest_prediction_request, get_predictio
 log = logging.getLogger(__name__)
 router = Router()
 
-HORIZON_ROWS = ((1, 2, 3, 4), (8, 16, 24))
+HORIZON_ROWS = ((1, 2), (4, 8))
 ROLE_ALIASES = {"Analyst": "A", "Strategist": "S", "Oracle": "O", "Worker": "W"}
 STATUS_EMOJI = {
     "completed": "🟢",
@@ -71,7 +71,6 @@ def build_prediction_horizon_keyboard(symbol: str) -> InlineKeyboardMarkup:
         )
     keyboard.append(
         [
-            InlineKeyboardButton(text="📋 Последний", callback_data=f"prediction_latest:{symbol}"),
             InlineKeyboardButton(text="⬅️ Назад", callback_data="prediction_menu"),
         ]
     )

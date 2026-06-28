@@ -32,8 +32,9 @@ def get_analytics_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_analytics_result_keyboard(symbol: str) -> InlineKeyboardMarkup:
-    """ТЗ §8.7 — кнопки для результата анализа."""
+    """ТЗ §8.7 — кнопки: Mini App, Рынок, Прогноз, Полный обзор."""
     url = os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8080"
+    webui_url = f"{url}/analytics/{symbol}" if not url.endswith("/") else f"{url}analytics/{symbol}"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -42,7 +43,7 @@ def get_analytics_result_keyboard(symbol: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text=f"🔮 Прогноз {symbol.upper()}", callback_data=f"prediction_symbol:{symbol}"),
-                InlineKeyboardButton(text="🔄 Обновить", callback_data=f"analytics:{symbol}"),
+                InlineKeyboardButton(text="📈 Полный обзор", url=webui_url),
             ],
         ]
     )

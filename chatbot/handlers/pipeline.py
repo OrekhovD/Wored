@@ -418,14 +418,16 @@ async def _build_status_response(user_id: int) -> tuple[str, InlineKeyboardMarku
             )
 
         open_count = sum(1 for t in trades if t["status"] == "open")
-        pnl_unreal = 0.0
-        pnl_real = 0.0
-        for t in trades:
-            if t["status"] == "open":
-                # approximate unrealized from metrics if available
-                pass
-            elif t["status"] == "closed" and t["realised_pnl_usdt"]:
-                pnl_real += float(t["realised_pnl_usdt"])
+        # ТЗ §8.1 — Realized PnL = sum of closed trades' realised_pnl_usdt
+        realized_pnl = sum(
+            float(t.get("realised_pnl_usdt") or 0)
+            for t in trades
+            if t["status"] == "closed"
+        )
+
+        # ТЗ §8.1 — Unrealized PnL = total_pnl - realized
+        total_pnl = float(metrics.get("total_pnl_usdt") or 0) if metrics else realized_pnl
+        unrealized_pnl = total_pnl - realized_pnl
 
         # ТЗ §7.2 — приоритет аварийности: авария → статус → PnL → позиции → детали
         # ТЗ §8.1 — шаблон
@@ -445,25 +447,28 @@ async def _build_status_response(user_id: int) -> tuple[str, InlineKeyboardMarku
         elif risk_status == "warning":
             lines.append("⚠️ <b>Риск: warning</b>")
         # 2. Статус сессии
-        lines.append(f"🎯 <b>Активная сессия</b>")
+        lines.append("🎯 <b>Активная сессия</b>")
         lines.append(f"ID: <code>{str(session['id'])[:8]}</code>")
         lines.append(f"Статус: {session['status'].upper()}")
         lines.append(f"План: v{session['active_plan_version']}")
         lines.append(f"Режим риска: {session['risk_mode']}")
         lines.append(f"Бюджет: {float(session['initial_budget_usdt']):.0f} USDT")
-        # 3. Агрегированный PnL и риск
-        if metrics:
-            lines.append(f"Realized PnL: {float(metrics['total_pnl_usdt']):+.2f} USDT")
-            lines.append(f"Total PnL: {float(metrics['total_pnl_usdt']):+.2f} USDT ({float(metrics['total_pnl_pct']):+.1f}%)")
-            lines.append(f"Max DD: {float(metrics['max_drawdown_pct']):.1f}% / лимит {risk_limit_pct:.1f}%")
-        # 4. Количество позиций
         lines.append(f"Открыто позиций: {open_count}")
-        # 5. Последняя команда
+        # 3. Агрегированный PnL и риск (ТЗ §8.1 — separate Unrealized/Realized)
+        if metrics:
+            lines.append(f"Unrealized PnL: {unrealized_pnl:+.2f} USDT ({(unrealized_pnl / float(session['initial_budget_usdt']) * 100):+.1f}%)")
+            lines.append(f"Realized PnL: {realized_pnl:+.2f} USDT")
+            lines.append(f"Max DD: {float(metrics['max_drawdown_pct']):.1f}% / лимит {risk_limit_pct:.1f}%")
+        # 4. Последняя команда
         if last_rev:
             lines.append(f"Последняя команда: {last_rev['execution_command']}")
 
-        # ТЗ §7.3 — если > 10 строк, offer Mini App
+        # ТЗ §7.3 — если > 12 строк, digest + Mini App кнопка
         text = "\n".join(lines)
+        if len(lines) > 12:
+            # Digest: только приоритетные поля
+            digest_lines = lines[:6] + ["\n📱 <i>Подробнее — в Mini App</i>"]
+            text = "\n".join(digest_lines)
         return text, _session_kb()
     except Exception as exc:
         log.error("Pipeline status error: %s", exc)
@@ -497,12 +502,11 @@ async def _build_positions_response(user_id: int) -> tuple[str, InlineKeyboardMa
         shorts = sum(1 for t in open_trades if t["side"] == "short")
 
         # ТЗ §8.2 — приоритет показа: 1) ближайшая к ликвидации 2) самая убыточная 3) самая большая по марже
-        # Since we don't have liquidation price in schema, sort by leverage desc (higher lev = closer to liq)
-        # then by negative PnL (if available), then by margin desc
         def _position_priority(t):
             lev = float(t.get("leverage") or 1)
             margin = float(t.get("margin_used_usdt") or 0)
-            return (-lev, -margin)
+            pnl = float(t.get("realised_pnl_usdt") or 0)
+            return (-lev, pnl, -margin)  # higher lev = closer to liq, lower pnl = more losing, higher margin
 
         open_trades_sorted = sorted(open_trades, key=_position_priority)
 
@@ -518,9 +522,11 @@ async def _build_positions_response(user_id: int) -> tuple[str, InlineKeyboardMa
                         "SELECT * FROM session_metrics WHERE session_id = $1", str(session["id"])
                     )
                     if metrics:
-                        unrealized_pnl = float(metrics.get("total_pnl_usdt") or 0) - sum(
-                            float(t.get("realised_pnl_usdt") or 0) for t in trades if t["status"] == "closed"
+                        realized_pnl = sum(
+                            float(t.get("realised_pnl_usdt") or 0)
+                            for t in trades if t["status"] == "closed"
                         )
+                        unrealized_pnl = float(metrics.get("total_pnl_usdt") or 0) - realized_pnl
                         max_dd = float(metrics.get("max_drawdown_pct") or 0)
                         if max_dd >= 4.8:
                             risk_status = "warning"
@@ -529,17 +535,34 @@ async def _build_positions_response(user_id: int) -> tuple[str, InlineKeyboardMa
         except Exception:
             pass
 
+        # ТЗ §8.2 — ближайшая ликвидация (позиция с макс leverage)
+        nearest_liq = "—"
+        if open_trades_sorted:
+            liq_trade = open_trades_sorted[0]  # already sorted by highest leverage first
+            liq_side = "long" if liq_trade["side"] == "long" else "short"
+            nearest_liq = f"{liq_trade['side'].upper()} #{str(liq_trade['id'])[:8]}"
+
+        # ТЗ §8.2 — определяем символы для digest (используем символы из trades, не hardcoded)
+        symbols_in_positions = set()
+        for t in open_trades:
+            sym = t.get("symbol") or "BTCUSDT"
+            symbols_in_positions.add(sym)
+
         lines = [
             f"📦 <b>Открытые позиции</b>",
             f"Всего: {len(open_trades)}",
         ]
         if longs:
-            lines.append(f"LONG BTCUSDT: {longs}")
+            long_syms = [t.get("symbol", "BTCUSDT").upper() for t in open_trades if t["side"] == "long"]
+            long_sym_str = "/".join(sorted(set(long_syms)))
+            lines.append(f"LONG {long_sym_str}: {longs}")
         if shorts:
-            lines.append(f"SHORT BTCUSDT: {shorts}")
-        if unrealized_pnl != 0:
-            lines.append(f"Общий unrealized PnL: {unrealized_pnl:+.2f} USDT")
+            short_syms = [t.get("symbol", "BTCUSDT").upper() for t in open_trades if t["side"] == "short"]
+            short_sym_str = "/".join(sorted(set(short_syms)))
+            lines.append(f"SHORT {short_sym_str}: {shorts}")
+        lines.append(f"Общий unrealized PnL: {unrealized_pnl:+.2f} USDT")
         lines.append(f"Общая маржа: {total_margin:.2f} USDT")
+        lines.append(f"Ближайшая ликвидация: {nearest_liq}")
         lines.append(f"Риск: {risk_status}")
 
         # ТЗ §8.2 — максимум 3 позиции по приоритету

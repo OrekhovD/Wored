@@ -37,7 +37,7 @@ def get_main_keyboard(has_session: bool = True) -> ReplyKeyboardMarkup:
             # Row 1-2: 6 разделов (ТЗ §5.1)
             [KeyboardButton(text="📊 Рынок"), KeyboardButton(text="🧠 Аналитика")],
             [KeyboardButton(text="🔮 Прогнозы"), KeyboardButton(text="📦 Портфель")],
-            [KeyboardButton(text="🔔 Алерты"), KeyboardButton(text="🎯 Старт сессии")],
+            [KeyboardButton(text="🔔 Алерты"), KeyboardButton(text="🎯 Сессия")],
         ],
         resize_keyboard=True,
         is_persistent=True,

@@ -35,9 +35,9 @@ async def menu_alerts(message: Message):
     await send_alerts(message)
 
 
-@router.message(F.text == "🎯 Старт сессии")
-async def menu_start_session(message: Message):
-    """ТЗ §6.1 — старт сессии из главного меню."""
-    from handlers.pipeline import handle_pipeline_intent
-    result = await handle_pipeline_intent({"intent": "pipeline_start", "budget": 100.0, "risk_mode": "balanced"}, user_id=message.from_user.id)
-    await message.answer(result, reply_markup=None)
+@router.message(F.text == "🎯 Сессия")
+async def menu_session_status(message: Message):
+    """ТЗ §5.1 — кнопка Сессия = статус активной сессии."""
+    from handlers.pipeline import _build_status_response
+    text, kb = await _build_status_response(message.from_user.id)
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")

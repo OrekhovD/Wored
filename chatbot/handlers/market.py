@@ -16,21 +16,19 @@ WATCHLIST = [s.strip().lower() for s in os.getenv("WATCHLIST", "btcusdt,ethusdt"
 
 
 def get_market_keyboard() -> InlineKeyboardMarkup:
-    """ТЗ §8.6 — кнопки: символы + Анализ + Прогнозы."""
-    analytics_buttons = [InlineKeyboardButton(text=f"🧠 {sym.upper()}", callback_data=f"analytics:{sym}") for sym in WATCHLIST]
-    prediction_buttons = [InlineKeyboardButton(text=f"🔮 {sym.upper()}", callback_data=f"prediction_symbol:{sym}") for sym in WATCHLIST]
-
+    """ТЗ §8.6/§9 — 4 кнопки: символы + Анализ + Прогнозы (max 5)."""
     keyboard = []
-    if analytics_buttons:
-        keyboard.append(analytics_buttons)
-    if prediction_buttons:
-        keyboard.append(prediction_buttons)
-    keyboard.append(
-        [
-            InlineKeyboardButton(text="📋 Forecast Lab", callback_data="prediction_menu"),
-            InlineKeyboardButton(text="🔄 Обновить", callback_data="refresh_market"),
-        ]
-    )
+    # Row 1: symbol buttons (ТЗ §8.6 — BTCUSDT, ETHUSDT)
+    sym_buttons = [InlineKeyboardButton(text=sym.upper(), callback_data=f"analytics:{sym}") for sym in WATCHLIST[:2]]
+    if sym_buttons:
+        keyboard.append(sym_buttons)
+    # Row 2: Анализ + Прогнозы (ТЗ §8.6)
+    keyboard.append([
+        InlineKeyboardButton(text="🧠 Анализ", callback_data="analytics:btcusdt"),
+        InlineKeyboardButton(text="🔮 Прогнозы", callback_data="prediction_menu"),
+    ])
+    # Row 3: Обновить
+    keyboard.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="refresh_market")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
