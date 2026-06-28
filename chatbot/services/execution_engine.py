@@ -70,14 +70,18 @@ TRADE_HORIZON_DEFAULTS = {
 
 
 class SessionState(str, Enum):
-    """ТЗ 6.1 — 7 состояний."""
+    """ТЗ 6.1 — 9 состояний (v3: +CREATED, +PLANNED, +FAILED, +BLOCKED)."""
+    CREATED = "created"
+    PLANNED = "planned"
     IDLE = "idle"
     ARMED = "armed"
     IN_POSITION = "in_position"
     COOLDOWN = "cooldown"
     PAUSED = "paused"
+    BLOCKED = "blocked"
     STOPPED = "stopped"
     COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class ExecutionCommand(str, Enum):
@@ -92,7 +96,14 @@ class ExecutionCommand(str, Enum):
 # ─── Transition table (ТЗ 6.2) ─────────────────────────────────────────
 
 TRANSITIONS = {
+    # v3: new early states
+    (SessionState.CREATED, "session_created"): SessionState.PLANNED,
+    (SessionState.PLANNED, "plan_generated"): SessionState.IDLE,
+    (SessionState.PLANNED, "plan_generation_failed"): SessionState.FAILED,
     (SessionState.IDLE, "has_planned_entries"): SessionState.ARMED,
+    (SessionState.IDLE, "bootstrap_blocked"): SessionState.BLOCKED,
+    (SessionState.BLOCKED, "bootstrap_retry_ok"): SessionState.ARMED,
+    (SessionState.BLOCKED, "session_window_completed"): SessionState.COMPLETED,
     (SessionState.ARMED, "entry_trigger_confirmed"): SessionState.IN_POSITION,
     (SessionState.IN_POSITION, "closed_by_stop_loss"): SessionState.COOLDOWN,
     (SessionState.IN_POSITION, "closed_by_tp_or_invalidation"): SessionState.ARMED,

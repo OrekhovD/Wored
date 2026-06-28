@@ -304,6 +304,172 @@ async def update_session_status(session_id: str, status: str, final_reason: str 
     return True
 
 
+# ─── Audit Event Logger (ТЗ §8) ─────────────────────────────────────
+
+async def log_execution_event(
+    session_id: str,
+    event_type: str,
+    state_before: str = "",
+    state_after: str = "",
+    payload: dict | None = None,
+) -> bool:
+    """§8 — write audit trail to execution_events."""
+    from storage.postgres_client import get_pool
+    pool = await get_pool()
+    if not pool:
+        return False
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO execution_events (id, session_id, event_type, state_before, state_after, event_payload, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            """,
+            _uuid(), session_id, event_type, state_before, state_after,
+            json.dumps(payload) if payload else None,
+        )
+    return True
+
+
+# ─── Bootstrap (ТЗ §6.2) ─────────────────────────────────────────────
+
+async def bootstrap_session(session_id: str) -> dict:
+    """§6.2 — post-creation bootstrap: validate market, arm session, log audit.
+
+    Returns {"ok": True, "status": "armed"} or {"ok": False, "status": "blocked", "reason": "..."}.
+    """
+    session = await get_session(session_id)
+    if not session:
+        return {"ok": False, "status": "failed", "reason": "session_not_found"}
+
+    state_before = session["status"]
+
+    # 1. Check fresh market snapshot in Redis
+    from storage.redis_client import get_redis
+    redis = get_redis()
+    symbol = session["symbol"].lower()
+    ticker_raw = await redis.get(f"ticker:{symbol}")
+    if not ticker_raw:
+        await log_execution_event(session_id, "bootstrap_blocked", state_before, state_before,
+                                  {"reason": "no_market_snapshot"})
+        await update_session_status(session_id, "blocked")
+        return {"ok": False, "status": "blocked", "reason": "market_snapshot_stale"}
+
+    # 2. Check active plan exists
+    from storage.postgres_client import get_pool
+    pool = await get_pool()
+    if not pool:
+        return {"ok": False, "status": "failed", "reason": "no_db_pool"}
+
+    async with pool.acquire() as conn:
+        plan_row = await conn.fetchrow(
+            "SELECT version FROM session_plans WHERE session_id=$1 ORDER BY version DESC LIMIT 1",
+            session_id,
+        )
+        if not plan_row:
+            await log_execution_event(session_id, "bootstrap_blocked", state_before, state_before,
+                                      {"reason": "no_active_plan"})
+            await update_session_status(session_id, "blocked")
+            return {"ok": False, "status": "blocked", "reason": "no_active_plan"}
+
+        entries_count = await conn.fetchval(
+            "SELECT count(*) FROM planned_entries WHERE session_id=$1 AND status='planned'",
+            session_id,
+        )
+
+    # 3. Transition to ARMED if entries exist, otherwise stay IDLE
+    if entries_count > 0:
+        await update_session_status(session_id, "armed")
+        await log_execution_event(session_id, "execution_armed", state_before, "armed",
+                                  {"plan_version": plan_row["version"], "entries": entries_count})
+        log.info("Bootstrap: session %s ARMED with %d entries", session_id, entries_count)
+        return {"ok": True, "status": "armed", "plan_version": plan_row["version"], "entries": entries_count}
+    else:
+        # Plan exists but no entries (no_trade) — keep idle, log reason
+        await log_execution_event(session_id, "bootstrap_no_entries", state_before, state_before,
+                                  {"reason": "plan_has_no_entries", "plan_version": plan_row["version"]})
+        await update_session_status(session_id, "idle")
+        log.info("Bootstrap: session %s IDLE — plan has no entries", session_id)
+        return {"ok": True, "status": "idle", "reason": "no_planned_entries", "plan_version": plan_row["version"]}
+
+
+# ─── Atomic Session Creation with Bootstrap (ТЗ §6.1) ───────────────
+
+async def create_session_with_bootstrap(
+    user_id: int,
+    budget_usdt: float = 100.0,
+    duration_hours: int = 8,
+    risk_mode: str = "balanced",
+    symbol: str = "BTCUSDT",
+    source: str = "webui",
+    trade_profile: dict | None = None,
+) -> dict:
+    """§6.1 — atomic session creation: session → plan → entries → metrics → bootstrap.
+
+    Returns {"ok": True, "session_id": ..., "status": ...} or {"ok": False, "error": ...}.
+    """
+    from storage.postgres_client import get_pool
+
+    # Step 1: Create session record
+    result = await create_session(
+        user_id=user_id,
+        budget_usdt=budget_usdt,
+        duration_hours=duration_hours,
+        risk_mode=risk_mode,
+        symbol=symbol,
+        source=source,
+        trade_profile=trade_profile,
+    )
+
+    if "error" in result:
+        return {"ok": False, "error": result["error"]}
+
+    session_id = result["session_id"]
+
+    # Step 2: Create initial session_metrics record
+    pool = await get_pool()
+    if not pool:
+        return {"ok": False, "error": "No DB pool", "session_id": session_id}
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO session_metrics (session_id, trade_count, win_count, loss_count,
+                liquidation_count, total_pnl_usdt, total_pnl_pct, max_drawdown_pct,
+                profit_factor, time_in_market_pct, updated_at)
+            VALUES ($1, 0, 0, 0, 0, 0.0, 0.0, 0.0, NULL, 0.0, NOW())
+            ON CONFLICT (session_id) DO NOTHING
+            """,
+            session_id,
+        )
+
+    # Step 3: Log session_created audit event
+    await log_execution_event(session_id, "session_created", "", "created",
+                              {"source": source, "risk_mode": risk_mode, "budget": budget_usdt})
+
+    # Step 4: Generate initial plan (Analyst AI)
+    plan_result = await generate_initial_plan(session_id)
+    if "error" in plan_result:
+        # Plan generation failed — mark session as FAILED
+        await update_session_status(session_id, "failed")
+        await log_execution_event(session_id, "plan_generation_failed", "created", "failed",
+                                  {"error": plan_result["error"]})
+        return {"ok": False, "error": plan_result["error"], "session_id": session_id,
+                "status": "failed", "reason": "plan_generation_failed"}
+
+    # Step 5: Bootstrap — validate market + transition to ARMED
+    bootstrap = await bootstrap_session(session_id)
+
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "status": bootstrap.get("status", "idle"),
+        "plan_version": bootstrap.get("plan_version"),
+        "entries": bootstrap.get("entries", 0),
+        "bootstrap_reason": bootstrap.get("reason"),
+        **{k: v for k, v in result.items() if k != "status"},
+    }
+
+
 # ─── Plan Generation (ТЗ 5.3) ──────────────────────────────────────────
 
 PLAN_GENERATION_PROMPT = """Ты — Crypto Trader Agent (Analyst), эксперт по BTCUSDT perpetual futures на HTX.

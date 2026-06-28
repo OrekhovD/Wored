@@ -178,6 +178,16 @@
         </div>
       </div>
 
+      <!-- §7.3 — Diagnostic Banner -->
+      <div class="ds-card" id="dsDiagBanner" style="display:none">
+        <div class="ds-card-header">
+          <h2>Execution Readiness</h2>
+          <span class="ds-status-badge" id="dsReadinessBadge">CHECKING</span>
+        </div>
+        <div id="dsDiagChecks" class="ds-diag-grid"></div>
+        <div id="dsBlockedReason" class="ds-blocked-reason" style="display:none"></div>
+      </div>
+
       <!-- 2. Session Health Grid (Metrics + Risk combined) -->
       <div class="ds-card" id="dsHealth" style="display:none">
         <div class="ds-card-header"><h2>Session Health</h2></div>
@@ -505,6 +515,9 @@ async function loadSession() {
       document.getElementById('dsControls').style.display = 'none';
     }
 
+    // §7.3 — Load diagnostics
+    loadDiagnostics(s.id);
+
     // Health KPI Grid
     if (data.metrics) {
       document.getElementById('dsHealth').style.display = '';
@@ -767,6 +780,59 @@ async function sendCommand(cmd) {
   } catch (err) {
     result.textContent = `✗ ${err.message}`;
     result.className = 'ds-cmd-result ds-cmd-error';
+  }
+}
+
+// ─── §7.3 Diagnostics ───
+async function loadDiagnostics(sessionId) {
+  try {
+    const res = await fetch(`/api/daily-session/diagnostics?session_id=${sessionId}`);
+    const data = await res.json();
+    if (!data.ok || !data.diagnostics) return;
+
+    const d = data.diagnostics;
+    const banner = document.getElementById('dsDiagBanner');
+    const badge = document.getElementById('dsReadinessBadge');
+    const checksDiv = document.getElementById('dsDiagChecks');
+    const blockedDiv = document.getElementById('dsBlockedReason');
+
+    banner.style.display = '';
+    badge.textContent = d.ready ? 'READY' : 'BLOCKED';
+    badge.style.color = d.ready ? '#22c55e' : '#ef4444';
+
+    // Render checks
+    const labels = {
+      session_status: 'Session Status',
+      market_snapshot: 'Market Snapshot',
+      active_plan: 'Active Plan',
+      risk_gate: 'Risk Gate',
+      session_window: 'Session Window',
+    };
+    let html = '';
+    for (const [key, val] of Object.entries(d.checks)) {
+      const ok = val.ok !== false;
+      const icon = ok ? '✓' : '✗';
+      const color = ok ? '#22c55e' : '#ef4444';
+      let detail = '';
+      if (key === 'market_snapshot' && val.price) detail = `$${val.price.toFixed(2)}`;
+      else if (key === 'active_plan' && val.version != null) detail = `v${val.version} · ${val.entries} entries`;
+      else if (key === 'risk_gate' && val.max_dd != null) detail = `DD ${val.max_dd.toFixed(2)}% / ${val.limit}%`;
+      else if (key === 'session_window' && val.expires_in_min != null) detail = `${val.expires_in_min}m left`;
+      else if (val.value) detail = val.value;
+      else if (val.reason) detail = val.reason;
+      html += `<div class="ds-diag-check"><span style="color:${color}">${icon}</span> <strong>${labels[key] || key}</strong> ${detail}</div>`;
+    }
+    checksDiv.innerHTML = html;
+
+    // Blocked reason
+    if (d.blocked_reason) {
+      blockedDiv.style.display = '';
+      blockedDiv.textContent = `⚠ Blocked: ${d.blocked_reason}`;
+    } else {
+      blockedDiv.style.display = 'none';
+    }
+  } catch (err) {
+    console.error('Diagnostics error:', err);
   }
 }
 

@@ -2587,7 +2587,14 @@ async def api_daily_session_active(request: Request):
 
 @app.post("/api/daily-session/start")
 async def api_daily_session_start(request: Request, body: dict = Body(...)):
-    """ТЗ 5.1 + §6 — start new daily trading session with trade profile."""
+    """ТЗ 5.1 + §6.1 — start new daily trading session with atomic bootstrap.
+
+    Calls create_session_with_bootstrap() which:
+    1. Creates session in DB
+    2. Creates initial session_metrics
+    3. Generates initial plan via Analyst AI
+    4. Bootstraps: validates market + transitions to ARMED or BLOCKED
+    """
     require_api_auth(request)
 
     pool = request.app.state.pg_pool
@@ -2607,9 +2614,8 @@ async def api_daily_session_start(request: Request, body: dict = Body(...)):
     cost_filter_enabled = bool(body.get("cost_filter_enabled", True))
 
     if risk_mode not in ("defensive", "balanced", "aggressive"):
-        return JSONResponse({"ok": False, "error": "invalid_risk_mode", "message": "risk_mode must be defensive/balanced/aggressive"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "invalid_risk_mode"}, status_code=400)
 
-    # Validate trade_direction/trade_horizon
     if trade_direction not in ("long", "short", "both", "auto"):
         return JSONResponse({"ok": False, "error": "invalid_trade_direction"}, status_code=400)
     if trade_horizon not in ("fast", "medium", "long"):
@@ -2618,53 +2624,54 @@ async def api_daily_session_start(request: Request, body: dict = Body(...)):
     # Check for existing active session (ТЗ 11.2)
     async with pool.acquire() as conn:
         existing = await conn.fetchrow(
-            "SELECT id, status FROM trading_sessions WHERE user_id = $1 AND status NOT IN ('completed', 'stopped') ORDER BY created_at DESC LIMIT 1",
+            "SELECT id, status FROM trading_sessions WHERE user_id = $1 AND status NOT IN ('completed', 'stopped', 'failed') ORDER BY created_at DESC LIMIT 1",
             user_id,
         )
 
     if existing:
-        return {"ok": True, "session_id": str(existing["id"]), "status": existing["status"], "message": "session already active"}
+        return {"ok": True, "session_id": str(existing["id"]), "status": existing["status"],
+                "message": "session already active"}
 
-    # Create session directly
-    import uuid as uuid_mod
-    session_id = str(uuid_mod.uuid4())
-    now = datetime.now(timezone.utc)
-    session_end = now + timedelta(hours=duration)
+    # Build trade profile
+    trade_profile = {
+        "trade_direction": trade_direction,
+        "trade_horizon": trade_horizon,
+        "target_net_profit_usdt": target_net_profit,
+        "max_trade_duration_minutes": max_trade_duration,
+        "cost_filter_enabled": cost_filter_enabled,
+    }
 
-    # Determine session_goal_profile from horizon
-    goal_profiles = {"fast": "fast_profit", "medium": "balanced_intraday", "long": "session_swing"}
-    session_goal_profile = goal_profiles.get(trade_horizon, "fast_profit")
+    # Atomic create + plan + bootstrap
+    import sys
+    sys.path.insert(0, "/chatbot")
+    from services.session_manager import create_session_with_bootstrap
 
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO trading_sessions
-                (id, user_id, symbol, exchange, session_start, session_end,
-                 forecast_horizon_hours, initial_budget_usdt, risk_mode, status,
-                 trade_direction, trade_horizon, target_net_profit_usdt,
-                 max_trade_duration_minutes, cost_filter_enabled, session_goal_profile,
-                 created_at, updated_at)
-            VALUES ($1, $2, 'BTCUSDT', 'HTX', $3, $4, $5, $6, $7, 'idle',
-                    $8, $9, $10, $11, $12, $13, NOW(), NOW())
-            """,
-            session_id, user_id, now, session_end, duration, budget, risk_mode,
-            trade_direction, trade_horizon, target_net_profit,
-            max_trade_duration, cost_filter_enabled, session_goal_profile,
-        )
+    result = await create_session_with_bootstrap(
+        user_id=user_id,
+        budget_usdt=budget,
+        duration_hours=duration,
+        risk_mode=risk_mode,
+        source="webui",
+        trade_profile=trade_profile,
+    )
+
+    if not result.get("ok"):
+        return JSONResponse({
+            "ok": False,
+            "error": result.get("error", "unknown"),
+            "session_id": result.get("session_id"),
+            "status": result.get("status", "failed"),
+            "reason": result.get("reason", result.get("bootstrap_reason")),
+        }, status_code=500)
 
     return JSONResponse({
         "ok": True,
-        "session_id": session_id,
-        "status": "idle",
-        "message": "session created — plan generation requires chatbot analyst trigger",
-        "trade_profile": {
-            "trade_direction": trade_direction,
-            "trade_horizon": trade_horizon,
-            "target_net_profit_usdt": target_net_profit,
-            "max_trade_duration_minutes": max_trade_duration,
-            "cost_filter_enabled": cost_filter_enabled,
-            "session_goal_profile": session_goal_profile,
-        },
+        "session_id": result["session_id"],
+        "status": result.get("status", "idle"),
+        "plan_version": result.get("plan_version"),
+        "entries": result.get("entries", 0),
+        "bootstrap_reason": result.get("bootstrap_reason"),
+        "trade_profile": trade_profile,
     }, status_code=201)
 
 
@@ -2890,6 +2897,116 @@ async def api_daily_session_events(
             for e in events
         ],
     }
+
+
+@app.get("/api/daily-session/diagnostics")
+async def api_daily_session_diagnostics(request: Request, session_id: str = Query(...)):
+    """§6.4 + §7.3 — execution guardrails + diagnostic messages.
+
+    Checks: market snapshot freshness, plan validity, risk limits, execution readiness.
+    Returns blocked_reason if any check fails.
+    """
+    require_api_auth(request)
+    pool = request.app.state.pg_pool
+
+    checks = {
+        "session_id": session_id,
+        "ready": True,
+        "blocked_reason": None,
+        "checks": {},
+    }
+
+    # 1. Session exists + status
+    async with pool.acquire() as conn:
+        session = await conn.fetchrow(
+            "SELECT status, risk_mode, initial_budget_usdt, active_plan_version, session_end FROM trading_sessions WHERE id=$1",
+            session_id,
+        )
+    if not session:
+        return JSONResponse({"ok": False, "error": "session_not_found"}, status_code=404)
+
+    checks["checks"]["session_status"] = {"ok": True, "value": session["status"]}
+    if session["status"] in ("completed", "stopped", "failed"):
+        checks["ready"] = False
+        checks["blocked_reason"] = f"session_{session['status']}"
+
+    # 2. Market snapshot freshness (Redis)
+    import redis.asyncio as aioredis
+    redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+    try:
+        redis = aioredis.from_url(redis_url, decode_responses=True)
+        ticker_raw = await redis.get("ticker:btcusdt")
+        if ticker_raw:
+            ticker = json.loads(ticker_raw)
+            checks["checks"]["market_snapshot"] = {"ok": True, "price": ticker.get("price")}
+        else:
+            checks["checks"]["market_snapshot"] = {"ok": False, "reason": "stale"}
+            checks["ready"] = False
+            checks["blocked_reason"] = "market_snapshot_stale"
+        await redis.aclose()
+    except Exception as exc:
+        checks["checks"]["market_snapshot"] = {"ok": False, "reason": str(exc)}
+        checks["ready"] = False
+        checks["blocked_reason"] = "redis_unavailable"
+
+    # 3. Active plan exists
+    async with pool.acquire() as conn:
+        plan = await conn.fetchrow(
+            "SELECT version, plan_json FROM session_plans WHERE session_id=$1 ORDER BY version DESC LIMIT 1",
+            session_id,
+        )
+        entries_count = await conn.fetchval(
+            "SELECT count(*) FROM planned_entries WHERE session_id=$1 AND status='planned'",
+            session_id,
+        )
+
+    if not plan:
+        checks["checks"]["active_plan"] = {"ok": False, "reason": "no_plan"}
+        checks["ready"] = False
+        checks["blocked_reason"] = "no_active_plan"
+    else:
+        plan_data = json.loads(plan["plan_json"]) if plan["plan_json"] else {}
+        checks["checks"]["active_plan"] = {
+            "ok": True, "version": plan["version"],
+            "entries": entries_count,
+            "market_regime": plan_data.get("market_regime"),
+            "primary_scenario": plan_data.get("primary_scenario"),
+        }
+        if entries_count == 0:
+            checks["ready"] = False
+            checks["blocked_reason"] = "no_planned_entries"
+
+    # 4. Risk gate — check if max drawdown exceeded
+    async with pool.acquire() as conn:
+        metrics = await conn.fetchrow(
+            "SELECT max_drawdown_pct, total_pnl_usdt FROM session_metrics WHERE session_id=$1",
+            session_id,
+        )
+    if metrics:
+        max_dd = float(metrics["max_drawdown_pct"] or 0)
+        risk_limits = {"defensive": 3.0, "balanced": 5.0, "aggressive": 8.0}
+        limit = risk_limits.get(session["risk_mode"], 5.0)
+        if max_dd >= limit:
+            checks["checks"]["risk_gate"] = {"ok": False, "max_dd": max_dd, "limit": limit}
+            checks["ready"] = False
+            checks["blocked_reason"] = "max_drawdown_exceeded"
+        else:
+            checks["checks"]["risk_gate"] = {"ok": True, "max_dd": max_dd, "limit": limit}
+
+    # 5. Session window
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    session_end = session["session_end"]
+    if session_end.tzinfo is None:
+        session_end = session_end.replace(tzinfo=timezone.utc)
+    if now >= session_end:
+        checks["checks"]["session_window"] = {"ok": False, "expired": True}
+        checks["ready"] = False
+        checks["blocked_reason"] = "session_window_expired"
+    else:
+        checks["checks"]["session_window"] = {"ok": True, "expires_in_min": int((session_end - now).total_seconds() / 60)}
+
+    return {"ok": True, "diagnostics": checks}
 
 
 @app.get("/api/daily-session/events/stream")
