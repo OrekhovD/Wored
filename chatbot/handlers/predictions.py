@@ -230,6 +230,7 @@ async def send_prediction_menu(message: Message) -> None:
 
 
 @router.message(Command("predictions"))
+@router.message(Command("forecast"))
 async def cmd_predictions(message: Message):
     await send_prediction_menu(message)
 

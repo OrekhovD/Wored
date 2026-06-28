@@ -15,15 +15,18 @@ router = Router()
 
 
 def get_analytics_result_keyboard(symbol: str) -> InlineKeyboardMarkup:
+    """ТЗ §8.7 — кнопки для результата анализа."""
+    import os
+    url = os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8080"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="⚖️ Второе мнение", callback_data=f"second_opinion:{symbol}"),
-                InlineKeyboardButton(text="🔮 Прогноз", callback_data=f"prediction_symbol:{symbol}"),
+                InlineKeyboardButton(text="📱 Mini App", url=url),
+                InlineKeyboardButton(text="📊 Рынок", callback_data="back_to_market"),
             ],
             [
-                InlineKeyboardButton(text="🔄 Обновить анализ", callback_data=f"analytics:{symbol}"),
-                InlineKeyboardButton(text="◀️ К рынку", callback_data="back_to_market"),
+                InlineKeyboardButton(text=f"🔮 Прогноз {symbol.upper()}", callback_data=f"prediction_symbol:{symbol}"),
+                InlineKeyboardButton(text="🔄 Обновить", callback_data=f"analytics:{symbol}"),
             ],
         ]
     )
@@ -68,47 +71,16 @@ async def cb_analytics(call: CallbackQuery):
     await answer_callback_early(call)
     await call.message.edit_text(f"⏳ <i>Анализирую {symbol.upper()}...</i>")
 
-    redis_client = get_redis()
-    data = await redis_client.get(f"ticker:{symbol}")
-    if not data:
-        await call.message.edit_text(
-            f"❌ Нет данных по {symbol.upper()}.",
-            reply_markup=get_analytics_result_keyboard(symbol),
-        )
-        return
-
-    ticker = json.loads(data)
-    context = [
-        {
-            "role": "system",
-            "content": (
-                f"Текущие данные рынка для {symbol.upper()}: "
-                f"цена ${ticker['price']}, объём {ticker['volume']}, изменение {ticker['change_pct']:+.2f}%."
-            ),
-        }
-    ]
-    prompt = f"Проанализируй текущую ситуацию по {symbol.upper()}. Краткий прогноз и ключевые риски."
-
-    try:
-        reply = await route_request(prompt, context=context)
-        try:
-            await call.message.edit_text(
-                sanitize_html(reply),
-                reply_markup=get_analytics_result_keyboard(symbol),
-            )
-        except TelegramBadRequest:
-            await call.message.edit_text(
-                strip_html(reply),
-                reply_markup=get_analytics_result_keyboard(symbol),
-                parse_mode=None,
-            )
-    except Exception as exc:
-        log.error("Render AI error: %s", exc)
-        await call.message.edit_text(
-            f"❌ Ошибка вызова AI: {exc}",
-            reply_markup=get_analytics_result_keyboard(symbol),
-            parse_mode=None,
-        )
+    # ТЗ §8.7 — structured analytics response
+    from handlers.analytics import _send_analytics_response
+    # Create a dummy message-like object that supports edit_text
+    class _DummyMsg:
+        async def answer(self, text, reply_markup=None, parse_mode=None):
+            try:
+                await call.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+            except TelegramBadRequest:
+                await call.message.edit_text(text, reply_markup=reply_markup, parse_mode=None)
+    await _send_analytics_response(_DummyMsg(), symbol)
 
 
 @router.callback_query(F.data.startswith("second_opinion:"))
@@ -142,7 +114,6 @@ async def cb_second_opinion(call: CallbackQuery):
     except Exception as exc:
         log.error("Render MiniMax error: %s", exc)
         await wait_message.edit_text(
-            f"❌ Ошибка Oracle: {exc}",
+            "⚠️ Временная ошибка сервиса. Попробуй позже.",
             reply_markup=get_analytics_result_keyboard(symbol),
-            parse_mode=None,
         )

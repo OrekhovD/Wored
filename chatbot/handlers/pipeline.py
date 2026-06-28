@@ -427,23 +427,38 @@ async def _build_status_response(user_id: int) -> tuple[str, InlineKeyboardMarku
             elif t["status"] == "closed" and t["realised_pnl_usdt"]:
                 pnl_real += float(t["realised_pnl_usdt"])
 
+        # ТЗ §7.2 — приоритет аварийности: авария → статус → PnL → позиции → детали
         # ТЗ §8.1 — шаблон
-        lines = [
-            f"🎯 <b>Активная сессия</b>",
-            f"ID: <code>{str(session['id'])[:8]}</code>",
-            f"Статус: {session['status'].upper()}",
-            f"План: v{session['active_plan_version']}",
-            f"Режим риска: {session['risk_mode']}",
-            f"Бюджет: {float(session['initial_budget_usdt']):.0f} USDT",
-            f"Открыто позиций: {open_count}",
-        ]
+        risk_limit_pct = 6.0  # default risk limit
+        risk_status = "normal"
+        if metrics:
+            max_dd = float(metrics.get("max_drawdown_pct", 0))
+            if max_dd >= risk_limit_pct * 0.8:
+                risk_status = "warning"
+            if max_dd >= risk_limit_pct:
+                risk_status = "critical"
 
+        lines = []
+        # 1. Авария / критический риск (если есть)
+        if risk_status == "critical":
+            lines.append("🚨 <b>КРИТИЧЕСКИЙ РИСК: Max DD превышен</b>")
+        elif risk_status == "warning":
+            lines.append("⚠️ <b>Риск: warning</b>")
+        # 2. Статус сессии
+        lines.append(f"🎯 <b>Активная сессия</b>")
+        lines.append(f"ID: <code>{str(session['id'])[:8]}</code>")
+        lines.append(f"Статус: {session['status'].upper()}")
+        lines.append(f"План: v{session['active_plan_version']}")
+        lines.append(f"Режим риска: {session['risk_mode']}")
+        lines.append(f"Бюджет: {float(session['initial_budget_usdt']):.0f} USDT")
+        # 3. Агрегированный PnL и риск
         if metrics:
             lines.append(f"Realized PnL: {float(metrics['total_pnl_usdt']):+.2f} USDT")
             lines.append(f"Total PnL: {float(metrics['total_pnl_usdt']):+.2f} USDT ({float(metrics['total_pnl_pct']):+.1f}%)")
-            lines.append(f"Max DD: {float(metrics['max_drawdown_pct']):.1f}%")
-            lines.append(f"Сделок: {metrics['trade_count']} (W:{metrics['win_count']} L:{metrics['loss_count']})")
-
+            lines.append(f"Max DD: {float(metrics['max_drawdown_pct']):.1f}% / лимит {risk_limit_pct:.1f}%")
+        # 4. Количество позиций
+        lines.append(f"Открыто позиций: {open_count}")
+        # 5. Последняя команда
         if last_rev:
             lines.append(f"Последняя команда: {last_rev['execution_command']}")
 
@@ -481,6 +496,39 @@ async def _build_positions_response(user_id: int) -> tuple[str, InlineKeyboardMa
         longs = sum(1 for t in open_trades if t["side"] == "long")
         shorts = sum(1 for t in open_trades if t["side"] == "short")
 
+        # ТЗ §8.2 — приоритет показа: 1) ближайшая к ликвидации 2) самая убыточная 3) самая большая по марже
+        # Since we don't have liquidation price in schema, sort by leverage desc (higher lev = closer to liq)
+        # then by negative PnL (if available), then by margin desc
+        def _position_priority(t):
+            lev = float(t.get("leverage") or 1)
+            margin = float(t.get("margin_used_usdt") or 0)
+            return (-lev, -margin)
+
+        open_trades_sorted = sorted(open_trades, key=_position_priority)
+
+        # Get unrealized PnL from metrics if available
+        from storage.postgres_client import get_pool as _get_pool
+        unrealized_pnl = 0.0
+        risk_status = "normal"
+        try:
+            pool2 = await _get_pool()
+            if pool2:
+                async with pool2.acquire() as conn2:
+                    metrics = await conn2.fetchrow(
+                        "SELECT * FROM session_metrics WHERE session_id = $1", str(session["id"])
+                    )
+                    if metrics:
+                        unrealized_pnl = float(metrics.get("total_pnl_usdt") or 0) - sum(
+                            float(t.get("realised_pnl_usdt") or 0) for t in trades if t["status"] == "closed"
+                        )
+                        max_dd = float(metrics.get("max_drawdown_pct") or 0)
+                        if max_dd >= 4.8:
+                            risk_status = "warning"
+                        if max_dd >= 6.0:
+                            risk_status = "critical"
+        except Exception:
+            pass
+
         lines = [
             f"📦 <b>Открытые позиции</b>",
             f"Всего: {len(open_trades)}",
@@ -488,15 +536,18 @@ async def _build_positions_response(user_id: int) -> tuple[str, InlineKeyboardMa
         if longs:
             lines.append(f"LONG BTCUSDT: {longs}")
         if shorts:
-            lines.append(f"SHORT ETHUSDT: {shorts}")
+            lines.append(f"SHORT BTCUSDT: {shorts}")
+        if unrealized_pnl != 0:
+            lines.append(f"Общий unrealized PnL: {unrealized_pnl:+.2f} USDT")
         lines.append(f"Общая маржа: {total_margin:.2f} USDT")
+        lines.append(f"Риск: {risk_status}")
 
-        # ТЗ §8.2 — максимум 3 позиции по приоритету риска
-        if len(open_trades) > 3:
-            lines.append(f"\n<i>Показаны 3 позиции из {len(open_trades)} по приоритету.</i>")
-            shown = open_trades[:3]
+        # ТЗ §8.2 — максимум 3 позиции по приоритету
+        if len(open_trades_sorted) > 3:
+            lines.append(f"\n<i>Показаны 3 позиции из {len(open_trades_sorted)} по приоритету.</i>")
+            shown = open_trades_sorted[:3]
         else:
-            shown = open_trades
+            shown = open_trades_sorted
 
         for t in shown:
             side_emoji = "🟢" if t["side"] == "long" else "🔴"
@@ -528,24 +579,29 @@ async def _build_balance_response(user_id: int) -> tuple[str, InlineKeyboardMark
         open_count = sum(1 for t in trades if t["status"] == "open")
         budget = float(session["initial_budget_usdt"])
 
+        # Calculate realized and unrealized PnL separately (ТЗ §8.3)
+        realized_pnl = sum(float(t.get("realised_pnl_usdt") or 0) for t in trades if t["status"] == "closed")
+
         if metrics:
             equity = float(metrics.get("current_equity") or budget)
-            real_pnl = float(metrics.get("total_pnl_usdt") or 0)
-            total_pnl = real_pnl
+            total_pnl = float(metrics.get("total_pnl_usdt") or 0)
+            unrealized_pnl = total_pnl - realized_pnl
             total_pct = float(metrics.get("total_pnl_pct") or 0)
             max_dd = float(metrics.get("max_drawdown_pct") or 0)
         else:
             equity = budget
-            real_pnl = 0.0
-            total_pnl = 0.0
+            total_pnl = realized_pnl
+            unrealized_pnl = 0.0
             total_pct = 0.0
             max_dd = 0.0
 
-        # ТЗ §8.3 — шаблон
+        # ТЗ §8.3 — шаблон с separate Realized/Unrealized PnL
         text = (
             f"💰 <b>Баланс и PnL</b>\n"
             f"Стартовый бюджет: {budget:.2f} USDT\n"
             f"Текущий equity: {equity:.2f} USDT\n"
+            f"Realized PnL: {realized_pnl:+.2f} USDT\n"
+            f"Unrealized PnL: {unrealized_pnl:+.2f} USDT\n"
             f"Total PnL: {total_pnl:+.2f} USDT ({total_pct:+.2f}%)\n"
             f"Max drawdown: {max_dd:.1f}%\n"
             f"Открыто позиций: {open_count}"
