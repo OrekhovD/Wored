@@ -1171,6 +1171,8 @@ async def execution_watch_loop(session_id: str) -> dict:
         await update_session_status(session_id, "completed", "session_window_completed")
         actions.append({"action": "session_completed"})
 
+    return {"actions": actions}
+
 
 # ─── Mini App API helpers (ТЗ backend_contract v1) ────────────────────
 

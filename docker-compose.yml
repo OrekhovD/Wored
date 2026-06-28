@@ -35,6 +35,9 @@ services:
       - .env
     volumes:
       - ./collector:/app
+      - ./chatbot:/chatbot:ro
+    environment:
+      - PYTHONPATH=/app:/chatbot
     command: python main.py
     restart: unless-stopped
 
