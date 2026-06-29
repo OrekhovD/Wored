@@ -19,6 +19,7 @@ PROVIDER_COOLDOWN_SECONDS = {"glm": 1.8, "gemini": 1.0, "dashscope": 1.4, "minim
 RETRY_BACKOFF_SECONDS = (2.0, 5.0)
 GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/"
+OLLAMA_BASE_URL = "https://api.ollama.com/v1"
 
 PREDICTION_SYSTEM_PROMPT = """
 You are a crypto market forecasting agent inside a model-vs-model evaluation lab.
@@ -370,6 +371,19 @@ def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                     timeout=config.timeout,
                 )
             )
+
+        # Ollama fallback — deepseek-v4-pro (reasoning model)
+        ollama_model = os.getenv("OLLAMA_ANALYST_MODEL", "deepseek-v4-pro").strip()
+        if ollama_model:
+            candidates.append(
+                RuntimeModelCandidate(
+                    cache_key=f"analyst:{ollama_model}",
+                    model_id=ollama_model,
+                    base_url=OLLAMA_BASE_URL,
+                    api_key_env="OLLAMA_API_KEY",
+                    timeout=config.timeout,
+                )
+            )
         return candidates
 
     if config.key == "premium":
@@ -402,6 +416,19 @@ def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                     timeout=config.timeout,
                 )
             )
+
+        # Ollama fallback — glm-5.2 (premium/strategy model)
+        ollama_model = os.getenv("OLLAMA_PREMIUM_MODEL", "glm-5.2").strip()
+        if ollama_model:
+            candidates.append(
+                RuntimeModelCandidate(
+                    cache_key=f"premium:{ollama_model}",
+                    model_id=ollama_model,
+                    base_url=OLLAMA_BASE_URL,
+                    api_key_env="OLLAMA_API_KEY",
+                    timeout=config.timeout,
+                )
+            )
         return candidates
 
     return [
@@ -411,7 +438,15 @@ def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
             base_url=config.base_url,
             api_key_env=config.api_key_env,
             timeout=config.timeout,
-        )
+        ),
+        # Ollama fallback — deepseek-v4-flash (fast oracle model)
+        RuntimeModelCandidate(
+            cache_key=f"{config.key}:ollama",
+            model_id=os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4-flash").strip(),
+            base_url=OLLAMA_BASE_URL,
+            api_key_env="OLLAMA_API_KEY",
+            timeout=config.timeout,
+        ),
     ]
 
 
@@ -419,7 +454,7 @@ def _candidate_is_available(candidate: RuntimeModelCandidate, strict_nvapi: bool
     api_key = os.getenv(candidate.api_key_env, "").strip()
     if not api_key:
         return False
-    if strict_nvapi and not api_key.startswith("nvapi-"):
+    if strict_nvapi and candidate.api_key_env != "OLLAMA_API_KEY" and not api_key.startswith("nvapi-"):
         return False
     return True
 
@@ -433,24 +468,23 @@ def list_prediction_models() -> list[dict[str, Any]]:
         reason = ""
 
         if key == "minimax":
-            available = _candidate_is_available(candidates[0], strict_nvapi=True)
+            # MiniMax: available if NVIDIA NIM key OR Ollama key is set
+            nvapi_available = _candidate_is_available(candidates[0], strict_nvapi=True)
+            ollama_available = len(candidates) > 1 and _candidate_is_available(candidates[1])
+            available = nvapi_available or ollama_available
             if not available:
-                reason = "MiniMax is supported only through NVIDIA NIM nvapi- keys"
+                reason = "MiniMax is supported only through NVIDIA NIM nvapi- keys or Ollama Cloud"
         else:
             available = any(_candidate_is_available(candidate) for candidate in candidates)
             if not available:
                 if key == "worker":
-                    reason = "Neither DASHSCOPE_API_KEY nor GLM_API_KEY is set"
+                    reason = "Neither DASHSCOPE_API_KEY nor GLM_API_KEY nor OLLAMA_API_KEY is set"
                 elif key == "analyst":
-                    reason = "Neither DASHSCOPE_API_KEY nor GLM_API_KEY is set for the analyst chain"
+                    reason = "Neither DASHSCOPE_API_KEY nor GLM_API_KEY nor OLLAMA_API_KEY is set for the analyst chain"
                 elif key == "premium":
-                    reason = "Neither DASHSCOPE_API_KEY nor GLM_API_KEY is set for the strategist chain"
+                    reason = "Neither DASHSCOPE_API_KEY nor GLM_API_KEY nor OLLAMA_API_KEY is set for the strategist chain"
                 else:
                     reason = f"{config.api_key_env} is not set"
-
-        if key == "minimax" and not available:
-            available = False
-            reason = "MiniMax is supported only through NVIDIA NIM nvapi- keys"
 
         items.append(
             {
@@ -474,7 +508,7 @@ def _build_client(candidate: RuntimeModelCandidate, strict_nvapi: bool = False) 
         _clients[candidate.cache_key] = None
         return None
 
-    if strict_nvapi and not api_key.startswith("nvapi-"):
+    if strict_nvapi and candidate.api_key_env != "OLLAMA_API_KEY" and not api_key.startswith("nvapi-"):
         _clients[candidate.cache_key] = None
         return None
 
@@ -510,9 +544,12 @@ def _attempt_schedule(config: PredictionModelConfig) -> tuple[float, ...]:
 async def generate_model_prediction(config: PredictionModelConfig, context_payload: dict[str, Any]) -> ModelPredictionResult:
     runtime_candidates = _build_runtime_candidates(config)
     strict_nvapi = config.key == "minimax"
-    chain_switch_enabled = config.key in {"worker", "analyst", "premium"}
+    chain_switch_enabled = config.key in {"worker", "analyst", "premium", "minimax"}
 
-    if not any(_candidate_is_available(candidate, strict_nvapi=strict_nvapi) for candidate in runtime_candidates):
+    if not any(
+        _candidate_is_available(candidate, strict_nvapi=(strict_nvapi and candidate.api_key_env != "OLLAMA_API_KEY"))
+        for candidate in runtime_candidates
+    ):
         model_status = next(item for item in list_prediction_models() if item["key"] == config.key)
         return ModelPredictionResult(
             key=config.key,
