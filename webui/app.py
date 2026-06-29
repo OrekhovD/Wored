@@ -1832,6 +1832,12 @@ async def api_health(request: Request):
     return await fetch_health_snapshot(request)
 
 
+@app.get("/api/tickers")
+async def api_tickers(request: Request):
+    """Public endpoint — all HTX market tickers (fixes 404 from external callers)."""
+    return await fetch_market_tickers(request)
+
+
 @app.get("/api/overview")
 async def api_overview(request: Request):
     require_api_auth(request)

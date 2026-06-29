@@ -194,6 +194,7 @@
           <h2>Signal Rules — Breakout Detector</h2>
           <span class="ds-status-badge" id="dsSignalBadge">—</span>
         </div>
+        <div class="ds-signal-subtitle">Informational — does not block trade execution. Watch loop uses planned entry zones independently.</div>
         <div class="ds-signal-grid">
           <div class="ds-signal-kpi"><label>Decision</label><span id="dsSigDecision">—</span></div>
           <div class="ds-signal-kpi"><label>Direction</label><span id="dsSigDirection">—</span></div>
@@ -204,6 +205,8 @@
           <div class="ds-signal-kpi"><label>ATR Ratio</label><span id="dsSigAtrRatio">—</span></div>
           <div class="ds-signal-kpi"><label>Spread %</label><span id="dsSigSpread">—</span></div>
         </div>
+        <!-- Watch Loop Status — shows why entries are/aren't triggering -->
+        <div id="dsWatchLoopStatus" style="margin-top:10px"></div>
         <div id="dsSignalTrade" style="display:none;margin-top:10px">
           <div class="ds-signal-grid">
             <div class="ds-signal-kpi ds-kpi-primary"><label>Entry</label><span id="dsSigEntry">—</span></div>
@@ -318,7 +321,7 @@
         <div id="dsTabPositions" class="ds-tab-content">
           <table class="ds-table ds-table-compact">
             <thead><tr>
-              <th>#</th><th>Side</th><th>Lev</th><th>Entry</th>
+              <th>#</th><th>Side</th><th>Lev</th><th>Entry</th><th>Opened</th>
               <th>PnL</th><th>Status</th>
             </tr></thead>
             <tbody id="dsPositionsBody"></tbody>
@@ -338,7 +341,7 @@
           </div>
           <table class="ds-table ds-table-compact">
             <thead><tr>
-              <th>Side</th><th>Zone</th><th>SL</th><th>Lev</th><th>Share</th><th>Status</th>
+              <th>Side</th><th>Zone</th><th>SL</th><th>TP</th><th>Lev</th><th>Share</th><th>Status</th>
             </tr></thead>
             <tbody id="dsOrdersBody"></tbody>
           </table>
@@ -548,6 +551,7 @@ async function loadSession() {
     loadDiagnostics(s.id);
     // §9 — Load signal
     loadSignal(s.id);
+    loadWatchLoopStatus(s.id);
 
     // Health KPI Grid
     if (data.metrics) {
@@ -675,13 +679,14 @@ async function loadPositions() {
 
 function renderPositions() {
   const tbody = document.getElementById('dsPositionsBody');
-  if (!allPositions.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#7291a5;padding:12px">No positions</td></tr>'; return; }
+  if (!allPositions.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#7291a5;padding:12px">No positions</td></tr>'; return; }
   tbody.innerHTML = allPositions.map((p, i) => `
     <tr>
       <td>${i + 1}</td>
       <td class="${p.side === 'LONG' ? 'ds-long' : 'ds-short'}">${p.side}</td>
       <td>${p.leverage}x</td>
       <td>${fmtPrice(p.entryprice)}</td>
+      <td>${p.openedat ? new Date(p.openedat).toLocaleTimeString() : '—'}</td>
       <td class="${(p.unrealizedpnl || p.realizedpnl || 0) >= 0 ? 'ds-profit' : 'ds-loss'}">${fmtPnl(p.unrealizedpnl || p.realizedpnl)}</td>
       <td class="ds-status-${p.status.toLowerCase()}">${p.status}</td>
     </tr>
@@ -703,12 +708,13 @@ function renderOrders() {
   const filter = document.getElementById('dsOrdersFilter')?.value || '';
   const filtered = filter ? allOrders.filter(o => o.status === filter) : allOrders;
   const tbody = document.getElementById('dsOrdersBody');
-  if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#7291a5;padding:12px">No orders</td></tr>'; return; }
+  if (!filtered.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#7291a5;padding:12px">No orders</td></tr>'; return; }
   tbody.innerHTML = filtered.map(o => `
     <tr>
       <td class="${o.side === 'LONG' ? 'ds-long' : 'ds-short'}">${o.side}</td>
       <td>${fmtPrice(o.pricefrom)} - ${fmtPrice(o.priceto)}</td>
-      <td>${fmtPrice(o.stoploss)}</td>
+      <td class="ds-loss">${fmtPrice(o.stoploss)}</td>
+      <td class="ds-profit">${o.takeprofit ? fmtPrice(o.takeprofit[0]) : '—'}</td>
       <td>${o.leverage}x</td>
       <td>${o.budgetsharepct}%</td>
       <td class="ds-status-${o.status.toLowerCase()}">${o.status}</td>
@@ -864,6 +870,37 @@ async function loadDiagnostics(sessionId) {
     }
   } catch (err) {
     console.error('Diagnostics error:', err);
+  }
+}
+
+// ─── Watch Loop Status — price vs planned entry zones ───
+async function loadWatchLoopStatus(sessionId) {
+  try {
+    const [ordersRes, signalRes] = await Promise.all([
+      fetch(`/api/daily-session/orders?session_id=${sessionId}`).then(r => r.json()),
+      fetch(`/api/daily-session/signal?session_id=${sessionId}`).then(r => r.json()),
+    ]);
+    const orders = (ordersRes.orders || []).filter(o => o.status === 'PLANNED');
+    const sig = signalRes.signal || {};
+    const price = sig.current_price || 0;
+    const div = document.getElementById('dsWatchLoopStatus');
+    if (!orders.length || !price) { div.innerHTML = ''; return; }
+
+    const lines = orders.map(o => {
+      const inZone = price >= o.pricefrom && price <= o.priceto;
+      const above = price > o.priceto;
+      const below = price < o.pricefrom;
+      const dist = above ? price - o.priceto : below ? o.pricefrom - price : 0;
+      const arrow = inZone ? '◆ IN ZONE' : above ? '↑ above' : '↓ below';
+      const color = inZone ? '#22c55e' : '#7291a5';
+      return `<div style="font-size:0.75rem;color:${color};padding:3px 0">
+        <strong>${o.side}</strong> zone $${o.pricefrom.toFixed(0)}-$${o.priceto.toFixed(0)} — ${arrow}
+        ${dist > 0 ? `($${dist.toFixed(0)} ${above ? 'above' : 'below'})` : ''}
+      </div>`;
+    }).join('');
+    div.innerHTML = `<div style="font-size:0.7rem;color:#7291a5;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px">Watch Loop — Price vs Entry Zones</div>${lines}`;
+  } catch (err) {
+    console.error('WatchLoop status error:', err);
   }
 }
 

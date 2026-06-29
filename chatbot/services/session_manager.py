@@ -1219,15 +1219,19 @@ async def execution_watch_loop(session_id: str) -> dict:
         "close": current_price,
     }
 
-    # Try to get last 1m candle from historical data
+    # Try to get last 1m candle from HTX REST (inline — no cross-package import)
     try:
-        import importlib
-        rest_mod = importlib.import_module("htx.rest")
-        get_recent_klines = getattr(rest_mod, "get_recent_klines", None)
-        if get_recent_klines:
-            klines = await get_recent_klines(symbol, "1min", 1)
-            if klines:
-                k = klines[-1]
+        import httpx
+        async with httpx.AsyncClient(timeout=5.0) as hc:
+            resp = await hc.get(
+                f"https://api.huobi.pro/market/history/kline",
+                params={"symbol": symbol, "period": "1min", "size": 1},
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            klines_data = payload.get("data", [])
+            if klines_data:
+                k = klines_data[-1]
                 candle = {
                     "open": float(k.get("open", current_price)),
                     "high": float(k.get("high", current_price)),
@@ -1303,6 +1307,16 @@ async def execution_watch_loop(session_id: str) -> dict:
                 result = await execute_exit(session_id, str(trade["id"]), tp1, "take_profit")
                 actions.append({"action": "take_profit", "trade_id": str(trade["id"]), "result": result})
                 continue
+
+    # 1.5 — Run breakout detector for diagnostics (does not block entries)
+    try:
+        from services.breakout_detector import get_breakout_signal_for_session
+        breakout = await get_breakout_signal_for_session(dict(session))
+        if breakout and breakout.decision == "trade":
+            log.info("Breakout detected: session=%s direction=%s entry=%.2f",
+                     session_id, breakout.direction, breakout.entry_price)
+    except Exception as exc:
+        log.debug("Breakout detector skipped: %s", exc)
 
     # 2. Check entries (only if no open position — ТЗ 7.4)
     has_open = any(a.get("action") != "liquidation" for a in actions)
