@@ -344,110 +344,57 @@ def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
         return candidates
 
     if config.key == "analyst":
+        # Ollama primary — glm-5.1, fallback deepseek-v4-pro
+        ollama_primary = os.getenv("OLLAMA_ANALYST_MODEL", "glm-5.1").strip()
+        ollama_fallback = os.getenv("OLLAMA_ANALYST_FALLBACK_MODEL", "deepseek-v4-pro").strip()
         candidates = []
-        qwen_models = [
-            os.getenv("ANALYST_QWEN_MODEL", DEFAULT_ANALYST_QWEN_MODEL),
-            *_parse_model_csv(os.getenv("ANALYST_QWEN_FALLBACKS", "qwen3.6-27b")),
-        ]
-        for model_id in qwen_models:
-            candidates.append(
-                RuntimeModelCandidate(
-                    cache_key=f"analyst:{model_id}",
-                    model_id=model_id,
-                    base_url=DASHSCOPE_BASE_URL,
-                    api_key_env="DASHSCOPE_API_KEY",
-                    timeout=config.timeout,
-                )
-            )
-
-        glm_model = os.getenv("ANALYST_GLM_FALLBACK_MODEL", os.getenv("GLM_MODEL", "glm-5.1")).strip()
-        if glm_model:
-            candidates.append(
-                RuntimeModelCandidate(
-                    cache_key=f"analyst:{glm_model}",
-                    model_id=glm_model,
-                    base_url=GLM_BASE_URL,
-                    api_key_env="GLM_API_KEY",
-                    timeout=config.timeout,
-                )
-            )
-
-        # Ollama fallback — deepseek-v4-pro (reasoning model)
-        ollama_model = os.getenv("OLLAMA_ANALYST_MODEL", "deepseek-v4-pro").strip()
-        if ollama_model:
-            candidates.append(
-                RuntimeModelCandidate(
-                    cache_key=f"analyst:{ollama_model}",
-                    model_id=ollama_model,
-                    base_url=OLLAMA_BASE_URL,
-                    api_key_env="OLLAMA_API_KEY",
-                    timeout=config.timeout,
-                )
-            )
-        return candidates
-
-    if config.key == "premium":
-        candidates = []
-        qwen_models = [
-            os.getenv("PREMIUM_QWEN_MODEL", DEFAULT_PREMIUM_QWEN_MODEL),
-            *_parse_model_csv(os.getenv("PREMIUM_QWEN_FALLBACKS", "qwen3.6-35b-a3b")),
-        ]
-        for model_id in qwen_models:
-            normalized = (model_id or "").strip()
-            if normalized and normalized not in [item.model_id for item in candidates]:
+        for model_id in [ollama_primary, ollama_fallback]:
+            if model_id:
                 candidates.append(
                     RuntimeModelCandidate(
-                        cache_key=f"premium:{normalized}",
-                        model_id=normalized,
-                        base_url=DASHSCOPE_BASE_URL,
-                        api_key_env="DASHSCOPE_API_KEY",
+                        cache_key=f"analyst:{model_id}",
+                        model_id=model_id,
+                        base_url=OLLAMA_BASE_URL,
+                        api_key_env="OLLAMA_API_KEY",
                         timeout=config.timeout,
                     )
                 )
+        return candidates
 
-        glm_model = os.getenv("PREMIUM_GLM_FALLBACK_MODEL", os.getenv("GLM_MODEL", "glm-5.1")).strip()
-        if glm_model:
-            candidates.append(
-                RuntimeModelCandidate(
-                    cache_key=f"premium:{glm_model}",
-                    model_id=glm_model,
-                    base_url=GLM_BASE_URL,
-                    api_key_env="GLM_API_KEY",
-                    timeout=config.timeout,
+    if config.key == "premium":
+        # Ollama primary — glm-5.2, fallback kimi-k2:1t
+        ollama_primary = os.getenv("OLLAMA_PREMIUM_MODEL", "glm-5.2").strip()
+        ollama_fallback = os.getenv("OLLAMA_PREMIUM_FALLBACK_MODEL", "kimi-k2:1t").strip()
+        candidates = []
+        for model_id in [ollama_primary, ollama_fallback]:
+            if model_id:
+                candidates.append(
+                    RuntimeModelCandidate(
+                        cache_key=f"premium:{model_id}",
+                        model_id=model_id,
+                        base_url=OLLAMA_BASE_URL,
+                        api_key_env="OLLAMA_API_KEY",
+                        timeout=config.timeout,
+                    )
                 )
-            )
+        return candidates
 
-        # Ollama fallback — glm-5.2 (premium/strategy model)
-        ollama_model = os.getenv("OLLAMA_PREMIUM_MODEL", "glm-5.2").strip()
-        if ollama_model:
+    # Oracle — Ollama only: kimi-k2-thinking → deepseek-v4-flash
+    ollama_primary = os.getenv("OLLAMA_ORACLE_MODEL", "kimi-k2-thinking").strip()
+    ollama_fallback = os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4-flash").strip()
+    candidates = []
+    for model_id in [ollama_primary, ollama_fallback]:
+        if model_id:
             candidates.append(
                 RuntimeModelCandidate(
-                    cache_key=f"premium:{ollama_model}",
-                    model_id=ollama_model,
+                    cache_key=f"minimax:{model_id}",
+                    model_id=model_id,
                     base_url=OLLAMA_BASE_URL,
                     api_key_env="OLLAMA_API_KEY",
                     timeout=config.timeout,
                 )
             )
-        return candidates
-
-    return [
-        RuntimeModelCandidate(
-            cache_key=config.key,
-            model_id=config.model_id,
-            base_url=config.base_url,
-            api_key_env=config.api_key_env,
-            timeout=config.timeout,
-        ),
-        # Ollama fallback — deepseek-v4-flash (fast oracle model)
-        RuntimeModelCandidate(
-            cache_key=f"{config.key}:ollama",
-            model_id=os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4-flash").strip(),
-            base_url=OLLAMA_BASE_URL,
-            api_key_env="OLLAMA_API_KEY",
-            timeout=config.timeout,
-        ),
-    ]
+    return candidates
 
 
 def _candidate_is_available(candidate: RuntimeModelCandidate, strict_nvapi: bool = False) -> bool:
@@ -468,12 +415,10 @@ def list_prediction_models() -> list[dict[str, Any]]:
         reason = ""
 
         if key == "minimax":
-            # MiniMax: available if NVIDIA NIM key OR Ollama key is set
-            nvapi_available = _candidate_is_available(candidates[0], strict_nvapi=True)
-            ollama_available = len(candidates) > 1 and _candidate_is_available(candidates[1])
-            available = nvapi_available or ollama_available
+            # Oracle — Ollama only now, no NVIDIA NIM required
+            available = any(_candidate_is_available(candidate) for candidate in candidates)
             if not available:
-                reason = "MiniMax is supported only through NVIDIA NIM nvapi- keys or Ollama Cloud"
+                reason = "OLLAMA_API_KEY is not set for the oracle chain"
         else:
             available = any(_candidate_is_available(candidate) for candidate in candidates)
             if not available:
@@ -543,7 +488,7 @@ def _attempt_schedule(config: PredictionModelConfig) -> tuple[float, ...]:
 
 async def generate_model_prediction(config: PredictionModelConfig, context_payload: dict[str, Any]) -> ModelPredictionResult:
     runtime_candidates = _build_runtime_candidates(config)
-    strict_nvapi = config.key == "minimax"
+    strict_nvapi = False  # Ollama-only now, no NVIDIA NIM strict check
     chain_switch_enabled = config.key in {"worker", "analyst", "premium", "minimax"}
 
     if not any(
