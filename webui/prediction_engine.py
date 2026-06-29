@@ -15,7 +15,7 @@ log = logging.getLogger("webui.prediction_engine")
 DEFAULT_ANALYST_QWEN_MODEL = "qwen3.6-35b-a3b"
 DEFAULT_PREMIUM_QWEN_MODEL = "qwen3.6-27b"
 DEFAULT_WORKER_GEMINI_MODEL = "gemini-3-flash-preview"
-PROVIDER_COOLDOWN_SECONDS = {"glm": 1.8, "gemini": 1.0, "dashscope": 1.4, "minimax": 1.0}
+PROVIDER_COOLDOWN_SECONDS = {"ollama": 1.0, "glm": 1.8, "gemini": 1.0, "dashscope": 1.4, "minimax": 1.0}
 RETRY_BACKOFF_SECONDS = (2.0, 5.0)
 GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/"
@@ -108,40 +108,40 @@ def _parse_model_csv(raw_value: str | None) -> list[str]:
 MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
     "worker": PredictionModelConfig(
         key="worker",
-        name="Worker / Qwen Auto",
-        model_id=os.getenv("WORKER_QWEN_MODEL", "qwen3.6-flash"),
-        base_url=DASHSCOPE_BASE_URL,
-        api_key_env="DASHSCOPE_API_KEY",
+        name="Worker / Ollama Auto",
+        model_id=os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4-flash"),
+        base_url=OLLAMA_BASE_URL,
+        api_key_env="OLLAMA_API_KEY",
         tier="worker",
         timeout=20.0,
         max_tokens=1200,
     ),
     "analyst": PredictionModelConfig(
         key="analyst",
-        name="Analyst / Qwen Reasoning Auto",
-        model_id=os.getenv("ANALYST_QWEN_MODEL", DEFAULT_ANALYST_QWEN_MODEL),
-        base_url=DASHSCOPE_BASE_URL,
-        api_key_env="DASHSCOPE_API_KEY",
+        name="Analyst / Ollama Reasoning",
+        model_id=os.getenv("OLLAMA_ANALYST_MODEL", "glm-5.1"),
+        base_url=OLLAMA_BASE_URL,
+        api_key_env="OLLAMA_API_KEY",
         tier="analyst",
         timeout=40.0,
         max_tokens=1600,
     ),
     "premium": PredictionModelConfig(
         key="premium",
-        name="Strategist / Qwen Reasoning",
-        model_id=os.getenv("PREMIUM_QWEN_MODEL", DEFAULT_PREMIUM_QWEN_MODEL),
-        base_url=DASHSCOPE_BASE_URL,
-        api_key_env="DASHSCOPE_API_KEY",
+        name="Strategist / Ollama Reasoning",
+        model_id=os.getenv("OLLAMA_PREMIUM_MODEL", "glm-5.2"),
+        base_url=OLLAMA_BASE_URL,
+        api_key_env="OLLAMA_API_KEY",
         tier="premium",
         timeout=45.0,
         max_tokens=1600,
     ),
     "minimax": PredictionModelConfig(
         key="minimax",
-        name="Oracle / MiniMax M2.7",
-        model_id="minimaxai/minimax-m2.7",
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key_env="MINIMAX_API_KEY",
+        name="Oracle / Ollama Thinking",
+        model_id=os.getenv("OLLAMA_ORACLE_MODEL", "kimi-k2-thinking"),
+        base_url=OLLAMA_BASE_URL,
+        api_key_env="OLLAMA_API_KEY",
         tier="minimax",
         timeout=60.0,
         max_tokens=700,
@@ -303,44 +303,19 @@ def _is_missing_model_error(exc: Exception) -> bool:
 def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeModelCandidate]:
     if config.key == "worker":
         candidates: list[RuntimeModelCandidate] = []
-        qwen_models = [
-            os.getenv("WORKER_QWEN_MODEL", "qwen3.6-flash"),
-            *_parse_model_csv(os.getenv("WORKER_QWEN_FALLBACKS", "qwen3.5-flash,qwen-flash")),
-        ]
-        for model_id in qwen_models:
-            candidates.append(
-                RuntimeModelCandidate(
-                    cache_key=f"worker:{model_id}",
-                    model_id=model_id,
-                    base_url=DASHSCOPE_BASE_URL,
-                    api_key_env="DASHSCOPE_API_KEY",
-                    timeout=config.timeout,
+        ollama_primary = os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4-flash").strip()
+        ollama_fallback = os.getenv("OLLAMA_WORKER_FALLBACK_MODEL", "").strip()
+        for model_id in [ollama_primary, ollama_fallback]:
+            if model_id:
+                candidates.append(
+                    RuntimeModelCandidate(
+                        cache_key=f"worker:{model_id}",
+                        model_id=model_id,
+                        base_url=OLLAMA_BASE_URL,
+                        api_key_env="OLLAMA_API_KEY",
+                        timeout=config.timeout,
+                    )
                 )
-            )
-
-        glm_model = os.getenv("WORKER_GLM_FALLBACK_MODEL", "glm-4-flash").strip()
-        if glm_model:
-            candidates.append(
-                RuntimeModelCandidate(
-                    cache_key=f"worker:{glm_model}",
-                    model_id=glm_model,
-                    base_url=GLM_BASE_URL,
-                    api_key_env="GLM_API_KEY",
-                    timeout=config.timeout,
-                )
-            )
-
-        gemini_model = os.getenv("WORKER_GEMINI_FALLBACK_MODEL", DEFAULT_WORKER_GEMINI_MODEL).strip()
-        if gemini_model:
-            candidates.append(
-                RuntimeModelCandidate(
-                    cache_key=f"worker:{gemini_model}",
-                    model_id=gemini_model,
-                    base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-                    api_key_env="GOOGLE_API_KEY",
-                    timeout=config.timeout,
-                )
-            )
         return candidates
 
     if config.key == "analyst":
@@ -423,11 +398,11 @@ def list_prediction_models() -> list[dict[str, Any]]:
             available = any(_candidate_is_available(candidate) for candidate in candidates)
             if not available:
                 if key == "worker":
-                    reason = "Neither DASHSCOPE_API_KEY nor GLM_API_KEY nor OLLAMA_API_KEY is set"
+                    reason = "OLLAMA_API_KEY is not set for the worker chain"
                 elif key == "analyst":
-                    reason = "Neither DASHSCOPE_API_KEY nor GLM_API_KEY nor OLLAMA_API_KEY is set for the analyst chain"
+                    reason = "OLLAMA_API_KEY is not set for the analyst chain"
                 elif key == "premium":
-                    reason = "Neither DASHSCOPE_API_KEY nor GLM_API_KEY nor OLLAMA_API_KEY is set for the strategist chain"
+                    reason = "OLLAMA_API_KEY is not set for the strategist chain"
                 else:
                     reason = f"{config.api_key_env} is not set"
 
@@ -526,7 +501,7 @@ async def generate_model_prediction(config: PredictionModelConfig, context_paylo
                     "max_tokens": config.max_tokens,
                     "temperature": config.temperature,
                 }
-                if config.key == "worker" and "dashscope-intl.aliyuncs.com" in candidate.base_url:
+                if config.key == "worker":
                     request_kwargs["extra_body"] = {"enable_thinking": False}
                 response = await client.chat.completions.create(**request_kwargs)
                 content = (response.choices[0].message.content or "").strip()
