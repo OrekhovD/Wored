@@ -1610,6 +1610,13 @@ a:focus-visible {
 .ds-diag-check strong { color: #c5d4dd; }
 .ds-blocked-reason { margin-top: 10px; padding: 8px 12px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); border-radius: 6px; color: #ef4444; font-size: 0.82rem; font-weight: 600; }
 
+/* §9 — Signal Rules */
+.ds-signal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; margin-top: 10px; }
+.ds-signal-kpi { background: rgba(10,20,28,0.3); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 3px; }
+.ds-signal-kpi label { font-size: 0.65rem; color: var(--muted,#7291a5); text-transform: uppercase; letter-spacing: 0.03em; }
+.ds-signal-kpi span { font-size: 0.88rem; font-weight: 600; font-variant-numeric: tabular-nums; color: #d3e0e8; }
+.ds-signal-kpi.ds-kpi-primary { background: rgba(54,201,221,0.08); border: 1px solid rgba(54,201,221,0.15); }
+
 /* Responsive */
 @media (max-width:1200px) {
   .ds3-layout { grid-template-columns: 260px 1fr; }

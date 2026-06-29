@@ -2899,6 +2899,75 @@ async def api_daily_session_events(
     }
 
 
+@app.get("/api/daily-session/signal")
+async def api_daily_session_signal(request: Request, session_id: str = Query(...)):
+    """§9 — current breakout signal for UI display.
+
+    Returns trade/no-trade decision with all parameters and reason.
+    """
+    require_api_auth(request)
+    pool = request.app.state.pg_pool
+
+    # Get session
+    async with pool.acquire() as conn:
+        session = await conn.fetchrow(
+            "SELECT id, symbol, status, risk_mode, initial_budget_usdt, trade_direction FROM trading_sessions WHERE id=$1",
+            session_id,
+        )
+    if not session:
+        return JSONResponse({"ok": False, "error": "session_not_found"}, status_code=404)
+
+    # Build config from session
+    import sys
+    sys.path.insert(0, "/chatbot")
+    from services.breakout_detector import BreakoutConfig, get_breakout_signal_for_session
+
+    config = BreakoutConfig(
+        symbol=session["symbol"],
+        direction=session.get("trade_direction", "auto"),
+    )
+
+    session_dict = dict(session)
+    signal = await get_breakout_signal_for_session(session_dict, config)
+
+    return {
+        "ok": True,
+        "signal": {
+            "decision": signal.decision,
+            "direction": signal.direction,
+            "reason": signal.reason,
+            "entry_price": signal.entry_price,
+            "stop_loss": signal.stop_loss,
+            "take_profit": signal.take_profit,
+            "position_size": signal.position_size,
+            "notional": signal.notional,
+            "leverage": signal.leverage,
+            "breakout_level": signal.breakout_level,
+            "confirm_count": signal.confirm_count,
+            "volume_ratio": round(signal.volume_ratio, 3),
+            "atr_ratio": round(signal.atr_ratio, 3),
+            "current_price": signal.current_price,
+            "current_volume": signal.current_volume,
+            "current_atr": round(signal.current_atr, 2),
+            "spread_pct": round(signal.spread_pct, 4),
+            "checks": signal.checks,
+            "timestamp": signal.timestamp,
+        },
+        "config": {
+            "timeframe": config.timeframe,
+            "breakout_high": config.breakout_high,
+            "breakout_low": config.breakout_low,
+            "confirm_closes": config.confirm_closes,
+            "vol_factor": config.vol_factor,
+            "atr_factor": config.atr_factor,
+            "risk_pct": config.risk_pct,
+            "sl_atr_mult": config.sl_atr_mult,
+            "tp_rr": config.tp_rr,
+            "max_leverage": config.max_leverage,
+        },
+    }
+
+
 @app.get("/api/daily-session/diagnostics")
 async def api_daily_session_diagnostics(request: Request, session_id: str = Query(...)):
     """§6.4 + §7.3 — execution guardrails + diagnostic messages.

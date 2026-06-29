@@ -188,6 +188,35 @@
         <div id="dsBlockedReason" class="ds-blocked-reason" style="display:none"></div>
       </div>
 
+      <!-- §9 — Signal Rules -->
+      <div class="ds-card" id="dsSignalCard" style="display:none">
+        <div class="ds-card-header">
+          <h2>Signal Rules — Breakout Detector</h2>
+          <span class="ds-status-badge" id="dsSignalBadge">—</span>
+        </div>
+        <div class="ds-signal-grid">
+          <div class="ds-signal-kpi"><label>Decision</label><span id="dsSigDecision">—</span></div>
+          <div class="ds-signal-kpi"><label>Direction</label><span id="dsSigDirection">—</span></div>
+          <div class="ds-signal-kpi"><label>Current Price</label><span id="dsSigPrice">—</span></div>
+          <div class="ds-signal-kpi"><label>Breakout Level</label><span id="dsSigLevel">—</span></div>
+          <div class="ds-signal-kpi"><label>Confirm Closes</label><span id="dsSigConfirm">—</span></div>
+          <div class="ds-signal-kpi"><label>Volume Ratio</label><span id="dsSigVolRatio">—</span></div>
+          <div class="ds-signal-kpi"><label>ATR Ratio</label><span id="dsSigAtrRatio">—</span></div>
+          <div class="ds-signal-kpi"><label>Spread %</label><span id="dsSigSpread">—</span></div>
+        </div>
+        <div id="dsSignalTrade" style="display:none;margin-top:10px">
+          <div class="ds-signal-grid">
+            <div class="ds-signal-kpi ds-kpi-primary"><label>Entry</label><span id="dsSigEntry">—</span></div>
+            <div class="ds-signal-kpi"><label>Stop Loss</label><span id="dsSigSL">—</span></div>
+            <div class="ds-signal-kpi"><label>Take Profit</label><span id="dsSigTP">—</span></div>
+            <div class="ds-signal-kpi"><label>Position Size</label><span id="dsSigSize">—</span></div>
+            <div class="ds-signal-kpi"><label>Notional</label><span id="dsSigNotional">—</span></div>
+            <div class="ds-signal-kpi"><label>Leverage</label><span id="dsSigLev">—</span></div>
+          </div>
+        </div>
+        <div id="dsSignalReason" class="ds-blocked-reason" style="display:none;margin-top:10px"></div>
+      </div>
+
       <!-- 2. Session Health Grid (Metrics + Risk combined) -->
       <div class="ds-card" id="dsHealth" style="display:none">
         <div class="ds-card-header"><h2>Session Health</h2></div>
@@ -517,6 +546,8 @@ async function loadSession() {
 
     // §7.3 — Load diagnostics
     loadDiagnostics(s.id);
+    // §9 — Load signal
+    loadSignal(s.id);
 
     // Health KPI Grid
     if (data.metrics) {
@@ -833,6 +864,58 @@ async function loadDiagnostics(sessionId) {
     }
   } catch (err) {
     console.error('Diagnostics error:', err);
+  }
+}
+
+// ─── §9 Signal Rules ───
+async function loadSignal(sessionId) {
+  try {
+    const res = await fetch(`/api/daily-session/signal?session_id=${sessionId}`);
+    const data = await res.json();
+    if (!data.ok || !data.signal) return;
+
+    const sig = data.signal;
+    const card = document.getElementById('dsSignalCard');
+    const badge = document.getElementById('dsSignalBadge');
+    card.style.display = '';
+
+    const isTrade = sig.decision === 'trade';
+    badge.textContent = sig.decision.toUpperCase();
+    badge.style.color = isTrade ? '#22c55e' : '#ef4444';
+
+    document.getElementById('dsSigDecision').textContent = sig.decision;
+    document.getElementById('dsSigDirection').textContent = sig.direction || '—';
+    document.getElementById('dsSigPrice').textContent = sig.current_price ? '$' + sig.current_price.toFixed(2) : '—';
+    document.getElementById('dsSigLevel').textContent = sig.breakout_level ? '$' + sig.breakout_level.toFixed(2) : '—';
+    document.getElementById('dsSigConfirm').textContent = sig.confirm_count;
+    document.getElementById('dsSigVolRatio').textContent = sig.volume_ratio ? sig.volume_ratio.toFixed(2) : '—';
+    document.getElementById('dsSigAtrRatio').textContent = sig.atr_ratio ? sig.atr_ratio.toFixed(2) : '—';
+    document.getElementById('dsSigSpread').textContent = sig.spread_pct ? sig.spread_pct.toFixed(4) + '%' : '—';
+
+    // Trade details
+    const tradeDiv = document.getElementById('dsSignalTrade');
+    if (isTrade) {
+      tradeDiv.style.display = '';
+      document.getElementById('dsSigEntry').textContent = '$' + sig.entry_price.toFixed(2);
+      document.getElementById('dsSigSL').textContent = '$' + sig.stop_loss.toFixed(2);
+      document.getElementById('dsSigTP').textContent = '$' + sig.take_profit.toFixed(2);
+      document.getElementById('dsSigSize').textContent = sig.position_size.toFixed(6);
+      document.getElementById('dsSigNotional').textContent = '$' + sig.notional.toFixed(2);
+      document.getElementById('dsSigLev').textContent = sig.leverage + 'x';
+    } else {
+      tradeDiv.style.display = 'none';
+    }
+
+    // Reason
+    const reasonDiv = document.getElementById('dsSignalReason');
+    if (sig.reason && sig.reason !== 'all_checks_passed') {
+      reasonDiv.style.display = '';
+      reasonDiv.textContent = '⚠ ' + sig.reason;
+    } else {
+      reasonDiv.style.display = 'none';
+    }
+  } catch (err) {
+    console.error('Signal error:', err);
   }
 }
 
