@@ -116,11 +116,54 @@ ERR_BACKEND = "⚠️ Временная ошибка сервиса. Попро
 
 # ── Router handlers (ТЗ §10.2 — regex-first) ──
 
+def _session_control_kb() -> InlineKeyboardMarkup:
+    """Inline-меню управления сессией — 10 кнопок."""
+    url = _miniapp_url()
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 Mini App", url=url)],
+        [
+            InlineKeyboardButton(text="📊 Статус", callback_data="pipeline_status"),
+            InlineKeyboardButton(text="📦 Позиции", callback_data="pipeline_positions"),
+        ],
+        [
+            InlineKeyboardButton(text="💰 Баланс", callback_data="pipeline_balance"),
+            InlineKeyboardButton(text="📋 План", callback_data="pipeline_plan"),
+        ],
+        [
+            InlineKeyboardButton(text="⏸ Pause", callback_data="pipeline_pause"),
+            InlineKeyboardButton(text="🛡 Tighten", callback_data="pipeline_tighten"),
+        ],
+        [
+            InlineKeyboardButton(text="📉 Reduce", callback_data="pipeline_reduce"),
+            InlineKeyboardButton(text="🛑 Close all", callback_data="pipeline_close_all"),
+        ],
+        [InlineKeyboardButton(text="🏁 Результат", callback_data="pipeline_result")],
+    ])
+
+
+def _risk_mode_kb() -> InlineKeyboardMarkup:
+    """Выбор risk_mode при старте сессии."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🛡 Defensive", callback_data="session_start_defensive"),
+            InlineKeyboardButton(text="⚖️ Balanced", callback_data="session_start_balanced"),
+            InlineKeyboardButton(text="🔥 Aggressive", callback_data="session_start_aggressive"),
+        ],
+    ])
+
+
 @router.message(Command("session"))
 async def cmd_session(message: Message):
-    """ТЗ §6.1 — /session = статус сессии."""
-    text, kb = await _build_status_response(message.from_user.id)
-    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+    """ТЗ §6.1 — /session = inline-меню управления сессией."""
+    text, _ = await _build_status_response(message.from_user.id)
+    await message.answer(text, reply_markup=_session_control_kb(), parse_mode="HTML")
+
+
+@router.message(Command("plan"))
+async def cmd_plan(message: Message):
+    """Показать активный план сессии."""
+    text = await _handle_plan(message.from_user.id)
+    await message.answer(text, parse_mode="HTML")
 
 
 @router.message(F.text.regexp(r"(?i)(старт сессии|начать сессию|daily session|запусти сессию|старт торговли|запусти дневную)"))
@@ -182,7 +225,23 @@ async def msg_portfolio_commands(message: Message):
 @router.callback_query(F.data == "pipeline_start")
 async def cb_start(callback):
     await callback.answer()
-    intent = {"intent": "pipeline_start", "budget": 100.0, "risk_mode": "balanced",
+    # Показываем выбор risk_mode
+    await callback.message.edit_text(
+        "🚀 <b>Запуск сессии</b>\n\nВыбери режим риска:\n"
+        "🛡 Defensive — низкий риск, 3% DD лимит\n"
+        "⚖️ Balanced — средний риск, 5% DD лимит\n"
+        "🔥 Aggressive — высокий риск, 8% DD лимит",
+        reply_markup=_risk_mode_kb(),
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data.startswith("session_start_"))
+async def cb_start_with_risk(callback):
+    """Старт сессии с выбранным risk_mode."""
+    await callback.answer()
+    risk_mode = callback.data.replace("session_start_", "")
+    intent = {"intent": "pipeline_start", "budget": 100.0, "risk_mode": risk_mode,
               "trade_profile": {"trade_direction": "auto", "trade_horizon": "fast"}}
     text, kb = await _handle_start_safe(callback.from_user.id, intent)
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
@@ -191,8 +250,8 @@ async def cb_start(callback):
 @router.callback_query(F.data == "pipeline_status")
 async def cb_status(callback):
     await callback.answer()
-    text, kb = await _build_status_response(callback.from_user.id)
-    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    text, _ = await _build_status_response(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=_session_control_kb(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "pipeline_positions")
@@ -200,6 +259,34 @@ async def cb_positions(callback):
     await callback.answer()
     text, kb = await _build_positions_response(callback.from_user.id)
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "pipeline_balance")
+async def cb_balance(callback):
+    await callback.answer()
+    text, kb = await _build_balance_response(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "pipeline_plan")
+async def cb_plan(callback):
+    await callback.answer()
+    text = await _handle_plan(callback.from_user.id)
+    await callback.message.edit_text(text, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "pipeline_result")
+async def cb_result(callback):
+    await callback.answer()
+    text, kb = await _build_result_response(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data == "pipeline_reduce")
+async def cb_reduce(callback):
+    await callback.answer()
+    text = await _handle_revision_safe(callback.from_user.id, "reduce")
+    await callback.message.answer(text, parse_mode="HTML")
 
 
 @router.callback_query(F.data == "pipeline_pause")

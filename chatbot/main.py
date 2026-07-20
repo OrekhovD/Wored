@@ -17,7 +17,6 @@ from handlers.portfolio import router as portfolio_router
 from handlers.predictions import router as predictions_router
 from handlers.settings import router as settings_router
 from handlers.trader import router as trader_router
-from handlers.models import router as models_router
 from handlers.admin import router as admin_router
 from handlers.pipeline import router as pipeline_router
 
@@ -122,7 +121,6 @@ async def main():
     dp.include_router(predictions_router)
     dp.include_router(settings_router)
     dp.include_router(trader_router)
-    dp.include_router(models_router)
     dp.include_router(admin_router)
     dp.include_router(pipeline_router)
     if os.getenv("HERMES_CHATBOT_GATEWAY_ENABLED", "false").lower() in {"1", "true", "yes"}:

@@ -37,7 +37,7 @@ async def menu_alerts(message: Message):
 
 @router.message(F.text == "🎯 Сессия")
 async def menu_session_status(message: Message):
-    """ТЗ §5.1 — кнопка Сессия = статус активной сессии."""
-    from handlers.pipeline import _build_status_response
-    text, kb = await _build_status_response(message.from_user.id)
-    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+    """ТЗ §5.1 — кнопка Сессия = inline-меню управления сессией."""
+    from handlers.pipeline import _build_status_response, _session_control_kb
+    text, _ = await _build_status_response(message.from_user.id)
+    await message.answer(text, reply_markup=_session_control_kb(), parse_mode="HTML")

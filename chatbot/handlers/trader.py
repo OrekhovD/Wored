@@ -1,10 +1,12 @@
 """
-Trader handler - Telegram menu for crypto trader functionality.
-Provides: Analysis, Simulation, Results, Strategy, Journal, Model selection.
+Trader handler — unified menu for crypto trader functionality + model selection.
+Merged /trader + /models into one menu (v2).
+Provides: Session, Market, Analytics, Models, Strategy, Journal, Results, Settings.
 """
 from __future__ import annotations
 
 import logging
+import os
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
@@ -16,100 +18,185 @@ router = Router(name="trader")
 ADMIN_ID = 5249526259
 
 
+# ── Unified trader menu ──
+
 def _trader_menu() -> InlineKeyboardMarkup:
     kb = [
-        [InlineKeyboardButton(text="📊 Анализ BTC/USDT", callback_data="trader_analyze")],
-        [InlineKeyboardButton(text="📈 Симуляция фьючерсов", callback_data="trader_sim")],
-        [InlineKeyboardButton(text="📋 Результаты симуляций", callback_data="trader_results")],
-        [InlineKeyboardButton(text="🧠 Стратегия", callback_data="trader_strategy")],
-        [InlineKeyboardButton(text="📓 Журнал агента", callback_data="trader_journal")],
-        [InlineKeyboardButton(text="🤖 Выбор модели", callback_data="trader_models")],
+        [
+            InlineKeyboardButton(text="🎯 Сессия", callback_data="trader_session"),
+            InlineKeyboardButton(text="📊 Рынок", callback_data="trader_market"),
+        ],
+        [
+            InlineKeyboardButton(text="🧠 Анализ", callback_data="trader_analyze"),
+            InlineKeyboardButton(text="🔮 Прогнозы", callback_data="trader_predictions"),
+        ],
+        [
+            InlineKeyboardButton(text="📦 Портфель", callback_data="trader_portfolio"),
+            InlineKeyboardButton(text="🔔 Алерты", callback_data="trader_alerts"),
+        ],
+        [
+            InlineKeyboardButton(text="🤖 Модели", callback_data="trader_models"),
+            InlineKeyboardButton(text="⚙️ Система", callback_data="trader_settings"),
+        ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+# ── Models submenu ──
+
+def _models_keyboard() -> InlineKeyboardMarkup:
+    kb = [
+        [InlineKeyboardButton(text="⚡ Auto (gateway routing)", callback_data="model_auto")],
+        [InlineKeyboardButton(text="🏃 Worker (flash)", callback_data="model_worker_ollama")],
+        [InlineKeyboardButton(text="🧠 Analyst (pro)", callback_data="model_analyst_ollama")],
+        [InlineKeyboardButton(text="👑 Premium (glm-5.2)", callback_data="model_premium_ollama")],
+        [InlineKeyboardButton(text="← Назад", callback_data="trader_back")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
+def _back_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="← Назад", callback_data="trader_back")],
+    ])
 
 
 @router.message(Command("trader"))
 async def cmd_trader(message: Message):
     await message.reply(
-        "<b>🏴‍☠️ Криптотрейдер</b>\n\nВыбери действие:",
+        "🏴‍☠️ <b>Командный мостик</b>\n\nВыбери действие:",
         reply_markup=_trader_menu(),
     )
+
+
+@router.callback_query(F.data == "trader_back")
+async def cb_back(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text(
+        "🏴‍☠️ <b>Командный мостик</b>\n\nВыбери действие:",
+        reply_markup=_trader_menu(),
+    )
+
+
+@router.callback_query(F.data == "trader_session")
+async def cb_session(callback: CallbackQuery):
+    await callback.answer()
+    from handlers.pipeline import _build_status_response, _session_control_kb
+    text, _ = await _build_status_response(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=_session_control_kb(), parse_mode="HTML")
+
+
+@router.callback_query(F.data == "trader_market")
+async def cb_market(callback: CallbackQuery):
+    await callback.answer()
+    from handlers.market import build_market_text, get_market_keyboard
+    text = await build_market_text()
+    await callback.message.edit_text(text, reply_markup=get_market_keyboard())
 
 
 @router.callback_query(F.data == "trader_analyze")
 async def cb_analyze(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text("📊 Анализирую BTC/USDT...")
+    await callback.message.edit_text(
+        "📊 <b>Анализ BTC/USDT</b>\n\nАнализирую...",
+        parse_mode="HTML",
+    )
     from ai.router import route_request
     result = await route_request("анализ btcusdt", [])
     await callback.message.answer(result or "Ошибка анализа")
 
 
-@router.callback_query(F.data == "trader_sim")
-async def cb_sim(callback: CallbackQuery):
+@router.callback_query(F.data == "trader_predictions")
+async def cb_predictions(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
-        "<b>📈 Симуляция фьючерсов</b>\n\n"
-        "Отправь команду в формате:\n"
-        "<code>фьючерсы кросс 200x лонг btc на 30$</code>\n\n"
-        "Параметры: направление (лонг/шорт), плечо (100-200x), маржа (cross/isolated), сумма$\n"
-        "Дополнительно: <code>торгуй</code> — AI управляет позицией\n"
-        "Просмотр: <code>мои позиции</code>, <code>закрой позицию #N</code>"
-    )
+    from handlers.predictions import send_prediction_menu
+    await send_prediction_menu(callback.message)
 
 
-@router.callback_query(F.data == "trader_results")
-async def cb_results(callback: CallbackQuery):
+@router.callback_query(F.data == "trader_portfolio")
+async def cb_portfolio(callback: CallbackQuery):
     await callback.answer()
-    from services.sim_engine import get_user_history
-    from services.sim_engine import get_open_positions
-    open_pos = await get_open_positions(ADMIN_ID)
-    closed_pos = await get_user_history(ADMIN_ID, limit=10)
-    lines = [f"<b>📋 Результаты симуляций</b>\n", f"Открытые: {len(open_pos)}", ""]
-    for p in open_pos[:5]:
-        from services.sim_engine import calculate_unrealized_pnl
-        pnl = calculate_unrealized_pnl(p, float(p["entry_price"]))
-        lines.append(f"#{p['id']} {p['direction'].upper()} {p['symbol'].upper()} {p['leverage']}x PnL:{pnl['roi_pct']:+.1f}%")
-    lines.append(f"\nЗакрытые: {len(closed_pos)}")
-    for p in closed_pos[:5]:
-        rpnl = float(p.get("realized_pnl") or 0)
-        lines.append(f"#{p['id']} {p['direction'].upper()} {p['symbol'].upper()} PnL:{rpnl:+.4f} ({p.get('close_reason','manual')})")
-    await callback.message.edit_text("\n".join(lines))
+    from handlers.pipeline import _build_positions_response
+    text, kb = await _build_positions_response(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 
-@router.callback_query(F.data == "trader_strategy")
-async def cb_strategy(callback: CallbackQuery):
+@router.callback_query(F.data == "trader_alerts")
+async def cb_alerts(callback: CallbackQuery):
     await callback.answer()
-    from storage.postgres_client import get_latest_strategy_rules
-    rules = await get_latest_strategy_rules()
-    if not rules:
-        await callback.message.edit_text("🧠 Стратегия: правила ещё не сформированы. Нужно провести серию симуляций (5+) для оценки.")
-        return
-    text = f"<b>🧠 Стратегия v{rules['version']}</b>\nСоздана: {rules.get('created_at','?')}\n\n"
-    r = rules.get("rules", {})
-    if isinstance(r, dict):
-        text += f"<i>{r.get('summary','')}</i>\n\n"
-        for adj in r.get("adjustments", []):
-            text += f"• {adj.get('parameter','?')}: {adj.get('old','?')}→{adj.get('new','?')} ({adj.get('reason','')})\n"
-    else:
-        text += str(r)
-    await callback.message.edit_text(text)
+    from handlers.alerts import send_alerts
+    await send_alerts(callback.message)
 
 
-@router.callback_query(F.data == "trader_journal")
-async def cb_journal(callback: CallbackQuery):
+@router.callback_query(F.data == "trader_settings")
+async def cb_settings(callback: CallbackQuery):
     await callback.answer()
-    from storage.postgres_client import get_recent_prediction_requests
-    items = await get_recent_prediction_requests(limit=5)
-    lines = ["<b>📓 Журнал агента</b>\n"]
-    for item in items:
-        lines.append(f"#{item['id']} {item['symbol']} {item['status']} acc:{item.get('avg_accuracy','?')}%")
-    if not items:
-        lines.append("Записей пока нет.")
-    await callback.message.edit_text("\n".join(lines))
+    from handlers.settings import send_settings
+    await send_settings(callback.message)
 
 
 @router.callback_query(F.data == "trader_models")
-async def cb_models(callback: CallbackQuery):
+async def cb_models_menu(callback: CallbackQuery):
+    """Показать меню выбора моделей (merged из models.py)."""
     await callback.answer()
-    await callback.message.edit_text("🤖 Выбор модели — используй /models")
+    from ai.models import MODELS, WORKER_MODEL_CHAIN, ANALYST_MODEL_CHAIN, PREMIUM_MODEL_CHAIN
+    from storage.postgres_client import get_user_model
+
+    user_id = callback.from_user.id
+    pref = await get_user_model(user_id)
+    current = pref["model_alias"] if pref else "auto"
+
+    lines = ["<b>🤖 Доступные модели</b>\n"]
+    tiers = [
+        ("Worker", WORKER_MODEL_CHAIN, "Быстрые задачи, классификация, парсинг"),
+        ("Analyst", ANALYST_MODEL_CHAIN, "Анализ рынка, прогнозы, сигналы"),
+        ("Premium", PREMIUM_MODEL_CHAIN, "Стратегия, deep research, корректировка"),
+    ]
+    for role, chain, desc in tiers:
+        lines.append(f"<b>{role}</b> — {desc}")
+        for tier in chain[:2]:
+            cfg = MODELS.get(tier)
+            if cfg and cfg.model_id:
+                lines.append(f"  • {cfg.name} ({cfg.model_id})")
+        lines.append("")
+
+    lines.append(f"<i>Текущий выбор: {current}</i>")
+    await callback.message.edit_text("\n".join(lines), reply_markup=_models_keyboard(), parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("model_"))
+async def cb_model_select(callback: CallbackQuery):
+    """Выбор модели (merged из models.py)."""
+    data = callback.data.replace("model_", "")
+    user_id = callback.from_user.id
+
+    if data == "auto":
+        from storage.postgres_client import save_user_model
+        await save_user_model(user_id, "auto", auto_mode=True)
+        await callback.answer("✅ Auto mode включён")
+        await callback.message.edit_text(
+            "✅ Автоматическая маршрутизация через gateway active slot.",
+            reply_markup=_models_keyboard(),
+        )
+        return
+
+    parts = data.split("_", 1)
+    if len(parts) < 2:
+        await callback.answer("Неизвестная модель")
+        return
+
+    tier = data
+    from ai.models import MODELS
+    from storage.postgres_client import save_user_model
+    cfg = MODELS.get(tier)
+    if not cfg:
+        await callback.answer(f"Модель {tier} не найдена")
+        return
+
+    await save_user_model(user_id, tier, auto_mode=False)
+    await callback.answer(f"✅ Выбрана: {cfg.name}")
+    await callback.message.edit_text(
+        f"✅ Выбрана модель:\n<b>{cfg.name}</b>\n{cfg.model_id}\n\n"
+        f"Используется для всех запросов до следующего выбора.",
+        reply_markup=_models_keyboard(),
+    )
