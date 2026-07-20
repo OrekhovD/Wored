@@ -420,15 +420,12 @@ def list_prediction_models() -> list[dict[str, Any]]:
 
 
 def _build_client(candidate: RuntimeModelCandidate, strict_nvapi: bool = False) -> AsyncOpenAI | None:
+    """Kept for list_prediction_models compatibility — actual calls use _ollama_chat."""
     if candidate.cache_key in _clients:
         return _clients[candidate.cache_key]
 
     api_key = os.getenv(candidate.api_key_env, "").strip()
     if not api_key:
-        _clients[candidate.cache_key] = None
-        return None
-
-    if strict_nvapi and candidate.api_key_env != "OLLAMA_API_KEY" and not api_key.startswith("nvapi-"):
         _clients[candidate.cache_key] = None
         return None
 
@@ -439,6 +436,49 @@ def _build_client(candidate: RuntimeModelCandidate, strict_nvapi: bool = False) 
         max_retries=0,
     )
     return _clients[candidate.cache_key]
+
+
+async def _ollama_chat(
+    candidate: RuntimeModelCandidate,
+    config: PredictionModelConfig,
+    context_payload: dict[str, Any],
+) -> str:
+    """Call Ollama Cloud native /api/chat endpoint and return assistant content."""
+    import httpx
+
+    api_key = os.getenv(candidate.api_key_env, "").strip()
+    if not api_key:
+        raise RuntimeError(f"{candidate.api_key_env} is not set")
+
+    base = candidate.base_url.rstrip("/").removesuffix("/v1")
+    url = f"{base}/api/chat"
+
+    payload = {
+        "model": candidate.model_id,
+        "messages": _build_prediction_messages(context_payload),
+        "stream": False,
+        "options": {
+            "temperature": config.temperature,
+            "num_predict": config.max_tokens,
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=candidate.timeout) as hc:
+        resp = await hc.post(
+            url,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    content = (data.get("message", {}).get("content", "") or "").strip()
+    if not content:
+        raise ValueError("Model returned empty content")
+    return content
 
 
 def _build_prediction_messages(context_payload: dict[str, Any]) -> list[dict[str, str]]:
@@ -484,8 +524,7 @@ async def generate_model_prediction(config: PredictionModelConfig, context_paylo
     last_model_id = runtime_candidates[0].model_id if runtime_candidates else config.model_id
 
     for candidate in runtime_candidates:
-        client = _build_client(candidate, strict_nvapi=strict_nvapi)
-        if client is None:
+        if not _candidate_is_available(candidate, strict_nvapi=strict_nvapi):
             continue
 
         attempt_schedule = _attempt_schedule(config)
@@ -495,18 +534,7 @@ async def generate_model_prediction(config: PredictionModelConfig, context_paylo
 
             try:
                 last_model_id = candidate.model_id
-                request_kwargs = {
-                    "model": candidate.model_id,
-                    "messages": _build_prediction_messages(context_payload),
-                    "max_tokens": config.max_tokens,
-                    "temperature": config.temperature,
-                }
-                if config.key == "worker":
-                    request_kwargs["extra_body"] = {"enable_thinking": False}
-                response = await client.chat.completions.create(**request_kwargs)
-                content = (response.choices[0].message.content or "").strip()
-                if not content:
-                    raise ValueError("Model returned empty content")
+                content = await _ollama_chat(candidate, config, context_payload)
 
                 summary, points = parse_prediction_payload(
                     raw_text=content,

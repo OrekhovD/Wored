@@ -1,4 +1,5 @@
 import asyncpg
+import asyncio
 import os
 import logging
 
@@ -70,14 +71,22 @@ async def get_pool():
         if db_url and "postgresql+asyncpg://" in db_url:
             db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
 
-        try:
-            _pool = await asyncpg.create_pool(dsn=db_url)
-            async with _pool.acquire() as conn:
-                for statement in [item.strip() for item in PREDICTION_TABLES_SQL.split(";") if item.strip()]:
-                    await conn.execute(statement)
-        except Exception as e:
-            log.error(f"Postgres connect error: {e}")
-            raise
+        max_retries = 5
+        backoff = 2
+        for attempt in range(1, max_retries + 1):
+            try:
+                _pool = await asyncpg.create_pool(dsn=db_url)
+                async with _pool.acquire() as conn:
+                    for statement in [item.strip() for item in PREDICTION_TABLES_SQL.split(";") if item.strip()]:
+                        await conn.execute(statement)
+                return _pool
+            except Exception as e:
+                log.error(f"Postgres connect error (attempt {attempt}/{max_retries}): {e}")
+                _pool = None
+                if attempt == max_retries:
+                    raise
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 30)
     return _pool
 
 

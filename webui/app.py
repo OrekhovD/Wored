@@ -1751,7 +1751,7 @@ async def create_prediction(
         set_flash(
             request,
             "ok",
-            f"Prediction #{detail['id']} created for {normalized_symbol.upper()} / {normalized_horizon}h. "
+            f"Prediction #{detail['id']} created for {detail.get('symbol', symbol).upper()} / {detail.get('horizon_hours', horizon_hours)}h. "
             f"Completed models: {len(successful_models)}. Failed models: {len(failed_models)}.{oracle_note}",
         )
     else:
