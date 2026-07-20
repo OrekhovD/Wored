@@ -12,7 +12,23 @@ def get_webui_internal_base_url() -> str:
 
 
 def get_webui_public_base_url() -> str:
-    return os.getenv("WEBUI_PUBLIC_BASE_URL", "http://localhost:8080").rstrip("/")
+    """Public WebUI base URL for Telegram inline buttons.
+
+    Priority: WEBUI_PUBLIC_BASE_URL > TG_MINIAPP_URL > WEBUI_URL.
+    Strips any path suffix (e.g. /daily-session) to get the bare base URL.
+    Telegram requires a public HTTPS URL — localhost will be rejected.
+    """
+    raw = (
+        os.getenv("WEBUI_PUBLIC_BASE_URL")
+        or os.getenv("TG_MINIAPP_URL")
+        or os.getenv("WEBUI_URL")
+        or "http://localhost:8080"
+    )
+    # Strip path suffix — TG_MINIAPP_URL may include /daily-session
+    from urllib.parse import urlparse
+    parsed = urlparse(raw.rstrip("/"))
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    return base
 
 
 def get_session_secret() -> str:
