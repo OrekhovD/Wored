@@ -143,7 +143,9 @@ def format_ui_timestamp(value: datetime | str | None) -> str | None:
 
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    from datetime import timedelta as _td
+    tz_plus7 = timezone(_td(hours=7))
+    return parsed.astimezone(tz_plus7).strftime("%m-%d %H:%M")
 
 
 def to_db_timestamp(value: datetime) -> datetime:

@@ -290,6 +290,18 @@
         height: 28,
         rightOffset: 4,
         barSpacing: 8,
+        tickMarkFormatter: function(time) {
+          // time is unix timestamp in seconds, convert to UTC+7
+          var d = new Date((time - 0) * 1000);
+          var h = (d.getUTCHours() + 7) % 24;
+          var m = d.getUTCMinutes();
+          var day = d.getUTCDate();
+          // Detect day rollover
+          var totalH = d.getUTCHours() + 7;
+          if (totalH >= 24) day = d.getUTCDate() + 1;
+          var month = d.getUTCMonth() + 1;
+          return (month < 10 ? '0' : '') + month + '-' + (day < 10 ? '0' : '') + day + ' ' + (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+        },
       },
       crosshair: {
         vertLine: { color: 'rgba(255,255,255,0.3)', width: 1, style: 2, labelBackgroundColor: '#1fd6a3' },
