@@ -103,6 +103,13 @@ async def cmd_chat(message: Message):
         await _dispatch_product_intent(message.text or "", message)
         return
 
+    # U9 — помощь → главное меню
+    msg_lower = (message.text or "").lower().strip()
+    if msg_lower in ("помощь", "help", "меню", "menu", "начать", "старт", "/start"):
+        from handlers.start import cmd_start
+        await cmd_start(message)
+        return
+
     # Fallback: AI chat for non-product queries (ТЗ §10.3 — worker-tier only)
     wait_msg = await message.answer("🤔 <i>Анализирую…</i>")
     try:

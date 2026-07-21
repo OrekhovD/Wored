@@ -56,12 +56,7 @@ async def cmd_start(message: Message):
     text = (
         f"🏴‍☠️ <b>WORED Trading Bot</b>\n\n"
         f"Daily Pipeline · BTCUSDT · HTX · 8h\n\n"
-        f"{cta_text}\n"
-        "📊 <b>Рынок</b> — live snapshot по watchlist\n"
-        "🧠 <b>Аналитика</b> — AI анализ по монете\n"
-        "🔮 <b>Прогнозы</b> — Forecast Lab\n"
-        "📦 <b>Портфель</b> — позиции и PnL\n"
-        "🔔 <b>Алерты</b> — последние движения\n\n"
-        "Или пиши текстом: «статус сессии», «цена btc», «анализ eth»…"
+        f"{cta_text}\n\n"
+        "Или пиши: «статус», «цена btc», «анализ eth»…"
     )
     await message.answer(text, reply_markup=get_main_keyboard(has_session))

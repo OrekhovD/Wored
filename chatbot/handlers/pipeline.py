@@ -104,6 +104,7 @@ def _session_control_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🛑 Close all", callback_data="pipeline_close_all"),
         ],
         [InlineKeyboardButton(text="🏁 Результат", callback_data="pipeline_result")],
+        [InlineKeyboardButton(text="← Назад", callback_data="menu_back")],
     ])
 
 
@@ -129,7 +130,8 @@ async def cmd_session(message: Message):
 async def cmd_plan(message: Message):
     """Показать активный план сессии."""
     text = await _handle_plan(message.from_user.id)
-    await message.answer(text, parse_mode="HTML")
+    kb = _no_session_kb() if text == ERR_NO_SESSION else None
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(F.text.regexp(r"(?i)(старт сессии|начать сессию|daily session|запусти сессию|старт торговли|запусти дневную)"))
@@ -238,7 +240,8 @@ async def cb_balance(callback):
 async def cb_plan(callback):
     await callback.answer()
     text = await _handle_plan(callback.from_user.id)
-    await callback.message.edit_text(text, parse_mode="HTML")
+    kb = _no_session_kb() if text == ERR_NO_SESSION else None
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.callback_query(F.data == "pipeline_result")
@@ -608,7 +611,9 @@ async def _build_status_response(user_id: int) -> tuple[str, InlineKeyboardMarku
         lines.append(f"Открыто позиций: {open_count}")
         # 3. Агрегированный PnL и риск (ТЗ §8.1 — separate Unrealized/Realized)
         if metrics:
-            lines.append(f"Unrealized PnL: {unrealized_pnl:+.2f} USDT ({(unrealized_pnl / float(session['initial_budget_usdt']) * 100):+.1f}%)")
+            budget = float(session['initial_budget_usdt'])
+            pnl_pct = (unrealized_pnl / budget * 100) if budget > 0 else 0.0
+            lines.append(f"Unrealized PnL: {unrealized_pnl:+.2f} USDT ({pnl_pct:+.1f}%)")
             lines.append(f"Realized PnL: {realized_pnl:+.2f} USDT")
             lines.append(f"Max DD: {float(metrics['max_drawdown_pct']):.1f}% / лимит {risk_limit_pct:.1f}%")
         # 4. Последняя команда

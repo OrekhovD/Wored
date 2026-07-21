@@ -48,7 +48,9 @@ async def build_market_text() -> str:
         if data:
             ticker = json.loads(data)
             emoji = "🟢" if ticker["change_pct"] >= 0 else "🔴"
-            lines.append(f"{emoji} <b>{sym.upper()}</b>: ${ticker['price']:,.2f} ({ticker['change_pct']:+.2f}%)")
+            vol = ticker.get("volume", 0)
+            vol_str = f" · Vol: {vol:,.0f} USDT" if vol else ""
+            lines.append(f"{emoji} <b>{sym.upper()}</b>: ${ticker['price']:,.2f} ({ticker['change_pct']:+.2f}%){vol_str}")
         else:
             lines.append(f"⚪ <b>{sym.upper()}</b>: <i>данные не загружены</i>")
 

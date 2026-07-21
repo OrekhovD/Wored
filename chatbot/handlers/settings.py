@@ -59,7 +59,8 @@ async def send_settings(message: Message):
         f"• analyst: <code>{_format_chain('analyst')}</code>\n"
         f"• strategist: <code>{_format_chain('premium')}</code>\n"
         f"• oracle: <code>{MODELS['minimax'].model_id}</code>\n\n"
-        f"🛡️ <b>Circuit Breakers:</b>\n{cb_text}"
+        f"🛡️ <b>Circuit Breakers</b> (защита от каскадных ошибок):\n{cb_text}\n\n"
+        "<i>🟢 closed=норма · 🔴 open=блокировка · 🟡 half_open=проверка</i>"
     )
     await message.answer(text)
 

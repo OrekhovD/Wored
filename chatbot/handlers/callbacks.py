@@ -24,6 +24,15 @@ async def answer_callback_early(call: CallbackQuery, text: str = "⏳ Запро
         log.warning("Callback %s ack failed: %s", call.data, exc)
 
 
+@router.callback_query(F.data == "menu_back")
+async def cb_menu_back(call: CallbackQuery):
+    """U5 — возврат в главное меню."""
+    await call.answer()
+    await call.message.delete()
+    from handlers.start import cmd_start
+    await cmd_start(call.message)
+
+
 @router.callback_query(F.data == "refresh_market")
 async def cb_refresh_market(call: CallbackQuery):
     text = await build_market_text()

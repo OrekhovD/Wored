@@ -50,10 +50,8 @@ def get_analytics_result_keyboard(symbol: str) -> InlineKeyboardMarkup:
 
 
 async def show_analytics_menu(message: Message):
-    await message.answer(
-        "🧠 <b>AI-аналитика</b>\n\nВыберите монету для reasoning-анализа или откройте прогнозный контур.",
-        reply_markup=get_analytics_keyboard(),
-    )
+    # U2 — сразу анализ BTC, с кнопкой переключения на ETH
+    await _send_analytics_response(message, "btcusdt")
 
 
 def _extract_symbol(text: str) -> Optional[str]:
@@ -128,6 +126,7 @@ async def _send_analytics_response(message: Message, symbol: str):
             vol_mode = "low"
 
         # Build context for AI
+        rsi_part = f"RSI 1h: {rsi:.0f}. " if rsi else ""
         context = [
             {
                 "role": "system",
@@ -135,8 +134,7 @@ async def _send_analytics_response(message: Message, symbol: str):
                     f"Текущие данные рынка для {symbol.upper()}: "
                     f"цена ${ticker['price']}, объём {ticker.get('volume', 0)}, "
                     f"изменение {change:+.2f}%. "
-                    f"RSI 1h: {rsi:.0f}" if rsi else "" +
-                    f" MACD: {macd_signal}"
+                    f"{rsi_part}MACD: {macd_signal}"
                 ),
             }
         ]
