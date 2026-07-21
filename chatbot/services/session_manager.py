@@ -769,12 +769,15 @@ async def hourly_revision(session_id: str) -> dict:
                 client.chat.completions.create(
                     model=cfg.model_id,
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=1200,
+                    max_tokens=2000,
                     temperature=0.2,
                 ),
                 timeout=cfg.timeout,
             )
             raw = (response.choices[0].message.content or "").strip()
+            # Reasoning models: content may be empty at low max_tokens, fallback to reasoning
+            if not raw and response.choices[0].message.reasoning:
+                raw = (response.choices[0].message.reasoning or "").strip()
             if raw.startswith("```"):
                 lines = raw.splitlines()
                 if lines and lines[0].startswith("```"):
@@ -822,6 +825,9 @@ async def hourly_revision(session_id: str) -> dict:
 
         # Cancel entries
         for cancel_id in patch.get("cancel_entries", []):
+            if not isinstance(cancel_id, str) or len(cancel_id) < 8:
+                log.warning("Skipping invalid cancel_entry id: %r", cancel_id)
+                continue
             await conn.execute(
                 "UPDATE planned_entries SET status='cancelled' WHERE id=$1 AND session_id=$2",
                 cancel_id, session_id,
@@ -830,7 +836,8 @@ async def hourly_revision(session_id: str) -> dict:
         # Update entries
         for update in patch.get("update_entries", []):
             entry_id = update.get("entry_id")
-            if not entry_id:
+            if not entry_id or not isinstance(entry_id, str) or len(entry_id) < 8:
+                log.warning("Skipping invalid update_entry id: %r", entry_id)
                 continue
             # Build dynamic update
             set_parts = []
@@ -901,6 +908,13 @@ async def hourly_revision(session_id: str) -> dict:
         await update_session_status(session_id, "stopped", "close_all_command")
 
     log.info("Revision v%d saved for session %s: cmd=%s", new_version, session_id, cmd)
+
+    # Record predictions for accuracy tracking
+    try:
+        from services.plan_accuracy import record_plan_prediction
+        await record_plan_prediction(session_id, new_version, revision_id)
+    except Exception as exc:
+        log.warning("Failed to record plan predictions: %s", exc)
 
     return {
         "revision_id": revision_id,

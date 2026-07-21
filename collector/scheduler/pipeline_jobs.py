@@ -268,6 +268,20 @@ async def post_session_review_job():
         log.error("post_session_review_job error: %s", exc)
 
 
+# ─── Plan Accuracy Evaluation (каждые 15 мин) ─────────────────────────
+
+async def evaluate_plan_accuracy_job():
+    """
+    Evaluate pending plan predictions that are >=1h old.
+    """
+    try:
+        import importlib
+        pa_mod = importlib.import_module("services.plan_accuracy")
+        await pa_mod.evaluate_pending_predictions()
+    except Exception as exc:
+        log.error("evaluate_plan_accuracy_job error: %s", exc)
+
+
 # ─── Registration function for collector/main.py ───────────────────────
 
 def register_pipeline_jobs(scheduler):
@@ -331,4 +345,13 @@ def register_pipeline_jobs(scheduler):
         replace_existing=True,
     )
 
-    log.info("Pipeline scheduler jobs registered: 6 recurring jobs")
+    # plan_accuracy evaluation — каждые 15 минут (проверяет pending predictions >=1h old)
+    scheduler.add_job(
+        evaluate_plan_accuracy_job,
+        "interval",
+        minutes=15,
+        id="pipeline_plan_accuracy",
+        replace_existing=True,
+    )
+
+    log.info("Pipeline scheduler jobs registered: 7 recurring jobs")

@@ -163,6 +163,40 @@ CREATE TABLE IF NOT EXISTS daily_reviews (
 );
 
 CREATE INDEX IF NOT EXISTS idx_daily_reviews_session ON daily_reviews (session_id, created_at DESC);
+
+-- 12.9 plan_accuracy — track plan revisions accuracy vs actual market moves
+CREATE TABLE IF NOT EXISTS plan_accuracy (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES trading_sessions(id) ON DELETE CASCADE,
+    plan_version INT NOT NULL,
+    revision_id UUID,
+    -- What the plan predicted
+    predicted_direction TEXT,
+    predicted_entry_from NUMERIC(20,8),
+    predicted_entry_to NUMERIC(20,8),
+    predicted_stop_loss NUMERIC(20,8),
+    predicted_take_profit_json JSONB,
+    predicted_regime TEXT,
+    -- What actually happened
+    actual_price_at_creation NUMERIC(20,8),
+    actual_price_1h_later NUMERIC(20,8),
+    actual_high_1h NUMERIC(20,8),
+    actual_low_1h NUMERIC(20,8),
+    price_change_pct_1h NUMERIC(20,8),
+    direction_correct BOOLEAN,
+    entry_zone_touched BOOLEAN,
+    stop_loss_hit BOOLEAN,
+    take_profit_hit BOOLEAN,
+    -- Evaluation
+    accuracy_score NUMERIC(5,2),  -- 0-100, how close was the prediction
+    outcome TEXT,  -- 'profit', 'loss', 'expired', 'pending'
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    evaluated_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_plan_accuracy_session ON plan_accuracy (session_id, plan_version DESC);
+CREATE INDEX IF NOT EXISTS idx_plan_accuracy_pending ON plan_accuracy (session_id) WHERE outcome = 'pending';
 """
 
 
