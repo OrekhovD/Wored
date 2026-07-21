@@ -103,6 +103,14 @@
     </div>
 
     {% if selected_request.comparison_rows %}
+    <div class="prediction-chart-card">
+      <div class="section-header-compact">
+        <div class="panel-kicker">Forecast Visualizer</div>
+        <div class="subtle small">Target price paths vs real market</div>
+      </div>
+      <div id="predictionChart" class="chart-frame"></div>
+    </div>
+
     <section class="detail-block comparison-section">
       <div class="section-header-compact">
         <div class="panel-kicker">Comparison Matrix</div>
@@ -249,6 +257,78 @@
     </div>
   </div>
 </section>
+
+{% if selected_request and selected_request.comparison_rows %}
+<script>
+(function() {
+  var el = document.getElementById('predictionChart');
+  if (!el || typeof LightweightCharts === 'undefined') return;
+
+  var chart = LightweightCharts.createChart(el, {
+    width: el.clientWidth,
+    height: 240,
+    layout: { background: { color: 'transparent' }, textColor: 'rgba(255,255,255,0.6)' },
+    grid: { vertLines: { color: 'rgba(255,255,255,0.04)' }, horzLines: { color: 'rgba(255,255,255,0.04)' } },
+    rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
+    timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: true, secondsVisible: false },
+  });
+
+  var basePrice = {{ selected_request.base_price }};
+  var colors = ['#1fd6a3', '#36c9dd', '#ff5d73', '#ff9b54', '#a78bfa'];
+  var modelNames = [
+    {% for model in selected_request.comparison_models %}"{{ model.short_name }}"{% if not loop.last %}, {% endif %}{% endfor %}
+  ];
+
+  // Real market line
+  var realData = [];
+  {% for row in selected_request.comparison_rows %}
+  realData.push({
+    time: "{{ row.target_time_display or row.target_time }}",
+    {% if row.actual_price is not none %}
+    value: {{ row.actual_price }}
+    {% else %}
+    value: null
+    {% endif %}
+  });
+  {% endfor %}
+
+  // Base price line (horizontal)
+  var baseSeries = chart.addLineSeries({ color: 'rgba(255,255,255,0.2)', lineWidth: 1, lineStyle: 2 });
+  var baseLine = [];
+  {% for row in selected_request.comparison_rows %}
+  baseLine.push({ time: "{{ row.target_time_display or row.target_time }}", value: basePrice });
+  {% endfor %}
+  baseSeries.setData(baseLine);
+
+  // Real market series
+  var realSeries = chart.addLineSeries({ color: '#ffffff', lineWidth: 2 });
+  realSeries.setData(realData.filter(function(d) { return d.value !== null; }));
+
+  // Model prediction series
+  {% for model in selected_request.comparison_models %}
+  var modelData_{{ loop.index0 }} = [];
+  {% for row in selected_request.comparison_rows %}
+  {% for cell in row.model_cells %}
+  {% if loop.index0 == loop.index | int %}
+  {% if cell.point %}
+  modelData_{{ loop.index0 }}.push({ time: "{{ row.target_time_display or row.target_time }}", value: {{ cell.point.predicted_price }} });
+  {% endif %}
+  {% endif %}
+  {% endfor %}
+  {% endfor %}
+  var series_{{ loop.index0 }} = chart.addLineSeries({ color: colors[{{ loop.index0 }} % colors.length], lineWidth: 1.5 });
+  series_{{ loop.index0 }}.setData(modelData_{{ loop.index0 }});
+  {% endfor %}
+
+  chart.timeScale().fitContent();
+
+  // Responsive
+  if (window.ResizeObserver) {
+    new ResizeObserver(function() { chart.applyOptions({ width: el.clientWidth }); }).observe(el);
+  }
+})();
+</script>
+{% endif %}
 
 {% else %}
 {# LIST PAGE: full header + form + stats + sidebar #}

@@ -797,9 +797,37 @@ select {
 
 .prediction-detail-layout {
   display: grid;
-  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 2.3fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   gap: 16px;
   margin-top: 12px;
+  align-items: start;
+}
+
+.prediction-detail-layout .prediction-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-content: start;
+  justify-content: flex-start;
+}
+
+.prediction-detail-layout .prediction-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: sticky;
+  top: 12px;
+}
+
+.prediction-detail-layout .request-list {
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  gap: 6px;
+}
+
+.prediction-detail-layout .request-link {
+  padding: 8px 10px;
+  gap: 4px;
 }
 
 .prediction-detail-header {
@@ -1035,21 +1063,18 @@ select {
 
 /* ===== Prediction Detail Tight Overrides ===== */
 
-.prediction-detail-layout .prediction-detail {
-  gap: 10px;
-}
-
+/* Override gap from flex to 12px (already set above) */
 .prediction-detail-layout .detail-block {
   margin-top: 0;
 }
 
 .prediction-detail-layout .table-wrap {
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .prediction-detail-layout .data-table th,
 .prediction-detail-layout .data-table td {
-  padding: 6px 8px;
+  padding: 8px 10px;
 }
 
 .prediction-detail-layout .prediction-model-list {
@@ -1062,11 +1087,11 @@ select {
 }
 
 .prediction-detail-layout .prediction-detail-header {
-  padding-bottom: 6px;
+  padding-bottom: 8px;
 }
 
 .prediction-detail-layout .detail-chips {
-  margin: 6px 0 8px;
+  margin: 4px 0 6px;
 }
 
 .prediction-detail-layout .data-table {
@@ -1074,36 +1099,176 @@ select {
 }
 
 .prediction-detail-layout .comparison-table-compact {
-  min-width: 560px;
+  min-width: 0;
+  width: 100%;
 }
 
 .prediction-detail-layout .forecast-table-compact {
-  min-width: 420px;
+  min-width: 0;
 }
 
 .prediction-detail-layout .panel-kicker {
   margin-bottom: 2px;
 }
 
+/* S2: Header deck — bigger title */
 .prediction-detail-layout h2 {
-  font-size: 1.1rem;
+  font-size: 1.35rem;
+  font-weight: 700;
 }
 
+/* S2: Chips — compact metric bar */
+.prediction-detail-layout .chip {
+  padding: 3px 9px;
+  font-size: 0.8rem;
+}
+
+.prediction-detail-layout .chip-label {
+  font-size: 0.68rem;
+}
+
+/* S3: Comparison table — readable cells */
+.comparison-table-compact th,
+.comparison-table-compact td {
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  vertical-align: middle;
+}
+
+.comparison-model-head-compact {
+  min-width: 0;
+  text-align: center;
+  padding: 6px 8px;
+}
+
+.comparison-model-head-compact strong {
+  font-size: 0.82rem;
+}
+
+.comparison-model-head-compact .table-pill {
+  font-size: 0.66rem;
+  padding: 1px 5px;
+}
+
+.comparison-cell-compact {
+  min-width: 0;
+  text-align: center;
+  padding: 8px 10px;
+}
+
+.comparison-cell-compact.is-best {
+  background: rgba(31, 214, 163, 0.10);
+  border: 1px solid rgba(31, 214, 163, 0.35);
+}
+
+.comparison-cell-compact.is-failed {
+  background: rgba(255, 93, 115, 0.08);
+}
+
+.cell-price {
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.cell-change {
+  font-size: 0.8rem;
+  font-weight: 600;
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.cell-change.delta-up {
+  background: rgba(31, 214, 163, 0.12);
+  color: rgba(31, 214, 163, 0.95);
+}
+
+.cell-change.delta-down {
+  background: rgba(255, 93, 115, 0.12);
+  color: rgba(255, 93, 115, 0.95);
+}
+
+.cell-score {
+  font-size: 0.76rem;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* S4: Model accordion */
 .prediction-detail-layout .model-summary {
-  margin: 4px 0;
-  line-height: 1.4;
+  margin: 6px 0;
+  line-height: 1.5;
+  font-size: 0.88rem;
+  color: #d6e0e7;
 }
 
 .prediction-detail-layout .prediction-model-card-compact {
-  padding: 6px 10px;
+  padding: 8px 12px;
 }
 
 .prediction-detail-layout .prediction-model-card-compact[open] {
-  padding-bottom: 10px;
+  padding-bottom: 12px;
 }
 
 .prediction-detail-layout .model-card-summary {
-  padding: 2px 0;
+  padding: 4px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+}
+
+.model-card-summary::-webkit-details-marker {
+  display: none;
+}
+
+.model-card-summary::after {
+  content: "\\25B8";
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.8rem;
+  transition: transform 0.15s;
+}
+
+.prediction-model-card-compact[open] .model-card-summary::after {
+  transform: rotate(90deg);
+}
+
+.model-card-header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.model-card-header strong {
+  font-size: 0.92rem;
+}
+
+.model-card-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* S5: Chart container */
+.prediction-chart-card {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(4, 11, 15, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.prediction-chart-card .section-header-compact {
+  margin-bottom: 8px;
+}
+
+.chart-frame {
+  width: 100%;
+  height: 240px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .comparison-section {
