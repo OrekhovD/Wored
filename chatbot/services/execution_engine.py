@@ -399,11 +399,22 @@ def calc_profit_factor(gross_profit_sum: float, gross_loss_sum: float) -> float 
 
 
 def calc_liquidation_price(entry_price: float, leverage: int, side: str) -> float:
-    """Расчёт цены ликвидации."""
+    """Расчёт цены ликвидации (isolated margin).
+    
+    Формула: liq = entry * (1 - 1/leverage - maintenance_margin) для LONG
+             liq = entry * (1 + 1/leverage + maintenance_margin) для SHORT
+    
+    maintenance_margin (LIQUIDATION_MARGIN=0.005) — буфер биржи (0.5%).
+    При 200x: liq = entry * 0.99 (1% от входа)
+    При 100x: liq = entry * 0.985 (1.5% от входа)
+    При 10x:  liq = entry * 0.895 (10.5% от входа)
+    """
+    if leverage <= 0:
+        leverage = 1
     if side.lower() == "long":
-        return round(entry_price * (1 - 1 / leverage + LIQUIDATION_MARGIN), 8)
+        return round(entry_price * (1 - 1 / leverage - LIQUIDATION_MARGIN), 8)
     else:
-        return round(entry_price * (1 + 1 / leverage - LIQUIDATION_MARGIN), 8)
+        return round(entry_price * (1 + 1 / leverage + LIQUIDATION_MARGIN), 8)
 
 
 def is_liquidated(current_price: float, liq_price: float, side: str) -> bool:
