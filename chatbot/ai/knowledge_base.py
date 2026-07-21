@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from typing import Optional
 from storage.redis_client import get_redis
 from storage.postgres_client import get_recent_alert_history
 from storage.journal_reader import get_recent_journal, format_journal_for_ai
@@ -24,7 +25,7 @@ async def _fetch_htx_klines(symbol: str, interval: str, limit: int = 50) -> list
         return []
 
 
-def _compute_rsi(candles: list[dict], period: int = 14) -> float | None:
+def _compute_rsi(candles: list[dict], period: int = 14) -> Optional[float]:
     if len(candles) <= period:
         return None
     closes = [c["close"] for c in candles]
@@ -44,7 +45,7 @@ def _compute_rsi(candles: list[dict], period: int = 14) -> float | None:
     return 100 - (100 / (1 + rs))
 
 
-def _compute_macd(candles: list[dict], fast=12, slow=26, signal=9) -> dict | None:
+def _compute_macd(candles: list[dict], fast=12, slow=26, signal=9) -> Optional[dict]:
     if len(candles) < slow + signal:
         return None
     closes = [c["close"] for c in candles]

@@ -45,7 +45,7 @@ async def fetch_news() -> list[dict]:
         if isinstance(resp, Exception) or resp.status_code != 200:
             continue
         try:
-            root = ElementTree.fromstring(resp.content)
+            root = ET.fromstring(resp.content)
             for item in root.findall(".//item")[:10]:
                 title = item.findtext("title", default="")
                 description = item.findtext("description", default="")
@@ -99,26 +99,54 @@ async def score_sentiment(news_items: list[dict]) -> dict:
     headlines = [item["title"] for item in news_items[:10]]
     headlines_text = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines))
 
-    from ai.router import _call_with_fallback
+    # Direct API call to avoid badge prefix from _call_with_fallback
+    import os
+    from openai import AsyncOpenAI
     from ai.prompts import get_prompt
 
-    prompt = f"Последние заголовки крипто-новостей:\n\n{headlines_text}"
-    response = await _call_with_fallback("worker", "news_sentiment", prompt, None)
+    api_key = os.getenv("OLLAMA_CLOUD_API_KEY", "").strip()
+    base_url = os.getenv("OLLAMA_CLOUD_BASE_URL", "https://ollama.com/v1")
+    model = os.getenv("OLLAMA_SENTIMENT_MODEL", "glm-5.1")
 
-    # Try to parse JSON from response
+    system_prompt = get_prompt("news_sentiment")
+    user_prompt = f"Последние заголовки крипто-новостей:\n\n{headlines_text}"
+
+    data = None
     try:
-        # Strip badge prefix if present
-        json_text = response
-        if "</code>\n\n" in json_text:
-            json_text = json_text.split("</code>\n\n", 1)[1]
-        # Find JSON in response
-        match = re.search(r'\{[^{}]*"score"[^{}]*\}', json_text, re.DOTALL)
-        if match:
-            data = json.loads(match.group())
-        else:
-            raise json.JSONDecodeError("No JSON found", json_text, 0)
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=30, max_retries=0)
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=2000,
+            temperature=0.3,
+        )
+        raw = (response.choices[0].message.content or "").strip()
+        # If content is empty, try reasoning field (some models return reasoning only at low max_tokens)
+        if not raw and response.choices[0].message.reasoning:
+            raw = response.choices[0].message.reasoning.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            raw = "\n".join(lines).strip()
+        # Try direct JSON parse first
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            # Search for JSON object in response
+            match = re.search(r'\{.*?"score".*?\}', raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+            else:
+                raise ValueError(f"No JSON in response: {raw[:200]}")
     except Exception as exc:
-        log.warning("Sentiment parse failed: %s. Response: %s", exc, response[:200])
+        log.warning("Sentiment scoring failed: %s", exc)
         data = {
             "score": 0.0,
             "category": "Neutral",
