@@ -19,6 +19,7 @@ from handlers.settings import router as settings_router
 from handlers.trader import router as trader_router
 from handlers.admin import router as admin_router
 from handlers.pipeline import router as pipeline_router
+from handlers.news import router as news_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 log = logging.getLogger("chatbot")
@@ -123,6 +124,7 @@ async def main():
     dp.include_router(trader_router)
     dp.include_router(admin_router)
     dp.include_router(pipeline_router)
+    dp.include_router(news_router)
     if os.getenv("HERMES_CHATBOT_GATEWAY_ENABLED", "false").lower() in {"1", "true", "yes"}:
         from handlers.hermes_admin import router as hermes_admin_router
         dp.include_router(hermes_admin_router)

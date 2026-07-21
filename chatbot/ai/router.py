@@ -118,6 +118,9 @@ async def route_request(message: str, context: list[dict] | None = None) -> str:
     if intent["intent"] == "trade_sim":
         return await _route_trade_sim(message, intent, context)
 
+    if intent["intent"] == "dual_analysis":
+        return await _route_dual_timeframe(message, intent, context)
+
     tickers = intent.get("tickers", [])
     ticker = tickers[0] if tickers else "btcusdt"
     enriched = await build_context(ticker)
@@ -690,3 +693,15 @@ async def _route_trade_sim(message: str, intent: dict, context: list[dict] | Non
         return '\n\n'.join(lines) + summary
 
     return f'❌ Неизвестное действие: {action}'
+
+
+async def _route_dual_timeframe(message: str, intent: dict, context: list[dict] | None = None) -> str:
+    """Dual timeframe analysis: fetch 15m+1h+4h indicators → AI dual horizon."""
+    from ai.knowledge_base import build_dual_timeframe_context
+
+    tickers = intent.get("tickers", [])
+    ticker = tickers[0] if tickers else "btcusdt"
+
+    enriched = await build_dual_timeframe_context(ticker)
+    full_context = (context or []) + [{"role": "system", "content": enriched}]
+    return await _call_with_fallback("analyst", "analyst_dual_timeframe", message, full_context)
