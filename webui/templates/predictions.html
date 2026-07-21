@@ -281,7 +281,19 @@
       layout: { background: { color: 'transparent' }, textColor: 'rgba(255,255,255,0.7)' },
       grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
       rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)', autoScale: true },
-      timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true, secondsVisible: false },
+      timeScale: {
+        borderColor: 'rgba(255,255,255,0.15)',
+        timeVisible: true,
+        secondsVisible: false,
+        visible: true,
+        height: 28,
+        rightOffset: 4,
+        barSpacing: 8,
+      },
+      crosshair: {
+        vertLine: { color: 'rgba(255,255,255,0.3)', width: 1, style: 2, labelBackgroundColor: '#1fd6a3' },
+        horzLine: { color: 'rgba(255,255,255,0.3)', width: 1, style: 2, labelBackgroundColor: '#1fd6a3' },
+      },
     });
     el._chartInstance = chart;
 
