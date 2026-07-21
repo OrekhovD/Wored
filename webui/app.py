@@ -1693,6 +1693,7 @@ async def predictions_page(
         selected_request=selected_request,
         model_statuses=list_prediction_models(),
         prediction_horizons=sorted(ALLOWED_PREDICTION_HORIZONS),
+        historical_candles=[],
         page=page,
         has_next_page=len(prediction_requests) == DEFAULT_PAGE_SIZE,
     )
@@ -1710,6 +1711,23 @@ async def prediction_detail_page(request: Request, request_id: int, page: int = 
     if selected_request is None:
         raise HTTPException(status_code=404, detail="Prediction request not found")
 
+    # Fetch historical candles for chart context (24h before prediction + horizon hours after)
+    historical_candles: list[dict[str, Any]] = []
+    try:
+        symbol = selected_request.get("symbol", "btcusdt")
+        horizon = selected_request.get("horizon_hours", 4)
+        # Fetch enough candles: 24h history + horizon hours forecast window + buffer
+        fetch_size = min(24 + horizon + 6, 200)
+        all_candles = await fetch_klines(request, symbol, "60min", fetch_size)
+        # Filter to only candles before prediction creation (historical context)
+        created_at = selected_request.get("created_at")
+        if all_candles and created_at:
+            # candles are normalized with 'time' as unix timestamp
+            # Keep last 24 candles before prediction, plus all after (for live actual)
+            historical_candles = all_candles[-(fetch_size):]
+    except Exception:
+        pass
+
     return template_response(
         request,
         "predictions.html",
@@ -1718,6 +1736,7 @@ async def prediction_detail_page(request: Request, request_id: int, page: int = 
         selected_request=selected_request,
         model_statuses=list_prediction_models(),
         prediction_horizons=sorted(ALLOWED_PREDICTION_HORIZONS),
+        historical_candles=historical_candles,
         page=page,
         has_next_page=len(prediction_requests) == DEFAULT_PAGE_SIZE,
     )
