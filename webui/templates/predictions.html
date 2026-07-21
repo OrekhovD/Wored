@@ -286,19 +286,25 @@
     el._chartInstance = chart;
 
     function createCandlestickSeries(options) {
+      // v5 API: chart.addSeries(LightweightCharts.CandlestickSeries, options)
+      if (typeof LightweightCharts.CandlestickSeries !== 'undefined' && typeof chart.addSeries === 'function') {
+        return chart.addSeries(LightweightCharts.CandlestickSeries, options);
+      }
+      // v4 fallback
       if (typeof chart.addCandlestickSeries === 'function') {
         return chart.addCandlestickSeries(options);
-      } else if (typeof LightweightCharts.CandlestickSeries !== 'undefined' && typeof chart.addSeries === 'function') {
-        return chart.addSeries(LightweightCharts.CandlestickSeries, options);
       }
       return null;
     }
 
     function createLineSeries(options) {
+      // v5 API: chart.addSeries(LightweightCharts.LineSeries, options)
+      if (typeof LightweightCharts.LineSeries !== 'undefined' && typeof chart.addSeries === 'function') {
+        return chart.addSeries(LightweightCharts.LineSeries, options);
+      }
+      // v4 fallback
       if (typeof chart.addLineSeries === 'function') {
         return chart.addLineSeries(options);
-      } else if (typeof LightweightCharts.LineSeries !== 'undefined' && typeof chart.addSeries === 'function') {
-        return chart.addSeries(LightweightCharts.LineSeries, options);
       }
       return null;
     }
