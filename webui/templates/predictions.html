@@ -332,7 +332,7 @@
       return isNaN(d.getTime()) ? Math.floor(Date.now() / 1000) : Math.floor(d.getTime() / 1000);
     }
 
-    // 1. Historical candlesticks (24h before prediction)
+    // 1. Historical candlesticks (before prediction — стандартный цвет)
     var candleData = [];
     {% for candle in historical_candles %}
     candleData.push({
@@ -353,6 +353,29 @@
         wickDownColor: '#ff5d73',
       });
       if (candleSeries) candleSeries.setData(candleData);
+    }
+
+    // 1b. Live candlesticks (after prediction — приглушённый цвет, отличимый)
+    var liveData = [];
+    {% for candle in live_candles %}
+    liveData.push({
+      time: {{ candle.time }},
+      open: {{ candle.open }},
+      high: {{ candle.high }},
+      low: {{ candle.low }},
+      close: {{ candle.close }}
+    });
+    {% endfor %}
+    if (liveData.length > 0) {
+      var liveSeries = createCandlestickSeries({
+        upColor: 'rgba(54, 201, 221, 0.6)',
+        downColor: 'rgba(167, 139, 250, 0.6)',
+        borderUpColor: 'rgba(54, 201, 221, 0.8)',
+        borderDownColor: 'rgba(167, 139, 250, 0.8)',
+        wickUpColor: 'rgba(54, 201, 221, 0.8)',
+        wickDownColor: 'rgba(167, 139, 250, 0.8)',
+      });
+      if (liveSeries) liveSeries.setData(liveData);
     }
 
     // 2. Base price line (horizontal reference at prediction start)

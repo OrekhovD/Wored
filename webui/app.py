@@ -1694,6 +1694,7 @@ async def predictions_page(
         model_statuses=list_prediction_models(),
         prediction_horizons=sorted(ALLOWED_PREDICTION_HORIZONS),
         historical_candles=[],
+        live_candles=[],
         page=page,
         has_next_page=len(prediction_requests) == DEFAULT_PAGE_SIZE,
     )
@@ -1711,20 +1712,36 @@ async def prediction_detail_page(request: Request, request_id: int, page: int = 
     if selected_request is None:
         raise HTTPException(status_code=404, detail="Prediction request not found")
 
-    # Fetch historical candles for chart context (24h before prediction + horizon hours after)
+    # Fetch historical candles for chart context (24h before prediction + live candles after)
     historical_candles: list[dict[str, Any]] = []
+    live_candles: list[dict[str, Any]] = []
     try:
         symbol = selected_request.get("symbol", "btcusdt")
         horizon = selected_request.get("horizon_hours", 4)
-        # Fetch enough candles: 24h history + horizon hours forecast window + buffer
-        fetch_size = min(24 + horizon + 6, 200)
+        fetch_size = min(48 + horizon + 6, 200)
         all_candles = await fetch_klines(request, symbol, "60min", fetch_size)
-        # Filter to only candles before prediction creation (historical context)
-        created_at = selected_request.get("created_at")
-        if all_candles and created_at:
-            # candles are normalized with 'time' as unix timestamp
-            # Keep last 24 candles before prediction, plus all after (for live actual)
-            historical_candles = all_candles[-(fetch_size):]
+
+        # Parse prediction creation timestamp (unix seconds)
+        created_str = selected_request.get("created_at")
+        created_ts = 0
+        if created_str:
+            from datetime import datetime as _dt
+            try:
+                _parsed = _dt.fromisoformat(created_str.replace("Z", "+00:00"))
+                created_ts = int(_parsed.timestamp())
+            except Exception:
+                pass
+
+        if all_candles and created_ts:
+            for candle in all_candles:
+                if candle["time"] < created_ts:
+                    historical_candles.append(candle)
+                else:
+                    live_candles.append(candle)
+            # Keep last 24 historical candles
+            historical_candles = historical_candles[-24:]
+        elif all_candles:
+            historical_candles = all_candles[-24:]
     except Exception:
         pass
 
@@ -1737,6 +1754,7 @@ async def prediction_detail_page(request: Request, request_id: int, page: int = 
         model_statuses=list_prediction_models(),
         prediction_horizons=sorted(ALLOWED_PREDICTION_HORIZONS),
         historical_candles=historical_candles,
+        live_candles=live_candles,
         page=page,
         has_next_page=len(prediction_requests) == DEFAULT_PAGE_SIZE,
     )
