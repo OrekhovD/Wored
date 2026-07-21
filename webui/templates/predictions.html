@@ -108,7 +108,7 @@
         <div class="panel-kicker">Forecast Visualizer</div>
         <div class="subtle small">Target price paths vs real market</div>
       </div>
-      <div id="predictionChart" class="chart-frame" style="height: 240px; min-height: 240px; width: 100%; position: relative;"></div>
+      <div id="predictionChart" class="chart-frame prediction-chart-frame"></div>
     </div>
 
     <section class="detail-block comparison-section">
@@ -277,7 +277,8 @@
     var chartWidth = el.clientWidth || el.parentElement.clientWidth || 600;
     var chart = LightweightCharts.createChart(el, {
       width: chartWidth,
-      height: 280,
+      height: 320,
+      autoSize: true,
       layout: { background: { color: 'transparent' }, textColor: 'rgba(255,255,255,0.7)' },
       grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
       rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)', autoScale: true },
