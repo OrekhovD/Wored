@@ -1033,6 +1033,79 @@ select {
   padding: 1px 5px;
 }
 
+/* ===== Prediction Detail Tight Overrides ===== */
+
+.prediction-detail-layout .prediction-detail {
+  gap: 10px;
+}
+
+.prediction-detail-layout .detail-block {
+  margin-top: 0;
+}
+
+.prediction-detail-layout .table-wrap {
+  margin-top: 6px;
+}
+
+.prediction-detail-layout .data-table th,
+.prediction-detail-layout .data-table td {
+  padding: 6px 8px;
+}
+
+.prediction-detail-layout .prediction-model-list {
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.prediction-detail-layout .section-header-compact {
+  margin-bottom: 4px;
+}
+
+.prediction-detail-layout .prediction-detail-header {
+  padding-bottom: 6px;
+}
+
+.prediction-detail-layout .detail-chips {
+  margin: 6px 0 8px;
+}
+
+.prediction-detail-layout .data-table {
+  min-width: 0;
+}
+
+.prediction-detail-layout .comparison-table-compact {
+  min-width: 560px;
+}
+
+.prediction-detail-layout .forecast-table-compact {
+  min-width: 420px;
+}
+
+.prediction-detail-layout .panel-kicker {
+  margin-bottom: 2px;
+}
+
+.prediction-detail-layout h2 {
+  font-size: 1.1rem;
+}
+
+.prediction-detail-layout .model-summary {
+  margin: 4px 0;
+  line-height: 1.4;
+}
+
+.prediction-detail-layout .prediction-model-card-compact {
+  padding: 6px 10px;
+}
+
+.prediction-detail-layout .prediction-model-card-compact[open] {
+  padding-bottom: 10px;
+}
+
+.prediction-detail-layout .model-card-summary {
+  padding: 2px 0;
+}
+
 .comparison-section {
   gap: 14px;
 }
