@@ -28,70 +28,36 @@ DEFAULT_USER_ID = 5249526259
 def _miniapp_url() -> str:
     return os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8080/daily-session"
 
-def _session_kb() -> InlineKeyboardMarkup:
-    """ТЗ §8.1 — кнопки для статус сессии."""
+def _session_nav_kb(*, show_review: bool = False, show_close_all: bool = False) -> InlineKeyboardMarkup:
+    """Unified navigation keyboard for session views.
+    Mini App + context-sensitive action buttons + back to control menu.
+    """
     url = _miniapp_url()
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📱 Mini App", web_app={"url": url} if False else None, url=url)],
+    rows = [
+        [InlineKeyboardButton(text="📱 Mini App", url=url)],
         [
+            InlineKeyboardButton(text="📊 Статус", callback_data="pipeline_status"),
             InlineKeyboardButton(text="📦 Позиции", callback_data="pipeline_positions"),
-            InlineKeyboardButton(text="⏸ Pause", callback_data="pipeline_pause"),
         ],
         [
-            InlineKeyboardButton(text="🛡 Tighten", callback_data="pipeline_tighten"),
-            InlineKeyboardButton(text="🛑 Close all", callback_data="pipeline_close_all"),
+            InlineKeyboardButton(text="💰 Баланс", callback_data="pipeline_balance"),
+            InlineKeyboardButton(text="📋 План", callback_data="pipeline_plan"),
         ],
-    ])
-
-def _start_kb() -> InlineKeyboardMarkup:
-    """ТЗ §8.5 — кнопки после старта сессии."""
-    url = _miniapp_url()
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📱 Открыть Mini App", url=url)],
-        [
-            InlineKeyboardButton(text="📈 Статус сессии", callback_data="pipeline_status"),
-            InlineKeyboardButton(text="⏸ Pause", callback_data="pipeline_pause"),
-        ],
-    ])
+    ]
+    if show_close_all:
+        rows.append([InlineKeyboardButton(text="🛑 Close all", callback_data="pipeline_close_all")])
+    if show_review:
+        rows.append([
+            InlineKeyboardButton(text="🧠 Review", callback_data="pipeline_review"),
+            InlineKeyboardButton(text="📊 Прогнозы", callback_data="prediction_menu"),
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def _no_session_kb() -> InlineKeyboardMarkup:
     """ТЗ §11.2 — кнопки когда сессии нет."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🚀 Старт сессии", callback_data="pipeline_start")],
         [InlineKeyboardButton(text="📊 Рынок", callback_data="back_to_market")],
-    ])
-
-def _portfolio_kb() -> InlineKeyboardMarkup:
-    """ТЗ §8.2 — кнопки для позиций."""
-    url = _miniapp_url()
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📱 Открыть Mini App", url=url)],
-        [
-            InlineKeyboardButton(text="📄 Все позиции", callback_data="pipeline_positions"),
-            InlineKeyboardButton(text="🛑 Close all", callback_data="pipeline_close_all"),
-        ],
-    ])
-
-def _balance_kb() -> InlineKeyboardMarkup:
-    """ТЗ §8.3 — кнопки для баланса."""
-    url = _miniapp_url()
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📱 Mini App", url=url)],
-        [
-            InlineKeyboardButton(text="📈 Сессия", callback_data="pipeline_status"),
-            InlineKeyboardButton(text="📦 Позиции", callback_data="pipeline_positions"),
-        ],
-    ])
-
-def _result_kb() -> InlineKeyboardMarkup:
-    """ТЗ §8.4 — кнопки для результата сессии."""
-    url = _miniapp_url()
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📱 Открыть обзор", url=url)],
-        [
-            InlineKeyboardButton(text="🧠 Review", callback_data="pipeline_review"),
-            InlineKeyboardButton(text="📊 Прогнозы", callback_data="prediction_menu"),
-        ],
     ])
 
 
@@ -458,7 +424,7 @@ async def _handle_start_safe(user_id: int, intent: dict) -> tuple[str, InlineKey
         if existing:
             # Idempotent — return current session
             text, _ = await _build_status_response(user_id)
-            return text, _start_kb()
+            return text, _session_nav_kb()
 
         budget = intent.get("budget", 100.0)
         risk = intent.get("risk_mode", "balanced")
@@ -488,7 +454,7 @@ async def _handle_start_safe(user_id: int, intent: dict) -> tuple[str, InlineKey
                 f"Горизонт: 8 часов\n"
                 f"Инструмент: BTCUSDT\n\n"
                 f"⚠️ План генерируется…",
-                _start_kb()
+                _session_nav_kb()
             )
 
         # ТЗ §8.5 + §5 — шаблон подтверждения с trade profile
@@ -511,7 +477,7 @@ async def _handle_start_safe(user_id: int, intent: dict) -> tuple[str, InlineKey
             f"Инструмент: BTCUSDT\n"
             f"План: v{plan.get('version', 1)} · {plan.get('market_regime', '—')}"
         )
-        return text, _start_kb()
+        return text, _session_nav_kb()
     except Exception as exc:
         log.error("Pipeline start error: %s", exc)
         return ERR_BACKEND, None
@@ -622,6 +588,20 @@ async def _build_status_response(user_id: int) -> tuple[str, InlineKeyboardMarku
         lines.append("🎯 <b>Активная сессия</b>")
         lines.append(f"ID: <code>{str(session['id'])[:8]}</code>")
         lines.append(f"Статус: {session['status'].upper()}")
+        # Countdown до окончания
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        session_end = session.get("session_end")
+        if session_end:
+            if isinstance(session_end, str):
+                session_end = datetime.fromisoformat(session_end.replace("Z", "+00:00"))
+            remaining = session_end - now
+            if remaining.total_seconds() > 0:
+                hours = int(remaining.total_seconds() // 3600)
+                minutes = int((remaining.total_seconds() % 3600) // 60)
+                lines.append(f"Осталось: {hours}ч {minutes}мин")
+            else:
+                lines.append("Осталось: завершается")
         lines.append(f"План: v{session['active_plan_version']}")
         lines.append(f"Режим риска: {session['risk_mode']}")
         lines.append(f"Бюджет: {float(session['initial_budget_usdt']):.0f} USDT")
@@ -641,7 +621,7 @@ async def _build_status_response(user_id: int) -> tuple[str, InlineKeyboardMarku
             # Digest: только приоритетные поля
             digest_lines = lines[:6] + ["\n📱 <i>Подробнее — в Mini App</i>"]
             text = "\n".join(digest_lines)
-        return text, _session_kb()
+        return text, _session_nav_kb()
     except Exception as exc:
         log.error("Pipeline status error: %s", exc)
         return ERR_SESSION_UNAVAILABLE, None
@@ -664,7 +644,7 @@ async def _build_positions_response(user_id: int) -> tuple[str, InlineKeyboardMa
             )
 
         if not trades:
-            return "📦 <b>Открытых позиций нет.</b>\nСессия активна, входы ожидаются.", _portfolio_kb()
+            return "📦 <b>Открытых позиций нет.</b>\nСессия активна, входы ожидаются.", _session_nav_kb(show_close_all=True)
 
         open_trades = [t for t in trades if t["status"] == "open"]
         total_margin = sum(float(t["margin_used_usdt"] or 0) for t in open_trades)
@@ -751,7 +731,7 @@ async def _build_positions_response(user_id: int) -> tuple[str, InlineKeyboardMa
                 f"entry={float(t['entry_price']):.1f} [{t['status']}]"
             )
 
-        return "\n".join(lines), _portfolio_kb()
+        return "\n".join(lines), _session_nav_kb(show_close_all=True)
     except Exception as exc:
         log.error("Pipeline positions error: %s", exc)
         return ERR_BACKEND, None
@@ -801,7 +781,7 @@ async def _build_balance_response(user_id: int) -> tuple[str, InlineKeyboardMark
             f"Max drawdown: {max_dd:.1f}%\n"
             f"Открыто позиций: {open_count}"
         )
-        return text, _balance_kb()
+        return text, _session_nav_kb()
     except Exception as exc:
         log.error("Pipeline balance error: %s", exc)
         return ERR_BACKEND, None
@@ -844,7 +824,7 @@ async def _build_result_response(user_id: int) -> tuple[str, InlineKeyboardMarku
                 f"Бюджет: {budget:.2f} USDT\n"
                 f"Метрики ещё не рассчитаны."
             )
-        return text, _result_kb()
+        return text, _session_nav_kb(show_review=True)
     except Exception as exc:
         log.error("Pipeline result error: %s", exc)
         return ERR_BACKEND, None

@@ -97,13 +97,8 @@ async def cb_market(callback: CallbackQuery):
 @router.callback_query(F.data == "trader_analyze")
 async def cb_analyze(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.edit_text(
-        "📊 <b>Анализ BTC/USDT</b>\n\nАнализирую...",
-        parse_mode="HTML",
-    )
-    from ai.router import route_request
-    result = await route_request("анализ btcusdt", [])
-    await callback.message.answer(result or "Ошибка анализа")
+    from handlers.analytics import show_analytics_menu
+    await show_analytics_menu(callback.message)
 
 
 @router.callback_query(F.data == "trader_predictions")

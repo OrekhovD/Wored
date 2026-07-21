@@ -8,29 +8,11 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from ai.router import route_request
 from handlers.chat import sanitize_html, strip_html
 from handlers.market import build_market_text, get_market_keyboard
+from handlers.analytics import get_analytics_result_keyboard
 from storage.redis_client import get_redis
 
 log = logging.getLogger(__name__)
 router = Router()
-
-
-def get_analytics_result_keyboard(symbol: str) -> InlineKeyboardMarkup:
-    """ТЗ §8.7 — кнопки: Mini App, Рынок, Прогноз, Полный обзор."""
-    import os
-    url = os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8080"
-    base = url.rstrip("/")
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="📱 Mini App", url=base),
-                InlineKeyboardButton(text="📊 Рынок", callback_data="back_to_market"),
-            ],
-            [
-                InlineKeyboardButton(text=f"🔮 Прогноз {symbol.upper()}", callback_data=f"prediction_symbol:{symbol}"),
-                InlineKeyboardButton(text="📈 Полный обзор", url=f"{base}/predictions"),
-            ],
-        ]
-    )
 
 
 async def answer_callback_early(call: CallbackQuery, text: str = "⏳ Запрос принят"):
