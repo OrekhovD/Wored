@@ -793,6 +793,246 @@ select {
   vertical-align: top;
 }
 
+/* ===== Prediction Detail Compact ===== */
+
+.prediction-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 2.3fr);
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.prediction-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.detail-metrics-compact {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.detail-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0 14px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.82rem;
+}
+
+.chip-label {
+  color: var(--text-muted, rgba(255, 255, 255, 0.5));
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.section-header-compact {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.prediction-new-form {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.prediction-form-compact {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+}
+
+.field-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.8rem;
+}
+
+.field-compact span {
+  font-size: 0.7rem;
+  color: var(--text-muted, rgba(255, 255, 255, 0.5));
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.field-compact select {
+  padding: 5px 8px;
+  font-size: 0.82rem;
+  border-radius: var(--radius-sm);
+  background: rgba(4, 11, 15, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: inherit;
+}
+
+.primary-button-compact {
+  padding: 5px 14px;
+  font-size: 0.82rem;
+}
+
+/* Compact comparison table */
+.comparison-table-compact {
+  min-width: 700px;
+}
+
+.comparison-table-compact th,
+.comparison-table-compact td {
+  padding: 6px 8px;
+  font-size: 0.82rem;
+  vertical-align: top;
+}
+
+.th-hour { width: 40px; }
+.th-target { width: 110px; }
+.th-actual { width: 120px; }
+.th-best { width: 80px; }
+
+.comparison-model-head-compact {
+  min-width: 100px;
+  text-align: center;
+}
+
+.comparison-model-head-compact strong {
+  display: block;
+  font-size: 0.8rem;
+  margin-bottom: 2px;
+}
+
+.comparison-model-head-compact .table-pill {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+}
+
+.comparison-cell-compact {
+  min-width: 100px;
+  text-align: center;
+}
+
+.comparison-cell-compact.is-best {
+  background: rgba(31, 214, 163, 0.08);
+}
+
+.comparison-cell-compact.is-failed {
+  background: rgba(255, 93, 115, 0.06);
+}
+
+.cell-price {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.cell-change {
+  font-size: 0.78rem;
+}
+
+.cell-score {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent-ok, rgba(31, 214, 163, 0.9));
+}
+
+/* Compact model cards (collapsible) */
+.prediction-model-card-compact {
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(4, 11, 15, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.prediction-model-card-compact[open] {
+  padding-bottom: 14px;
+}
+
+.model-card-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+}
+
+.model-card-summary::-webkit-details-marker {
+  display: none;
+}
+
+.model-card-header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.model-card-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.prediction-model-card-compact .model-summary,
+.prediction-model-card-compact .model-error {
+  font-size: 0.82rem;
+  margin: 8px 0;
+}
+
+/* Compact forecast table */
+.forecast-table-compact {
+  min-width: 560px;
+  margin-top: 8px;
+}
+
+.forecast-table-compact th,
+.forecast-table-compact td {
+  padding: 5px 7px;
+  font-size: 0.8rem;
+  vertical-align: top;
+}
+
+.forecast-table-compact .mono {
+  font-size: 0.78rem;
+}
+
+.forecast-table-compact .small {
+  font-size: 0.74rem;
+}
+
+.dir-hit {
+  color: var(--accent-ok, rgba(31, 214, 163, 0.9));
+  font-weight: 700;
+}
+
+.dir-miss {
+  color: var(--accent-bad, rgba(255, 93, 115, 0.9));
+  font-weight: 700;
+}
+
+.small {
+  font-size: 0.74rem;
+}
+
+.score-badge.small {
+  font-size: 0.72rem;
+  padding: 1px 5px;
+}
+
 .comparison-section {
   gap: 14px;
 }
