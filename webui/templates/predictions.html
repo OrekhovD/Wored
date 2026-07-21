@@ -109,6 +109,31 @@
         <div class="subtle small">Target price paths vs real market</div>
       </div>
       <div id="predictionChart" class="chart-frame prediction-chart-frame"></div>
+      <div class="forecast-legend" id="forecastLegend">
+        <div class="forecast-legend-item">
+          <div class="forecast-legend-dot" style="background:#1fd6a3; border-color:#1fd6a3;"></div>
+          <span>History (up)</span>
+        </div>
+        <div class="forecast-legend-item">
+          <div class="forecast-legend-dot" style="background:#ff5d73; border-color:#ff5d73;"></div>
+          <span>History (down)</span>
+        </div>
+        <div class="forecast-legend-item">
+          <div class="forecast-legend-dot" style="background:rgba(54,201,221,0.7); border-color:#36c9dd;"></div>
+          <span>Live (up)</span>
+        </div>
+        <div class="forecast-legend-item">
+          <div class="forecast-legend-dot" style="background:rgba(167,139,250,0.7); border-color:#a78bfa;"></div>
+          <span>Live (down)</span>
+        </div>
+        {% for model in selected_request.comparison_models %}
+        {% set model_colors = ['#1fd6a3', '#36c9dd', '#ff5d73', '#ff9b54', '#a78bfa'] %}
+        <div class="forecast-legend-item">
+          <div class="forecast-legend-line" style="background:{{ model_colors[loop.index0 % 5] }};"></div>
+          <span>{{ model.short_name }}</span>
+        </div>
+        {% endfor %}
+      </div>
     </div>
 
     <section class="detail-block comparison-section">
@@ -258,7 +283,7 @@
   </div>
 </section>
 
-{% if selected_request and selected_request.comparison_rows %}
+{% if selected_request and (historical_candles or selected_request.comparison_rows) %}
 <script>
 (function() {
   function initChart() {
@@ -412,7 +437,10 @@
     }
 
     // 4. Model prediction lines
-    var startTs = parseTs("{{ selected_request.created_at_display or selected_request.created_at }}");
+    var startTs = {{ base_ts or 0 }};
+    if (!startTs) {
+      startTs = parseTs("{{ selected_request.created_at_display or selected_request.created_at }}");
+    }
     {% for model in selected_request.comparison_models %}
     {% set model_idx = loop.index0 %}
     var modelData_{{ model_idx }} = [];
