@@ -114,7 +114,7 @@ MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
         api_key_env="OLLAMA_API_KEY",
         tier="worker",
         timeout=20.0,
-        max_tokens=1200,
+        max_tokens=2000,
     ),
     "analyst": PredictionModelConfig(
         key="analyst",
@@ -124,7 +124,7 @@ MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
         api_key_env="OLLAMA_API_KEY",
         tier="analyst",
         timeout=40.0,
-        max_tokens=1600,
+        max_tokens=2000,
     ),
     "premium": PredictionModelConfig(
         key="premium",
@@ -134,7 +134,7 @@ MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
         api_key_env="OLLAMA_API_KEY",
         tier="premium",
         timeout=45.0,
-        max_tokens=1600,
+        max_tokens=2000,
     ),
     "minimax": PredictionModelConfig(
         key="minimax",
@@ -144,7 +144,7 @@ MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
         api_key_env="OLLAMA_API_KEY",
         tier="minimax",
         timeout=60.0,
-        max_tokens=700,
+        max_tokens=2000,
         temperature=0.15,
     ),
 }
@@ -167,24 +167,42 @@ def _coerce_float(value: Any) -> float | None:
 
 def _extract_json_payload(raw_text: str) -> dict[str, Any] | list[Any]:
     text = raw_text.strip()
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
-    if text.startswith("```"):
+    text = re.sub(r"\<^.*?\$\>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
+    if text.startswith("\`\`\`"):
         lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
+        if lines and lines[0].startswith("\`\`\`"):
             lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
+        if lines and lines[-1].startswith("\`\`\`"):
             lines = lines[:-1]
         text = "\n".join(lines).strip()
 
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
-        return json.loads(text[start : end + 1])
+        json_str = text[start : end + 1]
+        # Tolerant parse: remove trailing commas before } or ]
+        json_str = re.sub(r",\s*([}\]])", r"\1", json_str)
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            # Try extracting from reasoning: models may embed JSON in prose
+            pass
 
     start = text.find("[")
     end = text.rfind("]")
     if start != -1 and end != -1 and end > start:
-        return json.loads(text[start : end + 1])
+        json_str = text[start : end + 1]
+        json_str = re.sub(r",\s*([}\]])", r"\1", json_str)
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            pass
+
+    # Last resort: try to find any JSON-like block with tolerant parsing
+    json_match = re.search(r"\{[^{}]*((?:\{[^{}]*\}[^{}]*)*)\}", text, re.DOTALL)
+    if json_match:
+        json_str = re.sub(r",\s*([}\]])", r"\1", json_match.group())
+        return json.loads(json_str)
 
     raise ValueError("Model response does not contain a JSON object or array")
 
@@ -477,7 +495,12 @@ async def _ollama_chat(
 
     content = (data.get("message", {}).get("content", "") or "").strip()
     if not content:
-        raise ValueError("Model returned empty content")
+        # Reasoning models: content may be empty, fallback to reasoning field
+        reasoning = (data.get("message", {}).get("reasoning", "") or "").strip()
+        if reasoning:
+            content = reasoning
+        else:
+            raise ValueError("Model returned empty content")
     return content
 
 
