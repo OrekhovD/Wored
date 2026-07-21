@@ -2055,12 +2055,14 @@ async def api_models_probe(request: Request):
                     resp = await client.post(
                         f"{base_url.rstrip('/')}/chat/completions",
                         headers={"Authorization": f"Bearer {api_key}"},
-                        json={"model": model_id, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 5},
+                        json={"model": model_id, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 20},
                     )
                     latency_ms = int((_asyncio.get_event_loop().time() - start) * 1000)
                     if resp.status_code == 200:
-                        content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                        status = "ok" if content.strip() else "empty"
+                        msg = resp.json().get("choices", [{}])[0].get("message", {})
+                        content = msg.get("content", "")
+                        reasoning = msg.get("reasoning", "")
+                        status = "ok" if (content.strip() or reasoning.strip()) else "empty"
                     else:
                         status = f"http_{resp.status_code}"
             except _httpx.TimeoutException:

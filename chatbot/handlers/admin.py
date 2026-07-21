@@ -83,7 +83,7 @@ async def cb_health(callback: CallbackQuery):
         import httpx
         api_key = os.getenv("OLLAMA_CLOUD_API_KEY", "")
         async with httpx.AsyncClient(timeout=10) as c:
-            resp = await c.get("https://ollama.com/v1/models", headers={"Authorization": f"Bearer {api_key}"})
+            resp = await c.get(f"{os.getenv('OLLAMA_CLOUD_BASE_URL', 'https://api.ollama.com/v1')}/models", headers={"Authorization": f"Bearer {api_key}"})
             results.append(f"{'✅' if resp.status_code == 200 else '❌'} Ollama Cloud: {resp.status_code}")
     except Exception as e:
         results.append(f"❌ Ollama Cloud: {e}")

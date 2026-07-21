@@ -19,7 +19,7 @@ PROVIDER_COOLDOWN_SECONDS = {"ollama": 1.0, "glm": 1.8, "gemini": 1.0, "dashscop
 RETRY_BACKOFF_SECONDS = (2.0, 5.0)
 GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/"
-OLLAMA_BASE_URL = "https://api.ollama.com/v1"
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
 
 PREDICTION_SYSTEM_PROMPT = """
 You are a crypto market forecasting agent inside a model-vs-model evaluation lab.

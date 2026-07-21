@@ -22,7 +22,7 @@ DASHSCOPE_ENDPOINT = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/"
 GOOGLE_OPENAI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/openai/"
 DEEPSEEK_ENDPOINT = "https://api.deepseek.com/v1/"
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/"
-OLLAMA_CLOUD_ENDPOINT = "https://ollama.com/v1"
+OLLAMA_CLOUD_ENDPOINT = os.getenv("OLLAMA_CLOUD_BASE_URL", "https://ollama.com/v1")
 DEFAULT_PREMIUM_QWEN_MODEL = "qwen3.6-27b"
 
 
