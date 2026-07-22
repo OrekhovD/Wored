@@ -884,6 +884,69 @@ select {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+/* Prediction launcher: top-of-page form panel */
+.prediction-launcher-panel {
+  margin-bottom: 20px;
+}
+
+.prediction-launcher-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.prediction-launcher-hint {
+  color: var(--text-muted, rgba(255, 255, 255, 0.55));
+  font-size: 0.85rem;
+  margin: 0;
+  max-width: 360px;
+  text-align: right;
+}
+
+.prediction-launcher-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
+.field-launcher select {
+  min-width: 90px;
+}
+
+.prediction-launcher-button {
+  padding: 6px 18px;
+  font-size: 0.9rem;
+}
+
+/* Scrollable request list: only show ~5 recent items */
+.request-list-scrollable {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.request-list-scrollable::-webkit-scrollbar {
+  width: 6px;
+}
+
+.request-list-scrollable::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
+}
+
+.request-list-scrollable::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+}
+
+.request-list-scrollable::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
 .prediction-form-compact {
   display: flex;
   gap: 8px;

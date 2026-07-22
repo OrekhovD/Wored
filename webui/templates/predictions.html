@@ -1,6 +1,61 @@
 {% extends "base.html" %}
 
 {% block content %}
+{# Top prediction launcher: always visible at the top of the page #}
+<section class="panel prediction-launcher-panel">
+  <div class="prediction-launcher-header">
+    <div>
+      <div class="panel-kicker">New Prediction</div>
+      <h2>Launch a model-vs-model forecast</h2>
+    </div>
+    <p class="prediction-launcher-hint">
+      Pick symbol, timeframe and horizon. Bull, Bear and Arbiter roles run side-by-side.
+    </p>
+  </div>
+
+  <form method="post" action="/predictions" class="prediction-launcher-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field-compact field-launcher">
+      <span>Symbol</span>
+      <select name="symbol">
+        {% for symbol in watchlist %}
+        <option value="{{ symbol }}" {% if symbol == default_symbol %}selected{% endif %}>{{ symbol | upper }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field-compact field-launcher">
+      <span>Timeframe</span>
+      <select name="base_timeframe">
+        <option value="60min" selected>1h</option>
+        <option value="15min">15m</option>
+        <option value="4hour">4h</option>
+        <option value="1day">1d</option>
+      </select>
+    </label>
+    <label class="field-compact field-launcher">
+      <span>Steps</span>
+      <select name="horizon_steps">
+        <option value="1" selected>1</option>
+        <option value="4">4</option>
+        <option value="8">8</option>
+        <option value="12">12</option>
+        <option value="24">24</option>
+        <option value="48">48</option>
+      </select>
+    </label>
+    <label class="field-compact field-launcher">
+      <span>Depth</span>
+      <select name="depth">
+        <option value="1">1</option>
+        <option value="3" selected>3</option>
+        <option value="6">6</option>
+        <option value="9">9</option>
+      </select>
+    </label>
+    <button type="submit" class="primary-button prediction-launcher-button">Generate forecast</button>
+  </form>
+</section>
+
 {% if selected_request %}
 {# DETAIL PAGE: compact, no header/form/stats #}
 <section class="prediction-layout prediction-detail-layout">
@@ -12,7 +67,7 @@
       </div>
     </div>
 
-    <div class="request-list">
+    <div class="request-list request-list-scrollable">
       {% if prediction_requests %}
         {% for item in prediction_requests %}
         <a href="/predictions/{{ item.id }}" class="request-link {% if selected_request and selected_request.id == item.id %}is-selected{% endif %}">
@@ -48,47 +103,6 @@
       {% if has_next_page %}
       <a class="ghost-button link-button" href="/predictions?page={{ page + 1 }}">Next</a>
       {% endif %}
-    </div>
-
-    <div class="prediction-new-form">
-      <form method="post" action="/predictions" class="prediction-form-compact">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label class="field-compact">
-          <span>Symbol</span>
-          <select name="symbol">
-            {% for symbol in watchlist %}
-            <option value="{{ symbol }}" {% if symbol == default_symbol %}selected{% endif %}>{{ symbol | upper }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label class="field-compact">
-          <span>TF</span>
-          <select name="base_timeframe">
-            <option value="60min" selected>1h</option>
-            <option value="15min">15m</option>
-            <option value="4hour">4h</option>
-            <option value="1day">1d</option>
-          </select>
-        </label>
-        <label class="field-compact">
-          <span>Steps</span>
-          <select name="horizon_steps">
-            <option value="4" selected>4</option>
-            <option value="8">8</option>
-            <option value="12">12</option>
-            <option value="24">24</option>
-          </select>
-        </label>
-        <label class="field-compact">
-          <span>Depth</span>
-          <select name="depth">
-            <option value="3" selected>3</option>
-            <option value="6">6</option>
-            <option value="9">9</option>
-          </select>
-        </label>
-        <button type="submit" class="primary-button primary-button-compact">Generate</button>
-      </form>
     </div>
   </aside>
 
@@ -398,124 +412,69 @@
     }
 
     var basePrice = {{ selected_request.base_price }};
-    var colors = ['#1fd6a3', '#36c9dd', '#ff5d73', '#ff9b54', '#a78bfa'];
+    var modelColors = ['#1fd6a3', '#36c9dd', '#ff5d73', '#ff9b54', '#a78bfa'];
 
-    function parseTs(str) {
-      if (!str) return Math.floor(Date.now() / 1000);
-      var cleaned = str.replace(' UTC', '').replace('Z', '').replace(' ', 'T');
-      var d = new Date(cleaned + 'Z');
-      if (isNaN(d.getTime())) d = new Date(cleaned);
-      return isNaN(d.getTime()) ? Math.floor(Date.now() / 1000) : Math.floor(d.getTime() / 1000);
-    }
-
-    // 1. Historical candlesticks (before prediction — стандартный цвет)
-    var candleData = [];
-    {% for candle in historical_candles %}
-    candleData.push({
-      time: {{ candle.time }},
-      open: {{ candle.open }},
-      high: {{ candle.high }},
-      low: {{ candle.low }},
-      close: {{ candle.close }}
-    });
-    {% endfor %}
-    if (candleData.length > 0) {
-      var candleSeries = createCandlestickSeries({
-        upColor: '#1fd6a3',
-        downColor: '#ff5d73',
-        borderUpColor: '#1fd6a3',
-        borderDownColor: '#ff5d73',
-        wickUpColor: '#1fd6a3',
-        wickDownColor: '#ff5d73',
+    // Historical candles before prediction creation
+    var historicalCandles = {{ historical_candles | tojson }};
+    if (historicalCandles && historicalCandles.length) {
+      var histSeries = createCandlestickSeries({
+        upColor: '#1fd6a3', downColor: '#ff5d73',
+        borderUpColor: '#1fd6a3', borderDownColor: '#ff5d73',
+        wickUpColor: '#1fd6a3', wickDownColor: '#ff5d73'
       });
-      if (candleSeries) candleSeries.setData(candleData);
+      if (histSeries) {
+        histSeries.setData(historicalCandles);
+      }
     }
 
-    // 1b. Live candlesticks (after prediction — приглушённый цвет, отличимый)
-    var liveData = [];
-    {% for candle in live_candles %}
-    liveData.push({
-      time: {{ candle.time }},
-      open: {{ candle.open }},
-      high: {{ candle.high }},
-      low: {{ candle.low }},
-      close: {{ candle.close }}
-    });
-    {% endfor %}
-    if (liveData.length > 0) {
+    // Live candles after prediction creation
+    var liveCandles = {{ live_candles | tojson }};
+    if (liveCandles && liveCandles.length) {
       var liveSeries = createCandlestickSeries({
-        upColor: 'rgba(54, 201, 221, 0.6)',
-        downColor: 'rgba(167, 139, 250, 0.6)',
-        borderUpColor: 'rgba(54, 201, 221, 0.8)',
-        borderDownColor: 'rgba(167, 139, 250, 0.8)',
-        wickUpColor: 'rgba(54, 201, 221, 0.8)',
-        wickDownColor: 'rgba(167, 139, 250, 0.8)',
+        upColor: 'rgba(54,201,221,0.7)', downColor: 'rgba(167,139,250,0.7)',
+        borderUpColor: '#36c9dd', borderDownColor: '#a78bfa',
+        wickUpColor: '#36c9dd', wickDownColor: '#a78bfa'
       });
-      if (liveSeries) liveSeries.setData(liveData);
+      if (liveSeries) {
+        liveSeries.setData(liveCandles);
+      }
     }
 
-    // 2. Base price line (horizontal reference at prediction start)
-    var baseSeries = createLineSeries({ color: 'rgba(255,255,255,0.3)', lineWidth: 1, lineStyle: 2, title: 'Base' });
-    var baseLine = [];
-    {% for row in selected_request.comparison_rows %}
-    baseLine.push({ time: parseTs("{{ row.target_time_display or row.target_time }}"), value: basePrice });
-    {% endfor %}
-    if (baseSeries && baseLine.length > 0) baseSeries.setData(baseLine);
-
-    // 3. Real market line (actual close prices as hours close)
-    var realData = [];
-    {% for row in selected_request.comparison_rows %}
-    {% if row.actual_price is not none %}
-    realData.push({ time: parseTs("{{ row.target_time_display or row.target_time }}"), value: {{ row.actual_price }} });
-    {% endif %}
-    {% endfor %}
-    if (realData.length > 0) {
-      var realSeries = createLineSeries({ color: '#ffffff', lineWidth: 2, title: 'Real Market' });
-      if (realSeries) realSeries.setData(realData);
-    }
-
-    // 4. Model prediction lines
-    var startTs = {{ base_ts or 0 }};
-    if (!startTs) {
-      startTs = parseTs("{{ selected_request.created_at_display or selected_request.created_at }}");
-    }
-    {% for model in selected_request.comparison_models %}
-    {% set model_idx = loop.index0 %}
-    var modelData_{{ model_idx }} = [];
-    modelData_{{ model_idx }}.push({ time: startTs, value: basePrice });
-    {% for row in selected_request.comparison_rows %}
-    {% set cell = row.model_cells[model_idx] %}
-    {% if cell and cell.point %}
-    modelData_{{ model_idx }}.push({
-      time: parseTs("{{ row.target_time_display or row.target_time }}"),
-      value: {{ cell.point.predicted_price }}
-    });
-    {% endif %}
-    {% endfor %}
-
-    if (modelData_{{ model_idx }}.length > 1) {
-      var series_{{ model_idx }} = createLineSeries({
-        color: colors[{{ model_idx }} % colors.length],
-        lineWidth: 2,
-        lineStyle: 0,
-        title: "{{ model.short_name }}"
-      });
-      if (series_{{ model_idx }}) series_{{ model_idx }}.setData(modelData_{{ model_idx }});
-    }
-    {% endfor %}
-
-    try { chart.timeScale().fitContent(); } catch(e) {}
-
-    if (window.ResizeObserver) {
-      new ResizeObserver(function() {
-        if (el.clientWidth > 0) {
-          chart.applyOptions({ width: el.clientWidth });
+    // Forecast lines
+    var comparisonModels = {{ selected_request.comparison_models | tojson }};
+    var comparisonRows = {{ selected_request.comparison_rows | tojson }};
+    if (comparisonModels && comparisonRows && comparisonRows.length) {
+      comparisonModels.forEach(function(model, idx) {
+        var series = createLineSeries({
+          color: modelColors[idx % modelColors.length],
+          lineWidth: 2,
+          lastValueVisible: false,
+          title: (model.role_name || model.short_name)
+        });
+        if (!series) return;
+        var lineData = comparisonRows
+          .filter(function(row) { return row.model_cells && row.model_cells[idx] && row.model_cells[idx].point; })
+          .map(function(row) {
+            var cell = row.model_cells[idx];
+            return {
+              time: row.base_ts || Math.floor(new Date(row.target_time).getTime() / 1000),
+              value: cell.point.predicted_price
+            };
+          });
+        if (lineData.length) {
+          // Ensure first forecast point connects from base price at creation time
+          lineData.unshift({
+            time: {{ base_ts }},
+            value: basePrice
+          });
+          series.setData(lineData);
         }
-      }).observe(el);
+      });
     }
+
+    chart.timeScale().fitContent();
   }
 
-  // Role filter for legend/model lines
   document.querySelectorAll('.forecast-role-tab').forEach(function(tab) {
     tab.addEventListener('click', function() {
       var filter = tab.dataset.filter;
@@ -646,7 +605,7 @@
       </div>
     </div>
 
-    <div class="request-list">
+    <div class="request-list request-list-scrollable">
       {% if prediction_requests %}
         {% for item in prediction_requests %}
         <a href="/predictions/{{ item.id }}" class="request-link {% if selected_request and selected_request.id == item.id %}is-selected{% endif %}">
@@ -758,15 +717,8 @@
                   {% if model.role_name %}
                   <div class="subtle">{{ model.role_name }}</div>
                   {% endif %}
-                  <div class="comparison-head-meta">
-                    <span class="table-pill {% if model.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
-                      {{ model.status }}
-                    </span>
-                    {% if model.avg_accuracy is not none %}
-                    <span class="subtle">avg hit {{ "%.1f"|format(model.avg_accuracy) }}% / miss {{ "%.1f"|format(model.avg_failure) }}%</span>
-                    {% endif %}
-                  </div>
                 </div>
+                <span class="table-pill {% if model.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">{{ model.status }}</span>
               </th>
               {% endfor %}
               <th>Best</th>
@@ -775,62 +727,44 @@
           <tbody>
             {% for row in selected_request.comparison_rows %}
             <tr>
-              <td><strong>#{{ row.step_index }}</strong></td>
-              <td class="mono">{{ row.target_time_display or row.target_time or "pending" }}</td>
+              <td><strong>{{ row.step_index }}</strong></td>
+              <td class="mono small">{{ row.target_time_display or row.target_time or "&mdash;" }}</td>
               <td>
-                <div class="comparison-actual">
-                  {% if row.actual_price is not none %}
-                  <strong>${{ "%.2f"|format(row.actual_price) }}</strong>
-                  <span class="{% if row.actual_change_pct is not none and row.actual_change_pct > 0 %}delta-up{% elif row.actual_change_pct is not none and row.actual_change_pct < 0 %}delta-down{% endif %}">
-                    {% if row.actual_change_pct is not none %}
-                    {{ "%+.2f"|format(row.actual_change_pct) }}%
-                    {% else %}
-                    flat
-                    {% endif %}
-                  </span>
-                  <span class="subtle">{{ row.evaluated_at_display or "evaluated" }}</span>
-                  {% else %}
-                  <span class="subtle">Waiting for hourly close</span>
-                  {% endif %}
-                </div>
+                {% if row.actual_price is not none %}
+                <strong>${{ "%.0f"|format(row.actual_price) }}</strong>
+                <span class="{% if row.actual_change_pct is not none and row.actual_change_pct > 0 %}delta-up{% elif row.actual_change_pct is not none and row.actual_change_pct < 0 %}delta-down{% endif %} small">
+                  {% if row.actual_change_pct is not none %}{{ "%+.2f"|format(row.actual_change_pct) }}%{% else %}flat{% endif %}
+                </span>
+                {% else %}
+                <span class="subtle">pending</span>
+                {% endif %}
               </td>
               {% for cell in row.model_cells %}
-              <td class="comparison-cell {% if cell.is_best %}is-best{% elif cell.cell_state == 'failed' %}is-failed{% endif %}">
-                <div class="comparison-stack">
-                  {% if cell.point %}
-                  <div class="comparison-price">${{ "%.2f"|format(cell.point.predicted_price) }}</div>
-                  <div class="{% if cell.point.predicted_change_pct > 0 %}delta-up{% elif cell.point.predicted_change_pct < 0 %}delta-down{% endif %}">
-                    {{ "%+.2f"|format(cell.point.predicted_change_pct) }}%
-                  </div>
-                  {% if cell.point.accuracy_score is not none %}
-                  <span class="score-badge">{{ "%.1f"|format(cell.point.accuracy_score) }}%</span>
-                  <span class="subtle">miss {{ "%.1f"|format(cell.point.failure_score) }}%</span>
-                  <span class="subtle">{% if cell.point.direction_match %}direction ok{% else %}direction miss{% endif %}</span>
-                  {% if cell.point.predicted_change_pct is not none and row.actual_change_pct is not none %}
-                  <span class="subtle" style="margin-top: 4px; font-size: 0.78rem;">
-                    Gap: {{ "%+.2f"|format(cell.point.predicted_change_pct - row.actual_change_pct) }}%
-                  </span>
-                  {% endif %}
-                  {% else %}
-                  <span class="subtle">success pending</span>
-                  {% endif %}
-                  {% elif cell.cell_state == "failed" %}
-                  <span class="subtle">model failed</span>
-                  {% else %}
-                  <span class="subtle">no forecast yet</span>
-                  {% endif %}
+              <td class="{% if cell.is_best %}is-best{% elif cell.cell_state == 'failed' %}is-failed{% endif %}">
+                {% if cell.point %}
+                <div class="cell-price">${{ "%.0f"|format(cell.point.predicted_price) }}</div>
+                <div class="cell-change {% if cell.point.predicted_change_pct > 0 %}delta-up{% elif cell.point.predicted_change_pct < 0 %}delta-down{% endif %}">
+                  {{ "%+.2f"|format(cell.point.predicted_change_pct) }}%
                 </div>
+                {% if cell.point.accuracy_score is not none %}
+                <div class="cell-score">{{ "%.0f"|format(cell.point.accuracy_score) }}%</div>
+                {% else %}
+                <div class="subtle small">pending</div>
+                {% endif %}
+                {% elif cell.cell_state == "failed" %}
+                <span class="subtle small">failed</span>
+                {% else %}
+                <span class="subtle small">—</span>
+                {% endif %}
               </td>
               {% endfor %}
               <td>
-                <div class="comparison-best">
-                  {% if row.best_accuracy is not none %}
-                  <strong>{{ row.best_models | join(", ") }}</strong>
-                  <span class="score-badge">{{ "%.1f"|format(row.best_accuracy) }}%</span>
-                  {% else %}
-                  <span class="subtle">pending</span>
-                  {% endif %}
-                </div>
+                {% if row.best_accuracy is not none %}
+                <strong class="small">{{ row.best_models | join(", ") }}</strong>
+                <span class="score-badge small">{{ "%.0f"|format(row.best_accuracy) }}%</span>
+                {% else %}
+                <span class="subtle">—</span>
+                {% endif %}
               </td>
             </tr>
             {% endfor %}
@@ -842,22 +776,21 @@
 
     <div class="prediction-model-list">
       {% for model in selected_request.models %}
-      <article class="prediction-model-card">
-        <div class="status-pill-row">
-          <div>
-            <h3>{{ model.model_name }}</h3>
-            <div class="subtle mono">{{ model.model_id }}</div>
-          </div>
-          <div class="detail-metrics">
-            <span class="table-pill {% if model.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
-              {{ model.status }}
-            </span>
-            {% if model.avg_accuracy is not none %}
-            <span class="score-badge">{{ "%.1f"|format(model.avg_accuracy) }}%</span>
-            <span class="subtle">miss {{ "%.1f"|format(model.avg_failure) }}%</span>
+      <details class="prediction-model-card">
+        <summary>
+          <div class="model-name-role">
+            <strong>{{ model.model_name }}</strong>
+            {% if model.agent_role %}
+            <span class="role-pill role-pill-{{ model.agent_role }}">{{ model.agent_role }}</span>
             {% endif %}
           </div>
-        </div>
+          <div class="model-card-meta">
+            <span class="table-pill {% if model.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">{{ model.status }}</span>
+            {% if model.avg_accuracy is not none %}
+            <span class="score-badge">{{ "%.1f"|format(model.avg_accuracy) }}%</span>
+            {% endif %}
+          </div>
+        </summary>
 
         {% if model.summary %}
         <p class="model-summary">{{ model.summary }}</p>
@@ -873,69 +806,36 @@
               <tr>
                 <th>Hour</th>
                 <th>Target</th>
-                <th>Predicted price</th>
-                <th>Predicted change</th>
-                <th>Actual price</th>
-                <th>Actual change</th>
-                <th>Success</th>
-                <th>Miss</th>
-                <th>Direction</th>
-                <th>Verdict</th>
+                <th>Pred</th>
+                <th>Low/High</th>
+                <th>Chg</th>
+                <th>Actual</th>
+                <th>Score</th>
+                <th>Dir</th>
               </tr>
             </thead>
             <tbody>
               {% for point in model.points %}
               <tr>
-                <td>{{ point.forecast_hour }}</td>
-                <td class="mono">{{ point.target_time_display or point.target_time }}</td>
-                <td>${{ "%.2f"|format(point.predicted_price) }}</td>
-                <td class="{% if point.predicted_change_pct > 0 %}delta-up{% elif point.predicted_change_pct < 0 %}delta-down{% endif %}">
-                  {{ "%+.2f"|format(point.predicted_change_pct) }}%
+                <td>{{ point.step_index or point.forecast_hour }}</td>
+                <td class="mono small">{{ point.target_time_display or point.target_time }}</td>
+                <td class="mono">${{ "%.0f"|format(point.predicted_price) }}</td>
+                <td class="mono small">
+                  {% if point.get("predicted_low") is not none and point.get("predicted_high") is not none %}
+                    ${{ "%.0f"|format(point.get("predicted_low")) }}–${{ "%.0f"|format(point.get("predicted_high")) }}
+                  {% else %}
+                    <span class="subtle">—</span>
+                  {% endif %}
+                </td>
+                <td class="{% if point.predicted_change_pct > 0 %}delta-up{% elif point.predicted_change_pct < 0 %}delta-down{% endif %}">{{ "%+.2f"|format(point.predicted_change_pct) }}%</td>
+                <td class="mono">
+                  {% if point.actual_price is not none %}${{ "%.0f"|format(point.actual_price) }}{% else %}<span class="subtle">—</span>{% endif %}
                 </td>
                 <td>
-                  {% if point.actual_price is not none %}
-                  ${{ "%.2f"|format(point.actual_price) }}
-                  {% else %}
-                  <span class="subtle">pending</span>
-                  {% endif %}
-                </td>
-                <td class="{% if point.actual_change_pct is not none and point.actual_change_pct > 0 %}delta-up{% elif point.actual_change_pct is not none and point.actual_change_pct < 0 %}delta-down{% endif %}">
-                  {% if point.actual_change_pct is not none %}
-                  {{ "%+.2f"|format(point.actual_change_pct) }}%
-                  {% else %}
-                  <span class="subtle">pending</span>
-                  {% endif %}
+                  {% if point.accuracy_score is not none %}<span class="score-badge">{{ "%.0f"|format(point.accuracy_score) }}%</span>{% else %}<span class="subtle">—</span>{% endif %}
                 </td>
                 <td>
-                  {% if point.accuracy_score is not none %}
-                  <span class="score-badge">{{ "%.1f"|format(point.accuracy_score) }}%</span>
-                  {% else %}
-                  <span class="subtle">pending</span>
-                  {% endif %}
-                </td>
-                <td>
-                  {% if point.failure_score is not none %}
-                  <span class="subtle">{{ "%.1f"|format(point.failure_score) }}%</span>
-                  {% else %}
-                  <span class="subtle">pending</span>
-                  {% endif %}
-                </td>
-                <td>
-                  {% if point.direction_match is sameas true %}
-                  <span class="table-pill table-pill-ok">hit</span>
-                  {% elif point.direction_match is sameas false %}
-                  <span class="table-pill table-pill-warn">miss</span>
-                  {% else %}
-                  <span class="subtle">pending</span>
-                  {% endif %}
-                </td>
-                <td>
-                  {% if point.verdict %}
-                  <div>{{ point.verdict }}</div>
-                  {% endif %}
-                  {% if point.rationale %}
-                  <div class="subtle">{{ point.rationale }}</div>
-                  {% endif %}
+                  {% if point.direction_match is sameas true %}<span class="dir-hit">✓</span>{% elif point.direction_match is sameas false %}<span class="dir-miss">✗</span>{% else %}<span class="subtle">—</span>{% endif %}
                 </td>
               </tr>
               {% endfor %}
@@ -943,14 +843,14 @@
           </table>
         </div>
         {% endif %}
-      </article>
+      </details>
       {% endfor %}
     </div>
     {% else %}
     <div class="empty-state">
-      <div class="empty-state-icon">📊</div>
-      <div class="empty-state-title">No prediction selected</div>
-      <div class="empty-state-copy">Select a saved forecast from the list or generate a new one above.</div>
+      <div class="empty-state-icon">🔮</div>
+      <div class="empty-state-title">No forecast selected</div>
+      <div class="empty-state-copy">Generate a forecast or pick one from the list to inspect model predictions.</div>
     </div>
     {% endif %}
   </div>
