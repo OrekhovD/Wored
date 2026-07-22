@@ -613,6 +613,7 @@ async def build_prediction_context(
         log.warning("Pattern matching failed for %s: %s", normalized_symbol, exc)
 
     price_values = [item["close"] for item in recent_candles]
+    latest_journal = journal_entries[0] if journal_entries else None
     latest_journal_symbol = latest_journal["symbols"][0] if latest_journal and latest_journal["symbols"] else {}
 
     return {
@@ -952,6 +953,7 @@ def build_prediction_comparison_payload(
                     "step_index": step,
                     "forecast_hour": point["forecast_hour"],
                     "target_time": point["target_time"],
+                    "target_time_ts": int(datetime.fromisoformat(point["target_time"].replace("Z", "+00:00")).timestamp()) if point.get("target_time") else None,
                     "target_time_display": point["target_time_display"],
                     "actual_price": None,
                     "actual_change_pct": None,
@@ -977,6 +979,7 @@ def build_prediction_comparison_payload(
                 "step_index": step,
                 "forecast_hour": step,
                 "target_time": None,
+                "target_time_ts": None,
                 "target_time_display": None,
                 "actual_price": None,
                 "actual_change_pct": None,
@@ -1025,6 +1028,7 @@ def build_prediction_comparison_payload(
             "step_index": row["step_index"],
             "forecast_hour": row["forecast_hour"],
             "target_time": row["target_time"],
+            "target_time_ts": row.get("target_time_ts"),
             "target_time_display": row["target_time_display"],
             "actual_price": row["actual_price"],
             "actual_change_pct": row["actual_change_pct"],

@@ -368,14 +368,12 @@
         rightOffset: 4,
         barSpacing: 8,
         tickMarkFormatter: function(time) {
-          // time is unix timestamp in seconds, convert to UTC+7
-          var d = new Date((time - 0) * 1000);
-          var h = (d.getUTCHours() + 7) % 24;
+          // time is unix timestamp in seconds; display Asia/Bangkok (+7)
+          var totalSeconds = (time - 0) + 7 * 3600;
+          var d = new Date(totalSeconds * 1000);
+          var h = d.getUTCHours();
           var m = d.getUTCMinutes();
           var day = d.getUTCDate();
-          // Detect day rollover
-          var totalH = d.getUTCHours() + 7;
-          if (totalH >= 24) day = d.getUTCDate() + 1;
           var month = d.getUTCMonth() + 1;
           return (month < 10 ? '0' : '') + month + '-' + (day < 10 ? '0' : '') + day + ' ' + (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
         },
@@ -443,8 +441,10 @@
     // Forecast lines
     var comparisonModels = {{ selected_request.comparison_models | tojson }};
     var comparisonRows = {{ selected_request.comparison_rows | tojson }};
+    var forecastSeries = [];
     if (comparisonModels && comparisonRows && comparisonRows.length) {
       comparisonModels.forEach(function(model, idx) {
+        forecastSeries[idx] = null;
         var series = createLineSeries({
           color: modelColors[idx % modelColors.length],
           lineWidth: 2,
@@ -456,24 +456,36 @@
           .filter(function(row) { return row.model_cells && row.model_cells[idx] && row.model_cells[idx].point; })
           .map(function(row) {
             var cell = row.model_cells[idx];
+            var ts = row.target_time_ts;
+            if (!ts && row.target_time) ts = Math.floor(new Date(row.target_time).getTime() / 1000);
             return {
-              time: row.base_ts || Math.floor(new Date(row.target_time).getTime() / 1000),
+              time: ts,
               value: cell.point.predicted_price
             };
           });
         if (lineData.length) {
           // Ensure first forecast point connects from base price at creation time
+          var firstTs = lineData[0].time;
           lineData.unshift({
-            time: {{ base_ts }},
+            time: {{ base_ts }} || firstTs,
             value: basePrice
           });
           series.setData(lineData);
         }
+        forecastSeries[idx] = series;
       });
     }
 
     chart.timeScale().fitContent();
   }
+
+  // Keep references to series keyed by role so tabs can toggle visibility
+  var seriesByRole = {};
+  comparisonModels.forEach(function(model, idx) {
+    var role = (model.agent_role || model.role_name || 'neutral').toLowerCase();
+    if (!seriesByRole[role]) seriesByRole[role] = [];
+    if (forecastSeries[idx]) seriesByRole[role].push(forecastSeries[idx]);
+  });
 
   document.querySelectorAll('.forecast-role-tab').forEach(function(tab) {
     tab.addEventListener('click', function() {
@@ -481,11 +493,12 @@
       document.querySelectorAll('.forecast-role-tab').forEach(function(t) { t.classList.remove('is-active'); });
       tab.classList.add('is-active');
       document.querySelectorAll('.forecast-legend-item[data-role]').forEach(function(item) {
-        if (filter === 'all' || item.dataset.role === filter) {
-          item.classList.remove('is-hidden');
-        } else {
-          item.classList.add('is-hidden');
-        }
+        var visible = filter === 'all' || item.dataset.role === filter;
+        item.classList.toggle('is-hidden', !visible);
+      });
+      Object.keys(seriesByRole).forEach(function(role) {
+        var visible = filter === 'all' || role === filter;
+        seriesByRole[role].forEach(function(s) { s.applyOptions({ visible: visible }); });
       });
     });
   });
