@@ -35,6 +35,9 @@ try:
 except Exception as _pattern_err:
     PatternMatcher = None  # type: ignore
 
+from prediction_timeframes import period_to_minutes, STEP_MINUTES_MAP
+
+
 log = logging.getLogger("webui")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
@@ -577,7 +580,7 @@ async def build_prediction_context(
 ) -> dict[str, Any]:
     normalized_symbol = ensure_prediction_symbol(symbol)
     normalized_timeframe = normalize_period(base_timeframe)
-    step_minutes = {"1min": 1, "5min": 5, "15min": 15, "30min": 30, "60min": 60, "4hour": 240, "1day": 1440}.get(normalized_timeframe, 60)
+    step_minutes = period_to_minutes(normalized_timeframe)
 
     snapshot = await get_symbol_snapshot(request, normalized_symbol)
     if snapshot["price"] <= 0:
@@ -610,7 +613,6 @@ async def build_prediction_context(
         log.warning("Pattern matching failed for %s: %s", normalized_symbol, exc)
 
     price_values = [item["close"] for item in recent_candles]
-    latest_journal = journal_entries[0] if journal_entries else None
     latest_journal_symbol = latest_journal["symbols"][0] if latest_journal and latest_journal["symbols"] else {}
 
     return {
@@ -916,7 +918,11 @@ def build_prediction_comparison_payload(
     comparison_models: list[dict[str, Any]] = []
     rows_by_step: dict[int, dict[str, Any]] = {}
 
-    for model in models:
+    # Stable role order for column headers
+    role_order = {"bull": 0, "bear": 1, "arbiter": 2}
+    sorted_models = sorted(models, key=lambda m: role_order.get(m.get("agent_role", "").lower(), 99))
+
+    for model in sorted_models:
         role_name, short_name = split_model_display_name(model["model_name"])
         model["role_name"] = role_name
         model["short_name"] = short_name
@@ -1247,6 +1253,9 @@ async def fetch_prediction_request_detail(request: Request, request_id: int) -> 
         model["avg_failure"] = round(100.0 - model["avg_accuracy"], 2) if model["avg_accuracy"] is not None else None
 
     detail["models"] = list(model_runs.values())
+    # Stable role order: bull, bear, arbiter
+    role_order = {"bull": 0, "bear": 1, "arbiter": 2}
+    detail["models"].sort(key=lambda m: role_order.get(m.get("agent_role", "").lower(), 99))
     detail["horizon_steps"] = detail.get("horizon_hours", 1)
     comparison_models, comparison_rows, top_model = build_prediction_comparison_payload(
         detail["horizon_steps"],
@@ -1273,8 +1282,7 @@ async def create_prediction_request_record(
     if pool is None:
         raise HTTPException(status_code=503, detail="Postgres is unavailable")
 
-    step_minutes = {"1min": 1, "5min": 5, "15min": 15, "30min": 30, "60min": 60, "4hour": 240, "1day": 1440}.get(base_timeframe, 60)
-    horizon_hours = int((horizon_steps * step_minutes) / 60) or 1
+    step_minutes = period_to_minutes(base_timeframe)
     created_at = datetime.now(timezone.utc)
 
     request_query = """
@@ -1405,7 +1413,7 @@ async def append_prediction_model_result(
                 return
 
             base_timeframe = request_row.get("base_timeframe", "60min")
-            step_minutes = {"1min": 1, "5min": 5, "15min": 15, "30min": 30, "60min": 60, "4hour": 240, "1day": 1440}.get(base_timeframe, step_minutes)
+            step_minutes = period_to_minutes(base_timeframe)
             created_at_ts = to_db_timestamp(request_row["created_at"])
             agent_role = getattr(result, "agent_role", "neutral")
             model_row = await connection.fetchrow(
@@ -1516,6 +1524,9 @@ async def run_prediction_request(
         background_tasks.add_task(
             finalize_oracle_prediction, request.app, detail["id"], context_payload, primary_results=role_results
         )
+        detail["oracle_status"] = "pending"
+    else:
+        detail["oracle_status"] = "unavailable"
 
     return detail
 
@@ -2111,6 +2122,46 @@ async def api_journal_entry(request: Request, entry_id: int, symbol: str | None 
     return entry
 
 
+@app.get("/api/predictions/_health")
+async def api_predictions_health(request: Request) -> JSONResponse:
+    """Return availability of each prediction role/model and recent evaluator stats."""
+    models = list_prediction_models()
+    status = []
+    for item in models:
+        status.append({
+            "key": item["key"],
+            "name": item["name"],
+            "model_id": item["model_id"],
+            "tier": item.get("tier", "unknown"),
+            "available": item.get("available", False),
+            "reason": item.get("reason") or None,
+        })
+
+    pool = getattr(app.state, "pg_pool", None)
+    recent_stats: dict[str, Any] = {"requests_last_24h": 0, "evaluated_points_last_24h": 0, "avg_accuracy_7d": None}
+    if pool:
+        try:
+            async with pool.acquire() as conn:
+                requests_row = await conn.fetchrow(
+                    "SELECT COUNT(*) AS n FROM forecast_requests WHERE created_at >= NOW() AT TIME ZONE 'UTC' - INTERVAL '24 hours'"
+                )
+                points_row = await conn.fetchrow(
+                    "SELECT COUNT(*) AS n, AVG(accuracy_score) AS avg FROM forecast_points WHERE evaluated_at >= NOW() AT TIME ZONE 'UTC' - INTERVAL '7 days' AND accuracy_score IS NOT NULL"
+                )
+                recent_stats["requests_last_24h"] = int(requests_row["n"]) if requests_row else 0
+                recent_stats["evaluated_points_last_24h"] = int(points_row["n"]) if points_row else 0
+                recent_stats["avg_accuracy_7d"] = round(float(points_row["avg"]), 2) if points_row and points_row["avg"] is not None else None
+        except Exception as exc:
+            recent_stats["db_error"] = str(exc)
+
+    return JSONResponse({
+        "ok": True,
+        "models": status,
+        "stats": recent_stats,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
 @app.api_route("/api/predictions", methods=["GET", "POST"])
 async def api_predictions(
     request: Request,
@@ -2130,7 +2181,7 @@ async def api_predictions(
         depth = int(payload.get("depth", 3))
         requested_by = str(payload.get("requested_by") or request.session.get("username", "api-webui"))
         source = str(payload.get("source") or "webui-api")
-        return await run_prediction_request(
+        detail = await run_prediction_request(
             request=request,
             background_tasks=background_tasks,
             symbol=symbol,
@@ -2140,6 +2191,7 @@ async def api_predictions(
             base_timeframe=base_timeframe,
             depth=depth,
         )
+        return JSONResponse(content=detail, status_code=202)
     return {"items": await fetch_prediction_requests(request, limit=limit, offset=offset)}
 
 

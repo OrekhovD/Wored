@@ -12,6 +12,8 @@ from openai import AsyncOpenAI
 
 log = logging.getLogger("webui.prediction_engine")
 
+from prediction_timeframes import STEP_MINUTES_MAP
+
 DEFAULT_ANALYST_QWEN_MODEL = "qwen3.6-35b-a3b"
 DEFAULT_PREMIUM_QWEN_MODEL = "qwen3.6-27b"
 DEFAULT_WORKER_GEMINI_MODEL = "gemini-3-flash-preview"
@@ -85,9 +87,11 @@ Rules:
 """.strip() + "\n\n" + PREDICTION_SYSTEM_PROMPT.split("Required JSON shape:")[1]
 
 
-STEP_MINUTES_MAP = {
+STEP_MINUTES_MAP: dict[str, int] = {
     "1min": 1,
+    "5min": 5,
     "15min": 15,
+    "30min": 30,
     "60min": 60,
     "1hour": 60,
     "4hour": 240,
@@ -256,7 +260,53 @@ def _extract_json_payload(raw_text: str) -> dict[str, Any] | list[Any]:
     raise ValueError("Model response does not contain a JSON object or array")
 
 
-def parse_prediction_payload(raw_text: str, horizon_steps: int, base_price: float, step_minutes: int = 60) -> tuple[str, list[PredictionPoint]]:
+def _calibrate_confidence(confidence: float | None, role: str | None) -> float | None:
+    """Damp confidence for historically poor roles (runs in async caller)."""
+    if confidence is None or role is None:
+        return confidence
+    try:
+        loop = asyncio.get_running_loop()
+        historical_accuracy = loop.run_until_complete(_fetch_role_accuracy(role))
+        if historical_accuracy is not None and historical_accuracy < 50.0:
+            damp = 0.7 + 0.3 * (historical_accuracy / 100.0)
+            return round(confidence * damp, 2)
+    except Exception:
+        pass
+    return confidence
+
+
+async def _fetch_role_accuracy(role: str) -> float | None:
+    """Return average accuracy_score for a role over the last 7 days."""
+    try:
+        import asyncpg
+
+        db_url = os.getenv("DATABASE_URL")
+        if not db_url:
+            return None
+        if "postgresql+asyncpg://" in db_url:
+            db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+        pool = await asyncpg.create_pool(dsn=db_url, min_size=1, max_size=1)
+        if not pool:
+            return None
+        async with pool.acquire() as conn:
+            row = await conn.fetchval(
+                """
+                SELECT AVG(fp.accuracy_score)
+                FROM forecast_points fp
+                JOIN forecast_model_runs fmr ON fmr.id = fp.model_run_id
+                WHERE fmr.agent_role = $1
+                  AND fp.evaluated_at >= NOW() AT TIME ZONE 'UTC' - INTERVAL '7 days'
+                  AND fp.accuracy_score IS NOT NULL
+                """,
+                role,
+            )
+        await pool.close()
+        return float(row) if row is not None else None
+    except Exception:
+        return None
+
+
+def parse_prediction_payload(raw_text: str, horizon_steps: int, base_price: float, step_minutes: int = 60, role: str | None = None) -> tuple[str, list[PredictionPoint]]:
     payload = _extract_json_payload(raw_text)
     if isinstance(payload, list):
         summary = ""
@@ -302,12 +352,19 @@ def parse_prediction_payload(raw_text: str, horizon_steps: int, base_price: floa
         confidence = _coerce_float(item.get("confidence"))
         if confidence is not None:
             confidence = max(0.0, min(100.0, confidence))
+            confidence = _calibrate_confidence(confidence, role)
 
         predicted_low = _coerce_float(item.get("low", item.get("predicted_low")))
         predicted_high = _coerce_float(item.get("high", item.get("predicted_high")))
         if predicted_low is not None and predicted_high is not None:
-            predicted_low = min(predicted_low, predicted_high)
-            predicted_high = max(predicted_low, predicted_high)
+            low = min(predicted_low, predicted_high)
+            high = max(predicted_low, predicted_high)
+            # sanity: band must contain central price
+            if low > predicted_price:
+                low = predicted_price * 0.998
+            if high < predicted_price:
+                high = predicted_price * 1.002
+            predicted_low, predicted_high = low, high
 
         rationale = str(item.get("rationale") or item.get("reason") or item.get("note") or "").strip()
         normalized_points[step] = PredictionPoint(
@@ -650,6 +707,7 @@ async def generate_model_prediction(
                     horizon_steps=horizon_steps,
                     base_price=float(context_payload["base_price"]),
                     step_minutes=step_minutes,
+                    role=role,
                 )
                 return ModelPredictionResult(
                     key=config.key,

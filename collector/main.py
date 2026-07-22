@@ -77,6 +77,7 @@ async def main():
     scheduler.add_job(evaluate_due_forecasts, "interval", minutes=5, id="evaluate_forecasts")
     scheduler.add_job(refresh_historical_forecast_scores, "interval", hours=1, id="refresh_historical_scores")
     scheduler.add_job(check_sim_positions, "interval", minutes=2, id="check_sim_positions")
+    scheduler.add_job(regenerate_hourly_correction, "interval", hours=1, id="hourly_correction")
 
     # Daily Pipeline v2 jobs (ТЗ раздел 11)
     register_pipeline_jobs(scheduler)

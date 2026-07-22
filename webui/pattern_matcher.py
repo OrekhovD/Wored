@@ -14,17 +14,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-log = logging.getLogger("webui.pattern_matcher")
+from prediction_timeframes import STEP_MINUTES_MAP
 
-TIMEFRAME_MINUTES = {
-    "1min": 1,
-    "15min": 15,
-    "60min": 60,
-    "1hour": 60,
-    "4hour": 240,
-    "12hour": 720,
-    "1day": 1440,
-}
+log = logging.getLogger("webui.pattern_matcher")
 
 
 @dataclass
