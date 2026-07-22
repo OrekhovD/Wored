@@ -308,6 +308,12 @@ def pop_flash(request: Request) -> dict[str, str] | None:
     return flash
 
 
+class _FakeRequest:
+    """Minimal request-like object for background tasks that only access app.state."""
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+
 def build_login_redirect(request: Request) -> RedirectResponse | None:
     if is_authenticated(request):
         return None
@@ -921,7 +927,7 @@ def build_prediction_comparison_payload(
 
     # Stable role order for column headers
     role_order = {"bull": 0, "bear": 1, "arbiter": 2}
-    sorted_models = sorted(models, key=lambda m: role_order.get(m.get("agent_role", "").lower(), 99))
+    sorted_models = sorted(models, key=lambda m: role_order.get((m.get("agent_role") or "").lower(), 99))
 
     for model in sorted_models:
         role_name, short_name = split_model_display_name(model["model_name"])
@@ -1259,7 +1265,7 @@ async def fetch_prediction_request_detail(request: Request, request_id: int) -> 
     detail["models"] = list(model_runs.values())
     # Stable role order: bull, bear, arbiter
     role_order = {"bull": 0, "bear": 1, "arbiter": 2}
-    detail["models"].sort(key=lambda m: role_order.get(m.get("agent_role", "").lower(), 99))
+    detail["models"].sort(key=lambda m: role_order.get((m.get("agent_role") or "").lower(), 99))
     detail["horizon_steps"] = detail.get("horizon_hours", 1)
     comparison_models, comparison_rows, top_model = build_prediction_comparison_payload(
         detail["horizon_steps"],
@@ -1483,6 +1489,101 @@ async def finalize_oracle_prediction(
         await append_prediction_model_result(pool, request_id, result)
     except Exception as exc:
         log.warning("Background Oracle/Arbiter prediction failed for request %s: %s", request_id, exc)
+
+
+async def run_prediction_request_async(
+    app: Any,
+    request_id: int,
+    symbol: str,
+    horizon_steps: int,
+    base_price: float,
+    requested_by: str,
+    source: str,
+    base_timeframe: str = "60min",
+    depth: int = 3,
+) -> None:
+    """Background completion of a pending prediction request."""
+    fake_request = _FakeRequest(app)
+    normalized_symbol = ensure_prediction_symbol(symbol)
+    normalized_timeframe = normalize_period(base_timeframe)
+    log.info("Starting background prediction request %s for %s", request_id, normalized_symbol)
+    try:
+        context_payload = await build_prediction_context(
+            fake_request, normalized_symbol, horizon_steps,
+            base_timeframe=base_timeframe, depth=depth
+        )
+        role_bundle = await generate_role_prediction_bundle(context_payload)
+        role_results = list(role_bundle.values())
+    except Exception as exc:
+        log.exception("Background prediction context/role generation failed for request %s: %s", request_id, exc)
+        pool = getattr(app.state, "pg_pool", None)
+        if pool:
+            try:
+                async with pool.acquire() as connection:
+                    await connection.execute(
+                        "UPDATE forecast_requests SET status=$1, updated_at=$2 WHERE id=$3",
+                        "failed", to_db_timestamp(datetime.now(timezone.utc)), request_id
+                    )
+            except Exception as db_exc:
+                log.warning("Failed to mark request %s failed: %s", request_id, db_exc)
+        return
+
+    pool = getattr(app.state, "pg_pool", None)
+    if not pool:
+        log.warning("No pg_pool for background request %s", request_id)
+        return
+    try:
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                request_status = "active" if any(
+                    r.status == "completed" and r.points for r in role_results
+                ) else "failed"
+                await connection.execute(
+                    "UPDATE forecast_requests SET status=$1, base_price=$2, updated_at=$3 WHERE id=$4",
+                    request_status, float(context_payload["base_price"]), to_db_timestamp(datetime.now(timezone.utc)), request_id
+                )
+                model_query = """
+                INSERT INTO forecast_model_runs (request_id, model_key, model_name, model_id, agent_role, status, summary, error_message)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id
+                """
+                point_query = """
+                INSERT INTO forecast_points (
+                    request_id, model_run_id, forecast_hour, step_index, target_time,
+                    predicted_price, predicted_change_pct, predicted_low, predicted_high, confidence, rationale, pattern_match_score
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                """
+                step_minutes = period_to_minutes(normalized_timeframe)
+                created_at = datetime.now(timezone.utc)
+                for result in role_results:
+                    agent_role = getattr(result, "agent_role", "neutral")
+                    model_row = await connection.fetchrow(
+                        model_query, request_id, result.key, result.name, result.model_id, agent_role,
+                        result.status, result.summary, result.error_message
+                    )
+                    if result.status != "completed" or not result.points:
+                        continue
+                    model_run_id = model_row["id"]
+                    for point in result.points:
+                        step = int(getattr(point, "step_index", getattr(point, "hour", 0)))
+                        target_time = created_at + timedelta(minutes=step * step_minutes)
+                        await connection.execute(
+                            point_query, request_id, model_run_id, step, step,
+                            to_db_timestamp(target_time), point.predicted_price, point.predicted_change_pct,
+                            getattr(point, "predicted_low", None), getattr(point, "predicted_high", None),
+                            point.confidence, point.rationale, getattr(point, "pattern_match_score", None)
+                        )
+    except Exception as exc:
+        log.exception("Background prediction DB save failed for request %s: %s", request_id, exc)
+        return
+
+    oracle_model = next((item for item in list_prediction_models() if item["key"] == "minimax"), None)
+    if oracle_model and oracle_model["available"]:
+        try:
+            await finalize_oracle_prediction(app, request_id, context_payload, primary_results=role_results)
+        except Exception as exc:
+            log.warning("Background oracle failed for request %s: %s", request_id, exc)
 
 
 async def run_prediction_request(
@@ -1958,37 +2059,43 @@ async def create_prediction(
     require_api_auth(request)
     verify_csrf_token(request, csrf_token)
     base_timeframe = normalize_period(base_timeframe)
-    detail = await run_prediction_request(
-        request=request,
-        background_tasks=background_tasks,
-        symbol=symbol,
-        horizon_steps=horizon_steps,
-        requested_by=request.session.get("username", "local-webui"),
-        source="webui",
-        base_timeframe=base_timeframe,
-        depth=depth,
+    normalized_symbol = ensure_prediction_symbol(symbol)
+
+    # Quick price snapshot and pending record; heavy model work goes to background
+    snapshot = await get_symbol_snapshot(request, normalized_symbol)
+    if snapshot["price"] <= 0:
+        raise HTTPException(status_code=503, detail=f"Current price for {normalized_symbol} is unavailable")
+    base_price = float(snapshot["price"])
+    horizon_hours = max(1, int((horizon_steps * period_to_minutes(base_timeframe)) / 60))
+
+    pool = request.app.state.pg_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Postgres is unavailable")
+    created_at = datetime.now(timezone.utc)
+    request_row = await pool.fetchrow(
+        """
+        INSERT INTO forecast_requests (symbol, horizon_hours, base_timeframe, depth, base_price, status, source, requested_by, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING id
+        """,
+        normalized_symbol, horizon_hours, base_timeframe, depth, base_price,
+        "pending", "webui", request.session.get("username", "local-webui"),
+        to_db_timestamp(created_at), to_db_timestamp(created_at)
+    )
+    request_id = request_row["id"]
+
+    background_tasks.add_task(
+        run_prediction_request_async,
+        request.app, request_id, normalized_symbol, horizon_steps, base_price,
+        request.session.get("username", "local-webui"), "webui", base_timeframe, depth
     )
 
-    successful_models = [model for model in detail["models"] if model["status"] == "completed" and model["points"]]
-    failed_models = [model for model in detail["models"] if model["status"] != "completed"]
-    oracle_model = next((item for item in list_prediction_models() if item["key"] == "minimax"), None)
-
-    if successful_models:
-        oracle_note = " Oracle continues in the background." if oracle_model and oracle_model["available"] else ""
-        set_flash(
-            request,
-            "ok",
-            f"Prediction #{detail['id']} created for {detail.get('symbol', symbol).upper()} / {detail.get('horizon_hours', horizon_steps)}h. "
-            f"Completed models: {len(successful_models)}. Failed models: {len(failed_models)}.{oracle_note}",
-        )
-    else:
-        set_flash(
-            request,
-            "bad",
-            f"Prediction #{detail['id']} was recorded, but all models failed. Check provider keys and model status.",
-        )
-
-    response = RedirectResponse(url=f"/predictions/{detail['id']}", status_code=303)
+    set_flash(
+        request,
+        "ok",
+        f"Prediction #{request_id} queued for {normalized_symbol.upper()} / {horizon_hours}h. Models run in background; refresh the page.",
+    )
+    response = RedirectResponse(url=f"/predictions/{request_id}", status_code=303)
     response.background = background_tasks
     return response
 

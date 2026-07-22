@@ -114,13 +114,19 @@
         <h2>{{ selected_request.symbol | upper }} · {{ selected_request.base_timeframe or '60min' }} · {{ selected_request.horizon_hours }}h · depth {{ selected_request.depth or 3 }} · {{ selected_request.models | length }} roles</h2>
       </div>
       <div class="detail-metrics-compact">
-        <span class="table-pill {% if selected_request.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
+        <span class="table-pill {% if selected_request.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}" data-request-status>
           {{ selected_request.status }}
         </span>
         <span class="mono">base ${{ "%.2f"|format(selected_request.base_price) }}</span>
         <span class="subtle">{{ selected_request.created_at_display or selected_request.created_at }}</span>
       </div>
     </div>
+
+    {% if selected_request.status == 'pending' %}
+    <div class="pending-banner" style="margin:0.5rem 0 1rem; padding:0.75rem 1rem; background:rgba(31,214,163,0.12); border:1px solid rgba(31,214,163,0.25); border-radius:8px; color:rgba(255,255,255,0.9);">
+      <strong>Prediction is running in the background.</strong> This page auto-refreshes every 5 seconds.
+    </div>
+    {% endif %}
 
     {%- set ok = selected_request.completed_models -%}
     {%- set fail = selected_request.failed_models -%}
@@ -669,12 +675,18 @@
         <h2>{{ selected_request.symbol | upper }} over {{ selected_request.horizon_hours }} hour{% if selected_request.horizon_hours != 1 %}s{% endif %}</h2>
       </div>
       <div class="detail-metrics">
-        <span class="table-pill {% if selected_request.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
+        <span class="table-pill {% if selected_request.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}" data-request-status>
           {{ selected_request.status }}
         </span>
         <span class="subtle">Base ${{ "%.2f"|format(selected_request.base_price) }}</span>
       </div>
     </div>
+
+    {% if selected_request.status == 'pending' %}
+    <div class="pending-banner" style="margin:0.75rem 0; padding:0.75rem 1rem; background:rgba(31,214,163,0.12); border:1px solid rgba(31,214,163,0.25); border-radius:8px; color:rgba(255,255,255,0.9);">
+      <strong>Prediction is running in the background.</strong> This page auto-refreshes every 5 seconds.
+    </div>
+    {% endif %}
 
     <div class="stats-grid">
       <div class="metric-card">
@@ -869,4 +881,28 @@
   </div>
 </section>
 {% endif %}
+
+{% if selected_request and selected_request.status == 'pending' %}
+<script>
+(function() {
+  var requestId = {{ selected_request.id }};
+  var statusEl = document.querySelector('[data-request-status]');
+  function poll() {
+    fetch('/api/predictions/' + requestId)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data || data.status !== 'pending') {
+          window.location.reload();
+          return;
+        }
+        if (statusEl) { statusEl.textContent = data.status; }
+      })
+      .catch(function() {});
+  }
+  setInterval(poll, 5000);
+  poll();
+})();
+</script>
+{% endif %}
+
 {% endblock %}
