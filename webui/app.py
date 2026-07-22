@@ -1969,6 +1969,40 @@ async def predictions_page(
     elif prediction_requests:
         selected_request = await fetch_prediction_request_detail(request, request_id=prediction_requests[0]["id"])
 
+    # Fetch historical candles for the selected request chart
+    historical_candles: list[dict[str, Any]] = []
+    live_candles: list[dict[str, Any]] = []
+    base_ts = 0
+    if selected_request:
+        try:
+            symbol = selected_request.get("symbol", "btcusdt")
+            horizon = selected_request.get("horizon_hours", 4)
+            base_timeframe = selected_request.get("base_timeframe", "60min")
+            fetch_size = min(72 + horizon + 6, 200)
+            all_candles = await fetch_klines(request, symbol, base_timeframe, fetch_size)
+
+            created_str = selected_request.get("created_at")
+            base_ts = 0
+            if created_str:
+                from datetime import datetime as _dt
+                try:
+                    _parsed = _dt.fromisoformat(created_str.replace("Z", "+00:00"))
+                    base_ts = int(_parsed.timestamp())
+                except Exception:
+                    pass
+
+            if all_candles and base_ts:
+                for candle in all_candles:
+                    if candle["time"] < base_ts:
+                        historical_candles.append(candle)
+                    else:
+                        live_candles.append(candle)
+                historical_candles = historical_candles[-48:]
+            elif all_candles:
+                historical_candles = all_candles[-48:]
+        except Exception:
+            pass
+
     return template_response(
         request,
         "predictions.html",
@@ -1977,73 +2011,21 @@ async def predictions_page(
         selected_request=selected_request,
         model_statuses=list_prediction_models(),
         prediction_horizons=sorted(ALLOWED_PREDICTION_HORIZONS),
-        historical_candles=[],
-        live_candles=[],
+        historical_candles=historical_candles,
+        live_candles=live_candles,
+        base_ts=base_ts,
         page=page,
         has_next_page=len(prediction_requests) == DEFAULT_PAGE_SIZE,
     )
 
 
 @app.get("/predictions/{request_id}", response_class=HTMLResponse)
-async def prediction_detail_page(request: Request, request_id: int, page: int = Query(default=1, ge=1)):
+async def prediction_detail_redirect(request: Request, request_id: int):
+    """Legacy detail URLs now redirect to the unified /predictions page."""
     auth_redirect = require_page_auth(request)
     if auth_redirect is not None:
         return auth_redirect
-
-    offset = (page - 1) * DEFAULT_PAGE_SIZE
-    prediction_requests = await fetch_prediction_requests(request, limit=DEFAULT_PAGE_SIZE, offset=offset)
-    selected_request = await fetch_prediction_request_detail(request, request_id=request_id)
-    if selected_request is None:
-        raise HTTPException(status_code=404, detail="Prediction request not found")
-
-    # Fetch historical candles for chart context (48h before prediction + live candles after)
-    historical_candles: list[dict[str, Any]] = []
-    live_candles: list[dict[str, Any]] = []
-    try:
-        symbol = selected_request.get("symbol", "btcusdt")
-        horizon = selected_request.get("horizon_hours", 4)
-        base_timeframe = selected_request.get("base_timeframe", "60min")
-        fetch_size = min(72 + horizon + 6, 200)
-        all_candles = await fetch_klines(request, symbol, base_timeframe, fetch_size)
-
-        # Parse prediction creation timestamp (unix seconds)
-        created_str = selected_request.get("created_at")
-        created_ts = 0
-        if created_str:
-            from datetime import datetime as _dt
-            try:
-                _parsed = _dt.fromisoformat(created_str.replace("Z", "+00:00"))
-                created_ts = int(_parsed.timestamp())
-            except Exception:
-                pass
-
-        if all_candles and created_ts:
-            for candle in all_candles:
-                if candle["time"] < created_ts:
-                    historical_candles.append(candle)
-                else:
-                    live_candles.append(candle)
-            # Keep last 48 historical candles
-            historical_candles = historical_candles[-48:]
-        elif all_candles:
-            historical_candles = all_candles[-48:]
-    except Exception:
-        pass
-
-    return template_response(
-        request,
-        "predictions.html",
-        page_title=f"Prediction #{request_id}",
-        prediction_requests=prediction_requests,
-        selected_request=selected_request,
-        model_statuses=list_prediction_models(),
-        prediction_horizons=sorted(ALLOWED_PREDICTION_HORIZONS),
-        historical_candles=historical_candles,
-        live_candles=live_candles,
-        base_ts=created_ts,
-        page=page,
-        has_next_page=len(prediction_requests) == DEFAULT_PAGE_SIZE,
-    )
+    return RedirectResponse(url="/predictions", status_code=307)
 
 
 @app.post("/predictions")
@@ -2095,7 +2077,7 @@ async def create_prediction(
         "ok",
         f"Prediction #{request_id} queued for {normalized_symbol.upper()} / {horizon_hours}h. Models run in background; refresh the page.",
     )
-    response = RedirectResponse(url=f"/predictions/{request_id}", status_code=303)
+    response = RedirectResponse(url="/predictions", status_code=303)
     response.background = background_tasks
     return response
 

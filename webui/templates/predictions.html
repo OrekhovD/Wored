@@ -70,7 +70,7 @@
     <div class="request-list request-list-scrollable">
       {% if prediction_requests %}
         {% for item in prediction_requests %}
-        <a href="/predictions/{{ item.id }}" class="request-link {% if selected_request and selected_request.id == item.id %}is-selected{% endif %}">
+        <a href="/predictions" class="request-link {% if selected_request and selected_request.id == item.id %}is-selected{% endif %}">
           <div class="status-pill-row">
             <strong>{{ item.symbol | upper }}</strong>
             <span class="table-pill {% if item.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
@@ -627,7 +627,7 @@
     <div class="request-list request-list-scrollable">
       {% if prediction_requests %}
         {% for item in prediction_requests %}
-        <a href="/predictions/{{ item.id }}" class="request-link {% if selected_request and selected_request.id == item.id %}is-selected{% endif %}">
+        <a href="/predictions" class="request-link {% if selected_request and selected_request.id == item.id %}is-selected{% endif %}">
           <div class="status-pill-row">
             <strong>{{ item.symbol | upper }}</strong>
             <span class="table-pill {% if item.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
@@ -885,17 +885,19 @@
 {% if selected_request and selected_request.status == 'pending' %}
 <script>
 (function() {
-  var requestId = {{ selected_request.id }};
+  var selectedId = {{ selected_request.id }};
   var statusEl = document.querySelector('[data-request-status]');
   function poll() {
-    fetch('/api/predictions/' + requestId)
+    fetch('/api/predictions')
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        if (!data || data.status !== 'pending') {
+        var items = data && data.items ? data.items : [];
+        var latest = items[0] || {};
+        if (latest.id === selectedId && latest.status !== 'pending') {
           window.location.reload();
           return;
         }
-        if (statusEl) { statusEl.textContent = data.status; }
+        if (statusEl && latest.id === selectedId) { statusEl.textContent = latest.status; }
       })
       .catch(function() {});
   }
