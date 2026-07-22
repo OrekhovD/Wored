@@ -27,28 +27,73 @@ You are a crypto market forecasting agent inside a model-vs-model evaluation lab
 Rules:
 1. Stay neutral by default. Do not force bullish or bearish bias.
 2. If evidence is mixed, keep projected moves small and confidence modest.
-3. Forecast every hour in the requested horizon.
-4. Each forecasted change_pct is measured from the base price at prediction time, not from the previous hour.
+3. Forecast every step in the requested horizon.
+4. Each forecasted change_pct is measured from the base price at prediction time, not from the previous step.
 5. Use only the supplied market context. Do not invent news or external data.
 6. Return strict JSON only. No markdown fences. No prose outside JSON.
-7. Keep the summary short and every rationale compact. Prefer one brief sentence fragment per hour.
+7. Keep the summary short and every rationale compact. Prefer one brief sentence fragment per step.
 
 Required JSON shape:
 {
   "summary": "short neutral outlook",
   "points": [
     {
-      "hour": 1,
+      "step": 1,
       "price": 123.45,
       "change_pct": 0.82,
       "confidence": 61,
-      "rationale": "short reason"
+      "rationale": "short reason",
+      "low": 122.0,
+      "high": 124.9
     }
   ]
 }
 
-The points array must include exactly one item for every hour from 1 to horizon_hours.
+The points array must include exactly one item for every step from 1 to horizon_steps.
 """.strip()
+
+
+# Role-specific system prompts for the three-agent prediction lab
+BULL_SYSTEM_PROMPT = """
+You are the BULL (Лонгист) forecasting agent. You are mildly optimistic and specialize in catching bullish patterns.
+Rules:
+1. Slight upward bias is allowed, but every upward call must be justified by indicators, patterns or seasonal context.
+2. Do not invent news. Use only supplied data.
+3. Return strict JSON only.
+4. Provide low/high band around each central price forecast.
+""".strip() + "\n\n" + PREDICTION_SYSTEM_PROMPT.split("Required JSON shape:")[1]
+
+
+BEAR_SYSTEM_PROMPT = """
+You are the BEAR (Шортист) forecasting agent. You are mildly pessimistic and specialize in catching bearish patterns.
+Rules:
+1. Slight downward bias is allowed, but every downward call must be justified by indicators, patterns or seasonal context.
+2. Do not invent news. Use only supplied data.
+3. Return strict JSON only.
+4. Provide low/high band around each central price forecast.
+""".strip() + "\n\n" + PREDICTION_SYSTEM_PROMPT.split("Required JSON shape:")[1]
+
+
+ARBITER_SYSTEM_PROMPT = """
+You are the ARBITER (Весы) forecasting agent. You are a risk-aware realist who reviews the Bull and Bear forecasts.
+Rules:
+1. You receive the Bull and Bear JSON outputs in the context. You must explicitly reference their risks in your rationale.
+2. Produce your own neutral-to-cautious forecast with confidence adjusted for disagreement between Bull and Bear.
+3. Do not simply average; form an independent view based on indicators and pattern evidence.
+4. Return strict JSON only.
+5. Provide low/high band around each central price forecast.
+""".strip() + "\n\n" + PREDICTION_SYSTEM_PROMPT.split("Required JSON shape:")[1]
+
+
+STEP_MINUTES_MAP = {
+    "1min": 1,
+    "15min": 15,
+    "60min": 60,
+    "1hour": 60,
+    "4hour": 240,
+    "12hour": 720,
+    "1day": 1440,
+}
 
 
 @dataclass(frozen=True)
@@ -75,11 +120,14 @@ class RuntimeModelCandidate:
 
 @dataclass(frozen=True)
 class PredictionPoint:
-    hour: int
+    step_index: int
     predicted_price: float
     predicted_change_pct: float
     confidence: float | None
     rationale: str
+    step_minutes: int = 60  # default 1h
+    predicted_low: float | None = None
+    predicted_high: float | None = None
 
 
 @dataclass
@@ -92,6 +140,7 @@ class ModelPredictionResult:
     summary: str = ""
     error_message: str | None = None
     points: list[PredictionPoint] = field(default_factory=list)
+    agent_role: str | None = None
 
 
 MODEL_ORDER = ["analyst", "premium", "minimax"]
@@ -207,7 +256,7 @@ def _extract_json_payload(raw_text: str) -> dict[str, Any] | list[Any]:
     raise ValueError("Model response does not contain a JSON object or array")
 
 
-def parse_prediction_payload(raw_text: str, horizon_hours: int, base_price: float) -> tuple[str, list[PredictionPoint]]:
+def parse_prediction_payload(raw_text: str, horizon_steps: int, base_price: float, step_minutes: int = 60) -> tuple[str, list[PredictionPoint]]:
     payload = _extract_json_payload(raw_text)
     if isinstance(payload, list):
         summary = ""
@@ -219,28 +268,28 @@ def parse_prediction_payload(raw_text: str, horizon_hours: int, base_price: floa
     if not isinstance(raw_points, list):
         raise ValueError("Prediction payload does not contain a points array")
 
-    required_hours = set(range(1, horizon_hours + 1))
+    required_steps = set(range(1, horizon_steps + 1))
     normalized_points: dict[int, PredictionPoint] = {}
 
     for item in raw_points:
         if not isinstance(item, dict):
             raise ValueError("Prediction point is not an object")
 
-        hour_value = item.get("hour", item.get("forecast_hour", item.get("step")))
-        if hour_value is None:
-            raise ValueError("Prediction point is missing hour")
+        step_value = item.get("step", item.get("hour", item.get("forecast_hour", item.get("step_index"))))
+        if step_value is None:
+            raise ValueError("Prediction point is missing step")
 
-        hour = int(hour_value)
-        if hour not in required_hours:
-            raise ValueError(f"Prediction hour {hour} is outside requested horizon")
-        if hour in normalized_points:
-            raise ValueError(f"Prediction hour {hour} is duplicated")
+        step = int(step_value)
+        if step not in required_steps:
+            raise ValueError(f"Prediction step {step} is outside requested horizon")
+        if step in normalized_points:
+            raise ValueError(f"Prediction step {step} is duplicated")
 
         predicted_price = _coerce_float(item.get("price", item.get("predicted_price")))
         predicted_change_pct = _coerce_float(item.get("change_pct", item.get("changePercent", item.get("predicted_change_pct"))))
 
         if predicted_price is None and predicted_change_pct is None:
-            raise ValueError(f"Prediction hour {hour} is missing both price and change_pct")
+            raise ValueError(f"Prediction step {step} is missing both price and change_pct")
 
         if predicted_price is None:
             predicted_price = base_price * (1.0 + (predicted_change_pct or 0.0) / 100.0)
@@ -248,26 +297,35 @@ def parse_prediction_payload(raw_text: str, horizon_hours: int, base_price: floa
             predicted_change_pct = ((predicted_price - base_price) / base_price * 100.0) if base_price else 0.0
 
         if predicted_price <= 0:
-            raise ValueError(f"Prediction hour {hour} has non-positive price")
+            raise ValueError(f"Prediction step {step} has non-positive price")
 
         confidence = _coerce_float(item.get("confidence"))
         if confidence is not None:
             confidence = max(0.0, min(100.0, confidence))
 
+        predicted_low = _coerce_float(item.get("low", item.get("predicted_low")))
+        predicted_high = _coerce_float(item.get("high", item.get("predicted_high")))
+        if predicted_low is not None and predicted_high is not None:
+            predicted_low = min(predicted_low, predicted_high)
+            predicted_high = max(predicted_low, predicted_high)
+
         rationale = str(item.get("rationale") or item.get("reason") or item.get("note") or "").strip()
-        normalized_points[hour] = PredictionPoint(
-            hour=hour,
+        normalized_points[step] = PredictionPoint(
+            step_index=step,
             predicted_price=round(predicted_price, 8),
             predicted_change_pct=round(predicted_change_pct, 4),
             confidence=round(confidence, 2) if confidence is not None else None,
             rationale=rationale[:400],
+            step_minutes=step_minutes,
+            predicted_low=round(predicted_low, 8) if predicted_low is not None else None,
+            predicted_high=round(predicted_high, 8) if predicted_high is not None else None,
         )
 
-    if set(normalized_points) != required_hours:
-        missing = sorted(required_hours - set(normalized_points))
-        raise ValueError(f"Prediction payload is missing hour(s): {missing}")
+    if set(normalized_points) != required_steps:
+        missing = sorted(required_steps - set(normalized_points))
+        raise ValueError(f"Prediction payload is missing step(s): {missing}")
 
-    ordered_points = [normalized_points[hour] for hour in sorted(normalized_points)]
+    ordered_points = [normalized_points[step] for step in sorted(normalized_points)]
     if not summary:
         fallback_parts = [point.rationale for point in ordered_points if point.rationale][:2]
         summary = " ".join(fallback_parts)[:500]
@@ -456,10 +514,34 @@ def _build_client(candidate: RuntimeModelCandidate, strict_nvapi: bool = False) 
     return _clients[candidate.cache_key]
 
 
+def _build_prediction_messages(
+    context_payload: dict[str, Any],
+    system_prompt: str | None = None,
+    peer_outputs: list[dict[str, Any]] | None = None,
+) -> list[dict[str, str]]:
+    prompt = system_prompt or PREDICTION_SYSTEM_PROMPT
+    user_text = (
+        "Build a crypto forecast using this exact context.\n"
+        "Return strict JSON matching the required schema.\n\n"
+        f"{json.dumps(context_payload, ensure_ascii=False, indent=2)}"
+    )
+    if peer_outputs:
+        user_text += (
+            "\n\nPeer forecasts for your review (ARBITER role):\n"
+            f"{json.dumps(peer_outputs, ensure_ascii=False, indent=2)}"
+        )
+    return [
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": user_text},
+    ]
+
+
 async def _ollama_chat(
     candidate: RuntimeModelCandidate,
     config: PredictionModelConfig,
     context_payload: dict[str, Any],
+    system_prompt: str | None = None,
+    peer_outputs: list[dict[str, Any]] | None = None,
 ) -> str:
     """Call Ollama Cloud native /api/chat endpoint and return assistant content."""
     import httpx
@@ -473,7 +555,7 @@ async def _ollama_chat(
 
     payload = {
         "model": candidate.model_id,
-        "messages": _build_prediction_messages(context_payload),
+        "messages": _build_prediction_messages(context_payload, system_prompt, peer_outputs),
         "stream": False,
         "options": {
             "temperature": config.temperature,
@@ -504,18 +586,14 @@ async def _ollama_chat(
     return content
 
 
-def _build_prediction_messages(context_payload: dict[str, Any]) -> list[dict[str, str]]:
-    return [
-        {"role": "system", "content": PREDICTION_SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": (
-                "Build an hourly crypto forecast using this exact context.\n"
-                "Return strict JSON matching the required schema.\n\n"
-                f"{json.dumps(context_payload, ensure_ascii=False, indent=2)}"
-            ),
-        },
-    ]
+def _role_system_prompt(role: str | None) -> str | None:
+    if role == "bull":
+        return BULL_SYSTEM_PROMPT
+    if role == "bear":
+        return BEAR_SYSTEM_PROMPT
+    if role == "arbiter":
+        return ARBITER_SYSTEM_PROMPT
+    return None
 
 
 def _attempt_schedule(config: PredictionModelConfig) -> tuple[float, ...]:
@@ -524,7 +602,12 @@ def _attempt_schedule(config: PredictionModelConfig) -> tuple[float, ...]:
     return (0.0, *RETRY_BACKOFF_SECONDS)
 
 
-async def generate_model_prediction(config: PredictionModelConfig, context_payload: dict[str, Any]) -> ModelPredictionResult:
+async def generate_model_prediction(
+    config: PredictionModelConfig,
+    context_payload: dict[str, Any],
+    role: str | None = None,
+    peer_outputs: list[dict[str, Any]] | None = None,
+) -> ModelPredictionResult:
     runtime_candidates = _build_runtime_candidates(config)
     strict_nvapi = False  # Ollama-only now, no NVIDIA NIM strict check
     chain_switch_enabled = config.key in {"worker", "analyst", "premium", "minimax"}
@@ -545,6 +628,9 @@ async def generate_model_prediction(config: PredictionModelConfig, context_paylo
 
     last_error: Exception | None = None
     last_model_id = runtime_candidates[0].model_id if runtime_candidates else config.model_id
+    system_prompt = _role_system_prompt(role)
+    horizon_steps = int(context_payload.get("horizon_steps", context_payload.get("horizon_hours", 4)))
+    step_minutes = int(context_payload.get("step_minutes", 60))
 
     for candidate in runtime_candidates:
         if not _candidate_is_available(candidate, strict_nvapi=strict_nvapi):
@@ -557,12 +643,13 @@ async def generate_model_prediction(config: PredictionModelConfig, context_paylo
 
             try:
                 last_model_id = candidate.model_id
-                content = await _ollama_chat(candidate, config, context_payload)
+                content = await _ollama_chat(candidate, config, context_payload, system_prompt, peer_outputs)
 
                 summary, points = parse_prediction_payload(
                     raw_text=content,
-                    horizon_hours=int(context_payload["horizon_hours"]),
+                    horizon_steps=horizon_steps,
                     base_price=float(context_payload["base_price"]),
+                    step_minutes=step_minutes,
                 )
                 return ModelPredictionResult(
                     key=config.key,
@@ -572,6 +659,7 @@ async def generate_model_prediction(config: PredictionModelConfig, context_paylo
                     status="completed",
                     summary=summary,
                     points=points,
+                    agent_role=role,
                 )
             except Exception as exc:
                 last_error = exc
@@ -622,6 +710,7 @@ async def generate_prediction_bundle(
     context_payload: dict[str, Any],
     model_keys: list[str] | tuple[str, ...] | None = None,
 ) -> list[ModelPredictionResult]:
+    """Legacy bundle: runs analyst/premium/minimax sequentially without roles."""
     results: list[ModelPredictionResult] = []
     previous_provider_group: str | None = None
     active_keys = list(model_keys or MODEL_ORDER)
@@ -638,3 +727,51 @@ async def generate_prediction_bundle(
         previous_provider_group = provider_group
 
     return results
+
+
+async def generate_role_prediction_bundle(
+    context_payload: dict[str, Any],
+) -> dict[str, ModelPredictionResult]:
+    """Three-agent role bundle: bull, bear, arbiter.
+
+    Maps existing model chain:
+      - analyst -> BULL
+      - premium -> BEAR
+      - minimax -> ARBITER (receives bull+bear JSON outputs)
+    """
+    role_map = [
+        ("analyst", "bull"),
+        ("premium", "bear"),
+        ("minimax", "arbiter"),
+    ]
+    role_results: dict[str, ModelPredictionResult] = {}
+    peer_outputs: list[dict[str, Any]] = []
+
+    for key, role in role_map:
+        config = MODEL_CONFIGS.get(key)
+        if not config:
+            continue
+        # small cooldown between roles
+        if role != "bull":
+            await asyncio.sleep(PROVIDER_COOLDOWN_SECONDS.get(_provider_group(config), 1.0))
+        result = await generate_model_prediction(config, context_payload, role=role, peer_outputs=peer_outputs if role == "arbiter" else None)
+        role_results[role] = result
+        if result.status == "completed":
+            peer_outputs.append({
+                "role": role,
+                "model": result.model_id,
+                "summary": result.summary,
+                "points": [
+                    {
+                        "step": p.step_index,
+                        "price": p.predicted_price,
+                        "change_pct": p.predicted_change_pct,
+                        "confidence": p.confidence,
+                        "low": p.predicted_low,
+                        "high": p.predicted_high,
+                    }
+                    for p in result.points
+                ],
+            })
+
+    return role_results

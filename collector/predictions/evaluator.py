@@ -1,14 +1,18 @@
 """
-Performance Evaluator - evaluates sim position series quality.
-Metrics: winrate, avg_pnl, max_drawdown, liquidation_rate.
+Forecast evaluator - checks due forecast points against actual HTX prices,
+saves accuracy metrics to forecast_points and self-evaluation reports to forecast_reports.
 """
 from __future__ import annotations
 
-import asyncpg
+import asyncio
+import json
 import logging
 import os
-import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import asyncpg
+import httpx
 
 log = logging.getLogger(__name__)
 
@@ -20,89 +24,212 @@ async def _get_pool():
     return await asyncpg.create_pool(dsn=db_url)
 
 
-async def evaluate_sim_series(user_id: int | None = None, min_positions: int = 5) -> dict | None:
-    """
-    Evaluate a series of closed sim positions.
-    Returns: {"run_id", "total", "winrate", "avg_pnl", "max_drawdown", "liquidation_rate", "details"}
-    """
-    pool = await _get_pool()
-    if not pool:
-        return None
+def _normalize_symbol(symbol: str) -> str:
+    s = symbol.strip().lower()
+    if s.endswith("usdt") and len(s) > 4:
+        return s[:-4] + "-usdt"
+    return s
 
-    async with pool.acquire() as conn:
-        if user_id:
-            rows = await conn.fetch(
-                "SELECT * FROM sim_positions WHERE user_id = $1 AND status IN ('closed','liquidated') ORDER BY closed_at DESC LIMIT 100",
-                user_id,
-            )
-        else:
-            rows = await conn.fetch(
-                "SELECT * FROM sim_positions WHERE status IN ('closed','liquidated') ORDER BY closed_at DESC LIMIT 100"
-            )
 
-    if len(rows) < min_positions:
-        return None
-
-    total = len(rows)
-    wins = 0
-    pnl_list = []
-    liquidations = 0
-    peak = 0.0
-    max_dd = 0.0
-
-    cumulative = 0.0
-    for r in rows:
-        pnl = float(r["realized_pnl"] or 0)
-        cumulative += pnl
-        if cumulative > peak:
-            peak = cumulative
-        dd = peak - cumulative
-        if dd > max_dd:
-            max_dd = dd
-
-        pnl_list.append(pnl)
-        if pnl > 0:
-            wins += 1
-        if r["status"] == "liquidated" or r["close_reason"] == "liquidation":
-            liquidations += 1
-
-    winrate = (wins / total * 100) if total > 0 else 0
-    avg_pnl = sum(pnl_list) / total if total > 0 else 0
-    liq_rate = (liquidations / total * 100) if total > 0 else 0
-
-    run_id = uuid.uuid4().hex[:16]
-    details = {
-        "wins": wins, "losses": total - wins, "liquidations": liquidations,
-        "best_pnl": max(pnl_list) if pnl_list else 0,
-        "worst_pnl": min(pnl_list) if pnl_list else 0,
-    }
-
-    # Save evaluation to DB
-    from storage.postgres_client import save_sim_evaluation
+async def _fetch_htx_kline(symbol: str, period: str = "60min", size: int = 1) -> list[dict[str, Any]]:
+    """Fetch latest kline(s) from HTX for a symbol/period."""
+    normalized = _normalize_symbol(symbol)
+    url = "https://api.huobi.pro/market/history/kline"
+    params = {"period": period, "size": size, "symbol": normalized}
     try:
-        await save_sim_evaluation(run_id, total, winrate, avg_pnl, max_dd, liq_rate, details)
-    except Exception:
-        pass  # collector may not have chatbot's postgres_client
-
-    log.info("Sim evaluation %s: total=%d winrate=%.1f%% avg_pnl=%.4f max_dd=%.4f liq=%.1f%%",
-             run_id, total, winrate, avg_pnl, max_dd, liq_rate)
-
-    return {
-        "run_id": run_id,
-        "total": total,
-        "winrate": round(winrate, 2),
-        "avg_pnl": round(avg_pnl, 4),
-        "max_drawdown": round(max_dd, 4),
-        "liquidation_rate": round(liq_rate, 2),
-        "details": details,
-    }
+        async with httpx.AsyncClient(timeout=20.0) as hc:
+            resp = await hc.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("status") != "ok":
+                return []
+            out = []
+            for item in data.get("data", []):
+                out.append({
+                    "time": item["id"],
+                    "open": float(item["open"]),
+                    "high": float(item["high"]),
+                    "low": float(item["low"]),
+                    "close": float(item["close"]),
+                    "volume": float(item.get("vol", 0)),
+                })
+            return list(reversed(out))
+    except Exception as exc:
+        log.warning("HTX kline fetch failed for %s %s: %s", symbol, period, exc)
+        return []
 
 
 async def evaluate_due_forecasts():
-    """Evaluate forecasts that are due (horizon reached). Stub for collector scheduler."""
-    log.debug("evaluate_due_forecasts: no-op stub (predictions handled by chatbot)")
+    """Find forecast points whose target_time has passed and evaluate them."""
+    pool = await _get_pool()
+    if not pool:
+        log.warning("evaluate_due_forecasts: no DB pool")
+        return
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                fp.id AS point_id,
+                fp.request_id,
+                fp.model_run_id,
+                fp.step_index,
+                fp.forecast_hour,
+                fp.target_time,
+                fp.predicted_price,
+                fp.predicted_change_pct,
+                fp.predicted_low,
+                fp.predicted_high,
+                fp.confidence,
+                fp.rationale,
+                fr.symbol,
+                fr.base_price,
+                fr.base_timeframe
+            FROM forecast_points fp
+            JOIN forecast_requests fr ON fr.id = fp.request_id
+            WHERE fp.evaluated_at IS NULL
+              AND fp.target_time <= NOW() AT TIME ZONE 'UTC'
+            ORDER BY fp.target_time
+            LIMIT 200
+            """
+        )
+
+    if not rows:
+        return
+
+    # Group by symbol/period to batch HTX calls
+    groups: dict[tuple[str, str], list[asyncpg.Record]] = {}
+    for row in rows:
+        key = (row["symbol"], row["base_timeframe"] or "60min")
+        groups.setdefault(key, []).append(row)
+
+    now = datetime.now(timezone.utc)
+    for (symbol, period), group_rows in groups.items():
+        try:
+            candles = await _fetch_htx_kline(symbol, period, size=10)
+        except Exception as exc:
+            log.warning("evaluate_due_forecasts: skip %s %s due to fetch error: %s", symbol, period, exc)
+            continue
+
+        if not candles:
+            continue
+
+        # map candle time -> close
+        close_by_time: dict[int, float] = {c["time"]: c["close"] for c in candles}
+
+        for row in group_rows:
+            target_ts = int(row["target_time"].replace(tzinfo=timezone.utc).timestamp()) if row["target_time"] else 0
+            actual_close = close_by_time.get(target_ts)
+            if actual_close is None:
+                # try nearest older candle
+                for c in candles:
+                    if c["time"] <= target_ts:
+                        actual_close = c["close"]
+                        break
+            if actual_close is None:
+                continue
+
+            predicted = float(row["predicted_price"])
+            base_price = float(row["base_price"]) if row["base_price"] else predicted
+            actual_change_pct = ((actual_close - base_price) / base_price * 100.0) if base_price else 0.0
+            price_error_pct = abs(actual_close - predicted) / actual_close * 100.0 if actual_close else 0.0
+            change_error_pct = abs(actual_change_pct - float(row["predicted_change_pct"]))
+            direction_match = (actual_change_pct >= 0) == (float(row["predicted_change_pct"]) >= 0)
+
+            low = row["predicted_low"]
+            high = row["predicted_high"]
+            in_range = None
+            if low is not None and high is not None:
+                in_range = float(low) <= actual_close <= float(high)
+
+            # accuracy score 0..100
+            score = max(0.0, 100.0 - price_error_pct)
+            if direction_match:
+                score += 10.0
+            if in_range:
+                score += 10.0
+            score = min(100.0, score)
+
+            verdict_parts = []
+            if direction_match:
+                verdict_parts.append("direction_match")
+            if in_range:
+                verdict_parts.append("in_range")
+            if score >= 90:
+                verdict_parts.append("excellent")
+            elif score >= 70:
+                verdict_parts.append("good")
+            elif score >= 50:
+                verdict_parts.append("fair")
+            else:
+                verdict_parts.append("poor")
+            verdict = " ".join(verdict_parts)
+
+            try:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE forecast_points
+                        SET actual_price = $1,
+                            actual_change_pct = $2,
+                            price_error_pct = $3,
+                            change_error_pct = $4,
+                            accuracy_score = $5,
+                            direction_match = $6,
+                            in_range = $7,
+                            verdict = $8,
+                            evaluated_at = $9
+                        WHERE id = $10
+                        """,
+                        actual_close,
+                        actual_change_pct,
+                        price_error_pct,
+                        change_error_pct,
+                        round(score, 2),
+                        direction_match,
+                        in_range,
+                        verdict,
+                        now,
+                        row["point_id"],
+                    )
+            except Exception as exc:
+                log.warning("Failed to update forecast point %s: %s", row["point_id"], exc)
+
+    log.info("evaluate_due_forecasts: evaluated %s due points", len(rows))
 
 
 async def refresh_historical_forecast_scores():
-    """Refresh historical forecast scores. Stub for collector scheduler."""
-    log.debug("refresh_historical_forecast_scores: no-op stub")
+    """Refresh aggregate scores per role/model. Lightweight rollup."""
+    pool = await _get_pool()
+    if not pool:
+        return
+
+    async with pool.acquire() as conn:
+        # Simple per-role accuracy summary over last 7 days
+        rows = await conn.fetch(
+            """
+            SELECT
+                fmr.agent_role,
+                COUNT(*) AS total,
+                AVG(fp.accuracy_score) AS avg_score,
+                AVG(fp.price_error_pct) AS avg_error,
+                SUM(CASE WHEN fp.direction_match THEN 1 ELSE 0 END) AS direction_hits
+            FROM forecast_points fp
+            JOIN forecast_model_runs fmr ON fmr.id = fp.model_run_id
+            WHERE fp.evaluated_at >= NOW() AT TIME ZONE 'UTC' - INTERVAL '7 days'
+              AND fp.accuracy_score IS NOT NULL
+            GROUP BY fmr.agent_role
+            """
+        )
+
+    if rows:
+        log.info("Historical forecast scores (7d): %s", [dict(r) for r in rows])
+
+
+async def regenerate_hourly_correction():
+    """Optional: re-run agent forecast for active requests every hour.
+
+    Not implemented in Phase 1; placeholder for Phase 2 when role-based
+    re-correction is wired end-to-end.
+    """
+    log.debug("regenerate_hourly_correction: not enabled")

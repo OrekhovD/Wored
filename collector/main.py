@@ -52,6 +52,15 @@ async def main():
     get_redis()
     await refresh_historical_forecast_scores()
 
+    # Ensure webui forecast tables exist on collector side
+    try:
+        from webui.app import PREDICTION_TABLES_SQL
+        async with pool.acquire() as conn:
+            await conn.execute(PREDICTION_TABLES_SQL)
+        log.info("Forecast tables ensured from collector.")
+    except Exception as exc:
+        log.warning("Forecast tables init (collector): %s", exc)
+
     # Daily Pipeline v2 — ensure tables exist
     try:
         import importlib
@@ -66,6 +75,7 @@ async def main():
     scheduler.add_job(record_ai_journal, "interval", minutes=15, id="record_ai_journal")
     scheduler.add_job(check_alerts, "interval", minutes=5, id="check_alerts")
     scheduler.add_job(evaluate_due_forecasts, "interval", minutes=5, id="evaluate_forecasts")
+    scheduler.add_job(refresh_historical_forecast_scores, "interval", hours=1, id="refresh_historical_scores")
     scheduler.add_job(check_sim_positions, "interval", minutes=2, id="check_sim_positions")
 
     # Daily Pipeline v2 jobs (ТЗ раздел 11)

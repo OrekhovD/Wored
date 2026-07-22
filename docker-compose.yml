@@ -36,8 +36,9 @@ services:
     volumes:
       - ./collector:/app
       - ./chatbot:/chatbot:ro
+      - ./webui:/webui:ro
     environment:
-      - PYTHONPATH=/app:/chatbot
+      - PYTHONPATH=/app:/chatbot:/webui
     command: python main.py
     restart: unless-stopped
 

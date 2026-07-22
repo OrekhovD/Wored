@@ -1281,6 +1281,51 @@ select {
   padding: 8px 2px 4px;
 }
 
+.forecast-role-tabs {
+  display: flex;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  margin-top: 8px;
+}
+
+.role-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: 8px;
+}
+.role-pill-bull { background: rgba(31, 214, 163, 0.15); color: #1fd6a3; }
+.role-pill-bear { background: rgba(255, 93, 115, 0.15); color: #ff5d73; }
+.role-pill-arbiter { background: rgba(255, 255, 255, 0.12); color: rgba(255,255,255,0.9); }
+.role-pill-neutral { background: rgba(167, 139, 250, 0.15); color: #a78bfa; }
+.model-name-role { display: flex; align-items: center; gap: 4px; }
+
+.forecast-role-tab {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: var(--text-muted, rgba(255,255,255,0.55));
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+
+.forecast-role-tab.is-active,
+.forecast-role-tab:hover {
+  background: rgba(31, 214, 163, 0.15);
+  border-color: var(--primary, #1fd6a3);
+  color: var(--primary, #1fd6a3);
+}
+
+.forecast-legend-item.is-hidden { display: none; }
+
 .forecast-legend-item {
   display: flex;
   align-items: center;

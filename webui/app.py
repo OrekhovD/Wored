@@ -22,7 +22,18 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from prediction_engine import MODEL_CONFIGS, generate_model_prediction, generate_prediction_bundle, list_prediction_models
+from prediction_engine import (
+    MODEL_CONFIGS,
+    generate_model_prediction,
+    generate_prediction_bundle,
+    generate_role_prediction_bundle,
+    list_prediction_models,
+)
+
+try:
+    from pattern_matcher import PatternMatcher
+except Exception as _pattern_err:
+    PatternMatcher = None  # type: ignore
 
 log = logging.getLogger("webui")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -36,7 +47,7 @@ DEFAULT_PERIOD = "60min"
 DEFAULT_SIZE = 240
 MAX_KLINE_SIZE = 500
 ALLOWED_PERIODS = {"1min", "5min", "15min", "30min", "60min", "4hour", "1day"}
-ALLOWED_PREDICTION_HORIZONS = {1, 2, 3, 4, 8, 16, 24}
+ALLOWED_PREDICTION_HORIZONS = set(range(1, 49))
 DEFAULT_PAGE_SIZE = 25
 SYNC_PREDICTION_MODEL_KEYS = ("analyst", "premium")
 CHART_NOTICE = "TradingView Lightweight Charts. Copyright (c) 2025 TradingView, Inc."
@@ -45,6 +56,8 @@ CREATE TABLE IF NOT EXISTS forecast_requests (
     id SERIAL PRIMARY KEY,
     symbol VARCHAR(15) NOT NULL,
     horizon_hours INT NOT NULL,
+    base_timeframe VARCHAR(10) NOT NULL DEFAULT '60min',
+    depth INT NOT NULL DEFAULT 3,
     base_price DECIMAL(20, 8) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'active',
     source VARCHAR(20) NOT NULL DEFAULT 'webui',
@@ -62,6 +75,7 @@ CREATE TABLE IF NOT EXISTS forecast_model_runs (
     model_key VARCHAR(32) NOT NULL,
     model_name VARCHAR(128) NOT NULL,
     model_id VARCHAR(128) NOT NULL,
+    agent_role VARCHAR(20) NOT NULL DEFAULT 'neutral',
     status VARCHAR(20) NOT NULL DEFAULT 'completed',
     summary TEXT,
     error_message TEXT,
@@ -69,6 +83,7 @@ CREATE TABLE IF NOT EXISTS forecast_model_runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_forecast_model_runs_request_id ON forecast_model_runs (request_id);
+CREATE INDEX IF NOT EXISTS idx_forecast_model_runs_role ON forecast_model_runs (request_id, agent_role);
 
 CREATE TABLE IF NOT EXISTS forecast_points (
     id SERIAL PRIMARY KEY,
@@ -94,7 +109,37 @@ CREATE TABLE IF NOT EXISTS forecast_points (
 
 CREATE INDEX IF NOT EXISTS idx_forecast_points_target_time ON forecast_points (target_time, evaluated_at);
 CREATE INDEX IF NOT EXISTS idx_forecast_points_request_id ON forecast_points (request_id, forecast_hour);
-ALTER TABLE forecast_points ADD COLUMN IF NOT EXISTS failure_score DECIMAL(6, 2);
+
+-- Additive migrations for Phase 2
+ALTER TABLE forecast_requests ADD COLUMN IF NOT EXISTS base_timeframe VARCHAR(10) DEFAULT '60min';
+ALTER TABLE forecast_requests ADD COLUMN IF NOT EXISTS depth INT DEFAULT 3;
+ALTER TABLE forecast_model_runs ADD COLUMN IF NOT EXISTS agent_role VARCHAR(20) DEFAULT 'neutral';
+ALTER TABLE forecast_points ADD COLUMN IF NOT EXISTS step_index INT DEFAULT 0;
+ALTER TABLE forecast_points ADD COLUMN IF NOT EXISTS predicted_low DECIMAL(20, 8);
+ALTER TABLE forecast_points ADD COLUMN IF NOT EXISTS predicted_high DECIMAL(20, 8);
+ALTER TABLE forecast_points ADD COLUMN IF NOT EXISTS in_range BOOLEAN DEFAULT NULL;
+ALTER TABLE forecast_points ADD COLUMN IF NOT EXISTS pattern_match_score DECIMAL(5,2) DEFAULT NULL;
+
+CREATE TABLE IF NOT EXISTS forecast_reports (
+    id SERIAL PRIMARY KEY,
+    request_id INT NOT NULL REFERENCES forecast_requests(id) ON DELETE CASCADE,
+    model_run_id INT NOT NULL REFERENCES forecast_model_runs(id) ON DELETE CASCADE,
+    agent_role VARCHAR(20) NOT NULL DEFAULT 'neutral',
+    evaluated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    step_index INT NOT NULL,
+    target_time TIMESTAMP NOT NULL,
+    factual_price DECIMAL(20, 8),
+    error_pct DECIMAL(10, 4),
+    in_range BOOLEAN,
+    confidence_before DECIMAL(5, 2),
+    confidence_after DECIMAL(5, 2),
+    reason_text TEXT,
+    model_response TEXT,
+    UNIQUE (model_run_id, step_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_forecast_reports_request_id ON forecast_reports (request_id);
+CREATE INDEX IF NOT EXISTS idx_forecast_reports_evaluated ON forecast_reports (evaluated_at);
 """
 
 
@@ -523,30 +568,58 @@ async def fetch_recent_symbol_journal(request: Request, symbol: str, limit: int 
     return items
 
 
-async def build_prediction_context(request: Request, symbol: str, horizon_hours: int) -> dict[str, Any]:
+async def build_prediction_context(
+    request: Request,
+    symbol: str,
+    horizon_steps: int,
+    base_timeframe: str = "60min",
+    depth: int = 3,
+) -> dict[str, Any]:
     normalized_symbol = ensure_prediction_symbol(symbol)
+    normalized_timeframe = normalize_period(base_timeframe)
+    step_minutes = {"1min": 1, "5min": 5, "15min": 15, "30min": 30, "60min": 60, "4hour": 240, "1day": 1440}.get(normalized_timeframe, 60)
+
     snapshot = await get_symbol_snapshot(request, normalized_symbol)
     if snapshot["price"] <= 0:
         raise HTTPException(status_code=503, detail=f"Current price for {normalized_symbol} is unavailable")
 
-    hourly_candles = await fetch_klines(request, normalized_symbol, "60min", 96)
-    if len(hourly_candles) < 30:
-        raise HTTPException(status_code=503, detail=f"Not enough hourly candles for {normalized_symbol}")
+    # One month of history for pattern matching
+    month_size = min(720 * 2, MAX_KLINE_SIZE) if step_minutes >= 60 else MAX_KLINE_SIZE
+    history_candles = await fetch_klines(request, normalized_symbol, normalized_timeframe, month_size)
+    if len(history_candles) < 30:
+        raise HTTPException(status_code=503, detail=f"Not enough candles for {normalized_symbol}")
 
-    rsi_points = compute_rsi_series(hourly_candles, 14)
-    macd_payload = compute_macd_payload(hourly_candles)
-    sma20 = compute_sma_series(hourly_candles, 20)
-    sma50 = compute_sma_series(hourly_candles, 50)
+    # Recent window for context (36 steps)
+    recent_candles = history_candles[-36:]
+
+    rsi_points = compute_rsi_series(recent_candles, 14)
+    macd_payload = compute_macd_payload(recent_candles)
+    sma20 = compute_sma_series(recent_candles, 20)
+    sma50 = compute_sma_series(recent_candles, 50)
     journal_entries = await fetch_recent_symbol_journal(request, normalized_symbol, limit=3)
 
-    last_24 = hourly_candles[-24:] if len(hourly_candles) >= 24 else hourly_candles
-    price_values = [item["close"] for item in last_24]
+    # Seasonal pattern matching
+    pattern_matches: list[dict[str, Any]] = []
+    try:
+        from pattern_matcher import find_seasonal_patterns, pattern_matches_to_context
+
+        current_window = history_candles[-12:]
+        matches = find_seasonal_patterns(history_candles, current_window, normalized_timeframe, depth=depth)
+        pattern_matches = pattern_matches_to_context(matches, include_candles=False)
+    except Exception as exc:
+        log.warning("Pattern matching failed for %s: %s", normalized_symbol, exc)
+
+    price_values = [item["close"] for item in recent_candles]
     latest_journal = journal_entries[0] if journal_entries else None
     latest_journal_symbol = latest_journal["symbols"][0] if latest_journal and latest_journal["symbols"] else {}
 
     return {
         "symbol": normalized_symbol.upper(),
-        "horizon_hours": horizon_hours,
+        "base_timeframe": normalized_timeframe,
+        "step_minutes": step_minutes,
+        "horizon_steps": horizon_steps,
+        "horizon_hours": int((horizon_steps * step_minutes) / 60) or 1,
+        "depth": depth,
         "base_price": round(snapshot["price"], 8),
         "requested_at": serialize_dt(datetime.now(timezone.utc)),
         "spot_snapshot": {
@@ -556,12 +629,11 @@ async def build_prediction_context(request: Request, symbol: str, horizon_hours:
             "source": snapshot["source"],
         },
         "market_features": {
-            "return_1h_pct": compute_return_pct(hourly_candles, 1),
-            "return_4h_pct": compute_return_pct(hourly_candles, 4),
-            "return_12h_pct": compute_return_pct(hourly_candles, 12),
-            "return_24h_pct": compute_return_pct(hourly_candles, 24),
-            "range_24h_low": round(min(price_values), 8) if price_values else None,
-            "range_24h_high": round(max(price_values), 8) if price_values else None,
+            "return_1step_pct": compute_return_pct(recent_candles, 1),
+            "return_4step_pct": compute_return_pct(recent_candles, 4),
+            "return_12step_pct": compute_return_pct(recent_candles, 12),
+            "range_steps_low": round(min(price_values), 8) if price_values else None,
+            "range_steps_high": round(max(price_values), 8) if price_values else None,
             "sma20": sma20[-1]["value"] if sma20 else None,
             "sma50": sma50[-1]["value"] if sma50 else None,
             "rsi14": rsi_points[-1]["value"] if rsi_points else None,
@@ -569,7 +641,8 @@ async def build_prediction_context(request: Request, symbol: str, horizon_hours:
             "macd_signal": macd_payload["signal"][-1]["value"] if macd_payload["signal"] else None,
             "macd_histogram": macd_payload["histogram"][-1]["value"] if macd_payload["histogram"] else None,
         },
-        "recent_hourly_candles": compact_candle_context(hourly_candles, limit=36),
+        "seasonal_patterns": pattern_matches,
+        "recent_candles": compact_candle_context(recent_candles, limit=36),
         "journal_context": {
             "latest_market_context": latest_journal["market_context"] if latest_journal else "",
             "latest_indicators": latest_journal_symbol.get("indicators", {}),
@@ -583,7 +656,7 @@ async def build_prediction_context(request: Request, symbol: str, horizon_hours:
             ],
         },
         "output_contract": {
-            "hours": list(range(1, horizon_hours + 1)),
+            "steps": list(range(1, horizon_steps + 1)),
             "change_pct_basis": "relative to base_price",
             "neutrality": "do not force directional bias without evidence",
         },
@@ -809,6 +882,8 @@ def build_prediction_request_status(request_row: asyncpg.Record) -> dict[str, An
         "id": request_row["id"],
         "symbol": request_row["symbol"],
         "horizon_hours": request_row["horizon_hours"],
+        "base_timeframe": request_row.get("base_timeframe", "60min"),
+        "depth": int(request_row.get("depth", 3) or 3),
         "base_price": float(request_row["base_price"]),
         "status": request_row["status"],
         "source": request_row["source"] or "webui",
@@ -835,39 +910,40 @@ def split_model_display_name(model_name: str) -> tuple[str, str]:
 
 
 def build_prediction_comparison_payload(
-    horizon_hours: int,
+    horizon_steps: int,
     models: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any] | None]:
     comparison_models: list[dict[str, Any]] = []
-    rows_by_hour: dict[int, dict[str, Any]] = {}
+    rows_by_step: dict[int, dict[str, Any]] = {}
 
     for model in models:
         role_name, short_name = split_model_display_name(model["model_name"])
         model["role_name"] = role_name
         model["short_name"] = short_name
-        comparison_models.append(
-            {
-                "id": model["id"],
-                "model_key": model["model_key"],
-                "model_name": model["model_name"],
-                "model_id": model["model_id"],
-                "status": model["status"],
-                "role_name": role_name,
-                "short_name": short_name,
-                "avg_accuracy": model.get("avg_accuracy"),
-                "avg_failure": (
-                    model.get("avg_failure")
-                    if model.get("avg_failure") is not None
-                    else round(100.0 - model["avg_accuracy"], 2) if model.get("avg_accuracy") is not None else None
-                ),
-                "error_message": model.get("error_message", ""),
-            }
-        )
+        comparison_models.append({
+            "id": model["id"],
+            "model_key": model["model_key"],
+            "model_name": model["model_name"],
+            "model_id": model["model_id"],
+            "agent_role": model.get("agent_role", role_name.lower() or "neutral"),
+            "status": model["status"],
+            "role_name": role_name,
+            "short_name": short_name,
+            "avg_accuracy": model.get("avg_accuracy"),
+            "avg_failure": (
+                model.get("avg_failure")
+                if model.get("avg_failure") is not None
+                else round(100.0 - model["avg_accuracy"], 2) if model.get("avg_accuracy") is not None else None
+            ),
+            "error_message": model.get("error_message", ""),
+        })
 
         for point in model["points"]:
-            row = rows_by_hour.setdefault(
-                point["forecast_hour"],
+            step = point.get("step_index", point["forecast_hour"])
+            row = rows_by_step.setdefault(
+                step,
                 {
+                    "step_index": step,
                     "forecast_hour": point["forecast_hour"],
                     "target_time": point["target_time"],
                     "target_time_display": point["target_time_display"],
@@ -879,7 +955,6 @@ def build_prediction_comparison_payload(
                 },
             )
             row["points_by_model"][model["id"]] = point
-
             if row["actual_price"] is None and point["actual_price"] is not None:
                 row["actual_price"] = point["actual_price"]
             if row["actual_change_pct"] is None and point["actual_change_pct"] is not None:
@@ -889,11 +964,12 @@ def build_prediction_comparison_payload(
                 row["evaluated_at_display"] = point["evaluated_at_display"]
 
     comparison_rows: list[dict[str, Any]] = []
-    for hour in range(1, horizon_hours + 1):
-        row = rows_by_hour.get(
-            hour,
+    for step in range(1, horizon_steps + 1):
+        row = rows_by_step.get(
+            step,
             {
-                "forecast_hour": hour,
+                "step_index": step,
+                "forecast_hour": step,
                 "target_time": None,
                 "target_time_display": None,
                 "actual_price": None,
@@ -921,42 +997,46 @@ def build_prediction_comparison_payload(
             if point is None:
                 cell_state = "failed" if model["status"] != "completed" else "pending"
 
-            model_cells.append(
-                {
-                    "model_id": model["id"],
-                    "model_name": model["model_name"],
-                    "short_name": model["short_name"],
-                    "role_name": model["role_name"],
-                    "status": model["status"],
-                    "cell_state": cell_state,
-                    "point": point,
-                    "is_best": accuracy_score is not None and best_accuracy is not None and accuracy_score == best_accuracy,
-                }
-            )
+            model_cells.append({
+                "model_id": model["id"],
+                "model_name": model["model_name"],
+                "short_name": model["short_name"],
+                "role_name": model["role_name"],
+                "status": model["status"],
+                "cell_state": cell_state,
+                "point": point,
+                "is_best": accuracy_score is not None and best_accuracy is not None and accuracy_score == best_accuracy,
+            })
 
         if best_accuracy is not None:
             for cell in model_cells:
-                point = cell["point"]
-                cell["is_best"] = point is not None and point["accuracy_score"] == best_accuracy
+                if cell["point"] is not None and cell["point"]["accuracy_score"] is not None and cell["point"]["accuracy_score"] == best_accuracy:
+                    cell["is_best"] = True
+                else:
+                    cell["is_best"] = False
 
-        comparison_rows.append(
-            {
-                "forecast_hour": hour,
-                "target_time": row["target_time"],
-                "target_time_display": row["target_time_display"],
-                "actual_price": row["actual_price"],
-                "actual_change_pct": row["actual_change_pct"],
-                "evaluated_at": row["evaluated_at"],
-                "evaluated_at_display": row["evaluated_at_display"],
-                "model_cells": model_cells,
-                "best_accuracy": best_accuracy,
-                "best_models": best_model_names,
-            }
-        )
+        comparison_rows.append({
+            "step_index": row["step_index"],
+            "forecast_hour": row["forecast_hour"],
+            "target_time": row["target_time"],
+            "target_time_display": row["target_time_display"],
+            "actual_price": row["actual_price"],
+            "actual_change_pct": row["actual_change_pct"],
+            "evaluated_at": row["evaluated_at"],
+            "evaluated_at_display": row["evaluated_at_display"],
+            "model_cells": model_cells,
+            "best_accuracy": best_accuracy,
+            "best_models": best_model_names,
+        })
 
-    ranked_models = [model for model in comparison_models if model["avg_accuracy"] is not None]
-    top_model = max(ranked_models, key=lambda item: item["avg_accuracy"]) if ranked_models else None
+    top_model: dict[str, Any] | None = None
+    for model in comparison_models:
+        if model["avg_accuracy"] is not None:
+            if top_model is None or (model["avg_accuracy"] or 0) > (top_model["avg_accuracy"] or 0):
+                top_model = model
+
     return comparison_models, comparison_rows, top_model
+
 
 
 async def fetch_prediction_requests(request: Request, limit: int = 12, offset: int = 0) -> list[dict[str, Any]]:
@@ -969,6 +1049,8 @@ async def fetch_prediction_requests(request: Request, limit: int = 12, offset: i
         fr.id,
         fr.symbol,
         fr.horizon_hours,
+        fr.base_timeframe,
+        fr.depth,
         fr.base_price,
         fr.status,
         fr.source,
@@ -1022,6 +1104,8 @@ async def fetch_prediction_request_detail(request: Request, request_id: int) -> 
         fr.id,
         fr.symbol,
         fr.horizon_hours,
+        fr.base_timeframe,
+        fr.depth,
         fr.base_price,
         fr.status,
         fr.source,
@@ -1065,14 +1149,20 @@ async def fetch_prediction_request_detail(request: Request, request_id: int) -> 
         fmr.model_key,
         fmr.model_name,
         fmr.model_id,
+        fmr.agent_role,
         fmr.status AS model_status,
         fmr.summary,
         fmr.error_message,
         fp.id AS point_id,
         fp.forecast_hour,
+        fp.step_index,
         fp.target_time,
         fp.predicted_price,
         fp.predicted_change_pct,
+        fp.predicted_low,
+        fp.predicted_high,
+        fp.in_range,
+        fp.pattern_match_score,
         fp.confidence,
         fp.rationale,
         fp.actual_price,
@@ -1107,6 +1197,7 @@ async def fetch_prediction_request_detail(request: Request, request_id: int) -> 
                 "model_key": row["model_key"],
                 "model_name": row["model_name"],
                 "model_id": row["model_id"],
+                "agent_role": row.get("agent_role", ""),
                 "status": row["model_status"],
                 "summary": row["summary"] or "",
                 "error_message": row["error_message"] or "",
@@ -1121,10 +1212,15 @@ async def fetch_prediction_request_detail(request: Request, request_id: int) -> 
         point = {
             "id": row["point_id"],
             "forecast_hour": row["forecast_hour"],
+            "step_index": row.get("step_index", row["forecast_hour"]),
             "target_time": serialize_dt(row["target_time"]),
             "target_time_display": format_ui_timestamp(row["target_time"]),
             "predicted_price": float(row["predicted_price"]),
             "predicted_change_pct": float(row["predicted_change_pct"]),
+            "predicted_low": float(row["predicted_low"]) if row.get("predicted_low") is not None else None,
+            "predicted_high": float(row["predicted_high"]) if row.get("predicted_high") is not None else None,
+            "in_range": row.get("in_range"),
+            "pattern_match_score": float(row["pattern_match_score"]) if row.get("pattern_match_score") is not None else None,
             "confidence": float(row["confidence"]) if row["confidence"] is not None else None,
             "rationale": row["rationale"] or "",
             "actual_price": float(row["actual_price"]) if row["actual_price"] is not None else None,
@@ -1151,8 +1247,9 @@ async def fetch_prediction_request_detail(request: Request, request_id: int) -> 
         model["avg_failure"] = round(100.0 - model["avg_accuracy"], 2) if model["avg_accuracy"] is not None else None
 
     detail["models"] = list(model_runs.values())
+    detail["horizon_steps"] = detail.get("horizon_hours", 1)
     comparison_models, comparison_rows, top_model = build_prediction_comparison_payload(
-        detail["horizon_hours"],
+        detail["horizon_steps"],
         detail["models"],
     )
     detail["comparison_models"] = comparison_models
@@ -1164,24 +1261,30 @@ async def fetch_prediction_request_detail(request: Request, request_id: int) -> 
 async def create_prediction_request_record(
     request: Request,
     symbol: str,
-    horizon_hours: int,
+    horizon_steps: int,
     base_price: float,
     requested_by: str,
     source: str,
     model_results: list[Any],
+    base_timeframe: str = "60min",
+    depth: int = 3,
 ) -> dict[str, Any]:
     pool = request.app.state.pg_pool
     if pool is None:
         raise HTTPException(status_code=503, detail="Postgres is unavailable")
 
+    step_minutes = {"1min": 1, "5min": 5, "15min": 15, "30min": 30, "60min": 60, "4hour": 240, "1day": 1440}.get(base_timeframe, 60)
+    horizon_hours = int((horizon_steps * step_minutes) / 60) or 1
+    created_at = datetime.now(timezone.utc)
+
     request_query = """
-    INSERT INTO forecast_requests (symbol, horizon_hours, base_price, status, source, requested_by)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO forecast_requests (symbol, horizon_hours, base_timeframe, depth, base_price, status, source, requested_by, created_at, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING id, created_at
     """
     model_query = """
-    INSERT INTO forecast_model_runs (request_id, model_key, model_name, model_id, status, summary, error_message)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    INSERT INTO forecast_model_runs (request_id, model_key, model_name, model_id, agent_role, status, summary, error_message)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING id
     """
     point_query = """
@@ -1189,13 +1292,17 @@ async def create_prediction_request_record(
         request_id,
         model_run_id,
         forecast_hour,
+        step_index,
         target_time,
         predicted_price,
         predicted_change_pct,
+        predicted_low,
+        predicted_high,
         confidence,
-        rationale
+        rationale,
+        pattern_match_score
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     """
 
     successful_models = [result for result in model_results if result.status == "completed" and result.points]
@@ -1207,21 +1314,27 @@ async def create_prediction_request_record(
                 request_query,
                 symbol,
                 horizon_hours,
+                base_timeframe,
+                depth,
                 base_price,
                 request_status,
                 source,
                 requested_by,
+                to_db_timestamp(created_at),
+                to_db_timestamp(created_at),
             )
             request_id = request_row["id"]
             created_at = to_db_timestamp(request_row["created_at"])
 
             for result in model_results:
+                agent_role = getattr(result, "agent_role", "neutral")
                 model_row = await connection.fetchrow(
                     model_query,
                     request_id,
                     result.key,
                     result.name,
                     result.model_id,
+                    agent_role,
                     result.status,
                     result.summary,
                     result.error_message,
@@ -1231,16 +1344,22 @@ async def create_prediction_request_record(
 
                 model_run_id = model_row["id"]
                 for point in result.points:
+                    step = int(getattr(point, "step_index", getattr(point, "hour", 0)))
+                    target_time = created_at + timedelta(minutes=step * step_minutes)
                     await connection.execute(
                         point_query,
                         request_id,
                         model_run_id,
-                        point.hour,
-                        to_db_timestamp(created_at + timedelta(hours=point.hour)),
+                        step,
+                        step,
+                        to_db_timestamp(target_time),
                         point.predicted_price,
                         point.predicted_change_pct,
+                        getattr(point, "predicted_low", None),
+                        getattr(point, "predicted_high", None),
                         point.confidence,
                         point.rationale,
+                        getattr(point, "pattern_match_score", None),
                     )
 
     detail = await fetch_prediction_request_detail(request, request_id=request_id)
@@ -1253,11 +1372,12 @@ async def append_prediction_model_result(
     pool: asyncpg.Pool,
     request_id: int,
     result: Any,
+    step_minutes: int = 60,
 ) -> None:
-    created_at_query = "SELECT created_at FROM forecast_requests WHERE id = $1"
+    created_at_query = "SELECT created_at, base_timeframe FROM forecast_requests WHERE id = $1"
     model_query = """
-    INSERT INTO forecast_model_runs (request_id, model_key, model_name, model_id, status, summary, error_message)
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    INSERT INTO forecast_model_runs (request_id, model_key, model_name, model_id, agent_role, status, summary, error_message)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING id
     """
     point_query = """
@@ -1265,28 +1385,36 @@ async def append_prediction_model_result(
         request_id,
         model_run_id,
         forecast_hour,
+        step_index,
         target_time,
         predicted_price,
         predicted_change_pct,
+        predicted_low,
+        predicted_high,
         confidence,
-        rationale
+        rationale,
+        pattern_match_score
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     """
 
     async with pool.acquire() as connection:
         async with connection.transaction():
-            created_at = await connection.fetchval(created_at_query, request_id)
-            if created_at is None:
+            request_row = await connection.fetchrow(created_at_query, request_id)
+            if request_row is None:
                 return
 
-            created_at_ts = to_db_timestamp(created_at)
+            base_timeframe = request_row.get("base_timeframe", "60min")
+            step_minutes = {"1min": 1, "5min": 5, "15min": 15, "30min": 30, "60min": 60, "4hour": 240, "1day": 1440}.get(base_timeframe, step_minutes)
+            created_at_ts = to_db_timestamp(request_row["created_at"])
+            agent_role = getattr(result, "agent_role", "neutral")
             model_row = await connection.fetchrow(
                 model_query,
                 request_id,
                 result.key,
                 result.name,
                 result.model_id,
+                agent_role,
                 result.status,
                 result.summary,
                 result.error_message,
@@ -1296,60 +1424,98 @@ async def append_prediction_model_result(
 
             model_run_id = model_row["id"]
             for point in result.points:
+                step = int(getattr(point, "step_index", getattr(point, "hour", 0)))
+                target_time = created_at_ts + timedelta(minutes=step * step_minutes)
                 await connection.execute(
                     point_query,
                     request_id,
                     model_run_id,
-                    point.hour,
-                    to_db_timestamp(created_at_ts + timedelta(hours=point.hour)),
+                    step,
+                    step,
+                    to_db_timestamp(target_time),
                     point.predicted_price,
                     point.predicted_change_pct,
+                    getattr(point, "predicted_low", None),
+                    getattr(point, "predicted_high", None),
                     point.confidence,
                     point.rationale,
+                    getattr(point, "pattern_match_score", None),
                 )
 
 
-async def finalize_oracle_prediction(app: FastAPI, request_id: int, context_payload: dict[str, Any]) -> None:
+async def finalize_oracle_prediction(
+    app: FastAPI,
+    request_id: int,
+    context_payload: dict[str, Any],
+    primary_results: list[Any] | None = None,
+) -> None:
     pool = getattr(app.state, "pg_pool", None)
     if pool is None:
         return
 
     try:
-        result = await generate_model_prediction(MODEL_CONFIGS["minimax"], context_payload)
+        arbiter_context = dict(context_payload)
+        if primary_results:
+            role_summaries = []
+            for result in primary_results:
+                role = getattr(result, "agent_role", "neutral")
+                direction = "long" if role == "bull" else "short" if role == "bear" else role
+                summary = result.summary or ""
+                role_summaries.append(f"[{direction}] {summary[:200]}")
+            arbiter_context["role_arguments"] = role_summaries
+            arbiter_context["arbiter_prompt"] = (
+                "You are the Arbiter (Scales). Review the bull and short arguments above. "
+                "Return a balanced, evidence-based forecast with per-step price, low, high, confidence, and a brief rationale."
+            )
+        result = await generate_model_prediction(MODEL_CONFIGS.get("minimax"), arbiter_context, role="arbiter")
         await append_prediction_model_result(pool, request_id, result)
     except Exception as exc:
-        log.warning("Background Oracle prediction failed for request %s: %s", request_id, exc)
+        log.warning("Background Oracle/Arbiter prediction failed for request %s: %s", request_id, exc)
 
 
 async def run_prediction_request(
     request: Request,
     background_tasks: BackgroundTasks,
     symbol: str,
-    horizon_hours: int,
+    horizon_steps: int,
     requested_by: str,
     source: str,
+    base_timeframe: str = "60min",
+    depth: int = 3,
 ) -> dict[str, Any]:
     normalized_symbol = ensure_prediction_symbol(symbol)
-    normalized_horizon = normalize_prediction_horizon(horizon_hours)
+    normalized_timeframe = normalize_period(base_timeframe)
+    if horizon_steps < 1 or horizon_steps > 48:
+        raise HTTPException(status_code=400, detail="horizon_steps must be between 1 and 48")
 
     try:
-        context_payload = await build_prediction_context(request, normalized_symbol, normalized_horizon)
-        results = await generate_prediction_bundle(context_payload, model_keys=SYNC_PREDICTION_MODEL_KEYS)
+        context_payload = await build_prediction_context(
+            request, normalized_symbol, horizon_steps,
+            base_timeframe=base_timeframe, depth=depth
+        )
+        # Run role bundle (bull + bear + arbiter)
+        role_bundle = await generate_role_prediction_bundle(context_payload)
+        role_results = list(role_bundle.values())
+
         detail = await create_prediction_request_record(
             request,
             symbol=normalized_symbol,
-            horizon_hours=normalized_horizon,
+            horizon_steps=horizon_steps,
             base_price=float(context_payload["base_price"]),
             requested_by=requested_by,
             source=source,
-            model_results=results,
+            model_results=role_results,
+            base_timeframe=base_timeframe,
+            depth=depth,
         )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch market context for {normalized_symbol}") from exc
 
     oracle_model = next((item for item in list_prediction_models() if item["key"] == "minimax"), None)
     if oracle_model and oracle_model["available"]:
-        background_tasks.add_task(finalize_oracle_prediction, request.app, detail["id"], context_payload)
+        background_tasks.add_task(
+            finalize_oracle_prediction, request.app, detail["id"], context_payload, primary_results=role_results
+        )
 
     return detail
 
@@ -1720,8 +1886,9 @@ async def prediction_detail_page(request: Request, request_id: int, page: int = 
     try:
         symbol = selected_request.get("symbol", "btcusdt")
         horizon = selected_request.get("horizon_hours", 4)
+        base_timeframe = selected_request.get("base_timeframe", "60min")
         fetch_size = min(72 + horizon + 6, 200)
-        all_candles = await fetch_klines(request, symbol, "60min", fetch_size)
+        all_candles = await fetch_klines(request, symbol, base_timeframe, fetch_size)
 
         # Parse prediction creation timestamp (unix seconds)
         created_str = selected_request.get("created_at")
@@ -1768,18 +1935,23 @@ async def create_prediction(
     background_tasks: BackgroundTasks,
     request: Request,
     symbol: str = Form(...),
-    horizon_hours: int = Form(...),
+    horizon_steps: int = Form(...),
+    base_timeframe: str = Form("60min"),
+    depth: int = Form(3),
     csrf_token: str = Form(...),
 ):
     require_api_auth(request)
     verify_csrf_token(request, csrf_token)
+    base_timeframe = normalize_period(base_timeframe)
     detail = await run_prediction_request(
         request=request,
         background_tasks=background_tasks,
         symbol=symbol,
-        horizon_hours=horizon_hours,
+        horizon_steps=horizon_steps,
         requested_by=request.session.get("username", "local-webui"),
         source="webui",
+        base_timeframe=base_timeframe,
+        depth=depth,
     )
 
     successful_models = [model for model in detail["models"] if model["status"] == "completed" and model["points"]]
@@ -1791,7 +1963,7 @@ async def create_prediction(
         set_flash(
             request,
             "ok",
-            f"Prediction #{detail['id']} created for {detail.get('symbol', symbol).upper()} / {detail.get('horizon_hours', horizon_hours)}h. "
+            f"Prediction #{detail['id']} created for {detail.get('symbol', symbol).upper()} / {detail.get('horizon_hours', horizon_steps)}h. "
             f"Completed models: {len(successful_models)}. Failed models: {len(failed_models)}.{oracle_note}",
         )
     else:
@@ -1814,13 +1986,16 @@ async def api_internal_create_prediction(
     x_internal_token: str | None = Header(default=None),
 ):
     verify_internal_api_token(x_internal_token)
+    base_timeframe = normalize_period(str(payload.get("base_timeframe", "60min")))
     detail = await run_prediction_request(
         request=request,
         background_tasks=background_tasks,
         symbol=str(payload.get("symbol") or ""),
-        horizon_hours=int(payload.get("horizon_hours") or 0),
+        horizon_steps=int(payload.get("horizon_steps") or payload.get("horizon_hours") or 0),
         requested_by=str(payload.get("requested_by") or "telegram-bot"),
         source=str(payload.get("source") or "telegram"),
+        base_timeframe=base_timeframe,
+        depth=int(payload.get("depth", 3)),
     )
     return detail
 
@@ -1936,13 +2111,35 @@ async def api_journal_entry(request: Request, entry_id: int, symbol: str | None 
     return entry
 
 
-@app.get("/api/predictions")
+@app.api_route("/api/predictions", methods=["GET", "POST"])
 async def api_predictions(
     request: Request,
+    background_tasks: BackgroundTasks,
     limit: int = Query(default=12, ge=1, le=100),
     offset: int = Query(default=0, ge=0, le=10000),
 ):
     require_api_auth(request)
+    if request.method == "POST":
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        symbol = str(payload.get("symbol") or "")
+        horizon_steps = int(payload.get("horizon_steps") or payload.get("horizon_hours") or 4)
+        base_timeframe = normalize_period(str(payload.get("base_timeframe", "60min")))
+        depth = int(payload.get("depth", 3))
+        requested_by = str(payload.get("requested_by") or request.session.get("username", "api-webui"))
+        source = str(payload.get("source") or "webui-api")
+        return await run_prediction_request(
+            request=request,
+            background_tasks=background_tasks,
+            symbol=symbol,
+            horizon_steps=horizon_steps,
+            requested_by=requested_by,
+            source=source,
+            base_timeframe=base_timeframe,
+            depth=depth,
+        )
     return {"items": await fetch_prediction_requests(request, limit=limit, offset=offset)}
 
 
@@ -1953,6 +2150,47 @@ async def api_prediction_detail(request: Request, request_id: int):
     if detail is None:
         raise HTTPException(status_code=404, detail="Prediction request not found")
     return detail
+
+
+@app.patch("/api/predictions/{request_id}")
+async def api_update_prediction(request: Request, request_id: int, body: dict[str, Any] = Body(...)):
+    require_api_auth(request)
+    pool = request.app.state.pg_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+
+    allowed = {"symbol", "horizon_hours", "base_timeframe", "depth", "status"}
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    if "base_timeframe" in updates:
+        updates["base_timeframe"] = normalize_period(updates["base_timeframe"])
+
+    set_clause = ", ".join(f"{k} = ${idx + 2}" for idx, k in enumerate(updates))
+    query = f"UPDATE forecast_requests SET {set_clause}, updated_at = NOW() WHERE id = $1"
+    async with pool.acquire() as connection:
+        await connection.execute(query, request_id, *updates.values())
+
+    detail = await fetch_prediction_request_detail(request, request_id=request_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Prediction request not found")
+    return detail
+
+
+@app.delete("/api/predictions/{request_id}")
+async def api_delete_prediction(request: Request, request_id: int):
+    require_api_auth(request)
+    pool = request.app.state.pg_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+
+    async with pool.acquire() as connection:
+        result = await connection.execute("DELETE FROM forecast_requests WHERE id = $1", request_id)
+    deleted = int(result.split()[-1]) if result.split() else 0
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Prediction request not found")
+    return {"ok": True, "deleted": deleted}
 
 
 @app.get("/api/candles")

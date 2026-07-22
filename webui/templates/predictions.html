@@ -23,7 +23,7 @@
             </span>
           </div>
           <div class="request-meta">
-            <span>{{ item.horizon_hours }}h</span>
+            <span>{{ item.base_timeframe or '60min' }} · {{ item.horizon_hours }}h</span>
             <span>${{ "%.2f"|format(item.base_price) }}</span>
             <span>{{ item.completed_models }}/{{ item.completed_models + item.failed_models }}</span>
           </div>
@@ -62,11 +62,29 @@
           </select>
         </label>
         <label class="field-compact">
-          <span>Horizon</span>
-          <select name="horizon_hours">
-            {% for horizon in prediction_horizons %}
-            <option value="{{ horizon }}" {% if horizon == 4 %}selected{% endif %}>{{ horizon }}h</option>
-            {% endfor %}
+          <span>TF</span>
+          <select name="base_timeframe">
+            <option value="60min" selected>1h</option>
+            <option value="15min">15m</option>
+            <option value="4hour">4h</option>
+            <option value="1day">1d</option>
+          </select>
+        </label>
+        <label class="field-compact">
+          <span>Steps</span>
+          <select name="horizon_steps">
+            <option value="4" selected>4</option>
+            <option value="8">8</option>
+            <option value="12">12</option>
+            <option value="24">24</option>
+          </select>
+        </label>
+        <label class="field-compact">
+          <span>Depth</span>
+          <select name="depth">
+            <option value="3" selected>3</option>
+            <option value="6">6</option>
+            <option value="9">9</option>
           </select>
         </label>
         <button type="submit" class="primary-button primary-button-compact">Generate</button>
@@ -79,7 +97,7 @@
     <div class="prediction-detail-header">
       <div>
         <div class="panel-kicker">Request #{{ selected_request.id }}</div>
-        <h2>{{ selected_request.symbol | upper }} · {{ selected_request.horizon_hours }}h</h2>
+        <h2>{{ selected_request.symbol | upper }} · {{ selected_request.base_timeframe or '60min' }} · {{ selected_request.horizon_hours }}h · depth {{ selected_request.depth or 3 }} · {{ selected_request.models | length }} roles</h2>
       </div>
       <div class="detail-metrics-compact">
         <span class="table-pill {% if selected_request.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
@@ -128,11 +146,17 @@
         </div>
         {% for model in selected_request.comparison_models %}
         {% set model_colors = ['#1fd6a3', '#36c9dd', '#ff5d73', '#ff9b54', '#a78bfa'] %}
-        <div class="forecast-legend-item">
+        <div class="forecast-legend-item" data-role="{{ model.role_name | lower }}">
           <div class="forecast-legend-line" style="background:{{ model_colors[loop.index0 % 5] }};"></div>
-          <span>{{ model.short_name }}</span>
+          <span>{{ model.role_name or 'Model' }} · {{ model.short_name }}</span>
         </div>
         {% endfor %}
+      </div>
+      <div class="forecast-role-tabs">
+        <button class="forecast-role-tab is-active" data-filter="all">All</button>
+        <button class="forecast-role-tab" data-filter="bull">Bull</button>
+        <button class="forecast-role-tab" data-filter="bear">Bear</button>
+        <button class="forecast-role-tab" data-filter="arbiter">Arbiter</button>
       </div>
     </div>
 
@@ -148,12 +172,17 @@
         <table class="data-table comparison-table comparison-table-compact">
           <thead>
             <tr>
-              <th class="th-hour">H</th>
+              <th class="th-hour">Step</th>
               <th class="th-target">Target</th>
               <th class="th-actual">Real</th>
               {% for model in selected_request.comparison_models %}
               <th class="comparison-model-head-compact">
-                <strong>{{ model.short_name }}</strong>
+                <div class="model-name-role">
+                  <strong>{{ model.short_name }}</strong>
+                  {% if model.role_name %}
+                  <span class="role-pill role-pill-{{ model.role_name | lower }}">{{ model.role_name }}</span>
+                  {% endif %}
+                </div>
                 <span class="table-pill {% if model.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">{{ model.status }}</span>
               </th>
               {% endfor %}
@@ -163,7 +192,7 @@
           <tbody>
             {% for row in selected_request.comparison_rows %}
             <tr>
-              <td><strong>+{{ row.forecast_hour }}h</strong></td>
+              <td><strong>#{{ row.step_index }}</strong></td>
               <td class="mono small">{{ row.target_time_display or row.target_time or "&mdash;" }}</td>
               <td>
                 {% if row.actual_price is not none %}
@@ -219,7 +248,12 @@
       <details class="prediction-model-card-compact">
         <summary class="model-card-summary">
           <div class="model-card-header">
-            <strong>{{ model.model_name }}</strong>
+            <div class="model-name-role">
+              <strong>{{ model.model_name }}</strong>
+              {% if model.agent_role %}
+              <span class="role-pill role-pill-{{ model.agent_role }}">{{ model.agent_role }}</span>
+              {% endif %}
+            </div>
             <span class="subtle mono small">{{ model.model_id }}</span>
           </div>
           <div class="model-card-meta">
@@ -242,12 +276,12 @@
           <table class="data-table forecast-table-compact">
             <thead>
               <tr>
-                <th>H</th>
+                <th>Step</th>
                 <th>Target</th>
                 <th>Pred</th>
+                <th>Low/High</th>
                 <th>Chg</th>
                 <th>Actual</th>
-                <th>Chg</th>
                 <th>Score</th>
                 <th>Dir</th>
               </tr>
@@ -255,15 +289,19 @@
             <tbody>
               {% for point in model.points %}
               <tr>
-                <td>{{ point.forecast_hour }}</td>
+                <td>{{ point.step_index or point.forecast_hour }}</td>
                 <td class="mono small">{{ point.target_time_display or point.target_time }}</td>
                 <td class="mono">${{ "%.0f"|format(point.predicted_price) }}</td>
+                <td class="mono small">
+                  {% if point.get("predicted_low") is not none and point.get("predicted_high") is not none %}
+                    ${{ "%.0f"|format(point.get("predicted_low")) }}–${{ "%.0f"|format(point.get("predicted_high")) }}
+                  {% else %}
+                    <span class="subtle">—</span>
+                  {% endif %}
+                </td>
                 <td class="{% if point.predicted_change_pct > 0 %}delta-up{% elif point.predicted_change_pct < 0 %}delta-down{% endif %}">{{ "%+.2f"|format(point.predicted_change_pct) }}%</td>
                 <td class="mono">
                   {% if point.actual_price is not none %}${{ "%.0f"|format(point.actual_price) }}{% else %}<span class="subtle">—</span>{% endif %}
-                </td>
-                <td class="{% if point.actual_change_pct is not none and point.actual_change_pct > 0 %}delta-up{% elif point.actual_change_pct is not none and point.actual_change_pct < 0 %}delta-down{% endif %}">
-                  {% if point.actual_change_pct is not none %}{{ "%+.2f"|format(point.actual_change_pct) }}%{% else %}<span class="subtle">—</span>{% endif %}
                 </td>
                 <td>
                   {% if point.accuracy_score is not none %}<span class="score-badge small">{{ "%.0f"|format(point.accuracy_score) }}%</span>{% else %}<span class="subtle">—</span>{% endif %}
@@ -477,6 +515,22 @@
     }
   }
 
+  // Role filter for legend/model lines
+  document.querySelectorAll('.forecast-role-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      var filter = tab.dataset.filter;
+      document.querySelectorAll('.forecast-role-tab').forEach(function(t) { t.classList.remove('is-active'); });
+      tab.classList.add('is-active');
+      document.querySelectorAll('.forecast-legend-item[data-role]').forEach(function(item) {
+        if (filter === 'all' || item.dataset.role === filter) {
+          item.classList.remove('is-hidden');
+        } else {
+          item.classList.add('is-hidden');
+        }
+      });
+    });
+  });
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initChart);
   } else {
@@ -491,10 +545,10 @@
 <header class="page-header">
   <div>
     <div class="eyebrow">Prediction Lab</div>
-    <h1>Hourly multi-model crypto forecasts</h1>
+    <h1>Multi-timeframe multi-model crypto forecasts</h1>
     <p class="page-copy">
-      Choose a symbol and horizon, generate hourly price paths from every configured model, and track how each one performs
-      against the real market as the hours close.
+      Choose a symbol, timeframe, and step horizon; generate price paths from Bull, Bear, and Arbiter roles;
+      then track how each one performs against the real market as steps close.
     </p>
   </div>
   <div class="stats-grid prediction-stats">
@@ -503,8 +557,8 @@
       <span class="metric-value">{{ watchlist | length }}</span>
     </div>
     <div class="metric-card">
-      <span class="metric-label">Forecast horizons</span>
-      <span class="metric-value">{{ prediction_horizons | join(", ") }}h</span>
+      <span class="metric-label">Forecast steps</span>
+      <span class="metric-value">1–48</span>
     </div>
     <div class="metric-card">
       <span class="metric-label">Model slots</span>
@@ -534,11 +588,31 @@
     </label>
 
     <label class="field">
-      <span>Horizon</span>
-      <select name="horizon_hours">
-        {% for horizon in prediction_horizons %}
-        <option value="{{ horizon }}" {% if horizon == 4 %}selected{% endif %}>{{ horizon }} hour{% if horizon != 1 %}s{% endif %}</option>
-        {% endfor %}
+      <span>Timeframe</span>
+      <select name="base_timeframe">
+        <option value="60min" selected>1h</option>
+        <option value="15min">15m</option>
+        <option value="4hour">4h</option>
+        <option value="1day">1d</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Steps</span>
+      <select name="horizon_steps">
+        <option value="4" selected>4</option>
+        <option value="8">8</option>
+        <option value="12">12</option>
+        <option value="24">24</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Pattern depth</span>
+      <select name="depth">
+        <option value="3" selected>3</option>
+        <option value="6">6</option>
+        <option value="9">9</option>
       </select>
     </label>
 
@@ -583,7 +657,7 @@
             </span>
           </div>
           <div class="request-meta">
-            <span>{{ item.horizon_hours }}h horizon</span>
+            <span>{{ item.base_timeframe or '60min' }} · {{ item.horizon_hours }}h</span>
             <span>base ${{ "%.2f"|format(item.base_price) }}</span>
           </div>
           <div class="request-meta">
@@ -701,7 +775,7 @@
           <tbody>
             {% for row in selected_request.comparison_rows %}
             <tr>
-              <td><strong>+{{ row.forecast_hour }}h</strong></td>
+              <td><strong>#{{ row.step_index }}</strong></td>
               <td class="mono">{{ row.target_time_display or row.target_time or "pending" }}</td>
               <td>
                 <div class="comparison-actual">
