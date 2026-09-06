@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="panel" style="padding:0;overflow:hidden">
+  <div id="cdContainer" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px">
+
+    <!-- MARKET -->
+    <div class="panel" id="cdMarket" style="margin:0">
+      <div class="panel-kicker">📈 Market</div>
+      <div id="cdMarketData">Loading...</div>
+    </div>
+
+    <!-- CONSENSUS -->
+    <div class="panel" id="cdConsensus" style="margin:0">
+      <div class="panel-kicker">🔮 Consensus</div>
+      <div id="cdConsensusData">Loading...</div>
+    </div>
+
+    <!-- POSITIONS -->
+    <div class="panel" id="cdPositions" style="margin:0">
+      <div class="panel-kicker">🤖 Positions</div>
+      <div id="cdPositionsData">Loading...</div>
+    </div>
+
+    <!-- SESSION -->
+    <div class="panel" id="cdSession" style="margin:0">
+      <div class="panel-kicker">🎯 Session</div>
+      <div id="cdSessionData">Loading...</div>
+    </div>
+
+    <!-- QUICK ACTIONS (full width) -->
+    <div class="panel" id="cdActions" style="margin:0;grid-column:1/-1">
+      <div class="panel-kicker">⚡ Quick Actions</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+        <button class="ghost-button" onclick="cdQuickForecast()">🔮 New Forecast</button>
+        <button class="ghost-button" onclick="cdOpenPos('long')">📈 Open Long</button>
+        <button class="ghost-button" onclick="cdOpenPos('short')">📉 Open Short</button>
+        <button class="ghost-button" onclick="cdCloseAll()">🔒 Close All</button>
+        <button class="ghost-button" onclick="cdBriefing()">📋 Briefing</button>
+        <a class="ghost-button link-button" href="/predictions" style="text-decoration:none">📊 Full View</a>
+      </div>
+      <div id="cdActionResult" style="margin-top:8px;font-size:0.85em;color:var(--muted-foreground)"></div>
+    </div>
+
+    <!-- MODEL ACCURACY -->
+    <div class="panel" id="cdAccuracy" style="margin:0;grid-column:1/-1">
+      <div class="panel-kicker">📊 Model Accuracy (historical)</div>
+      <div id="cdAccuracyData">Loading...</div>
+    </div>
+
+  </div>
+</section>
+
+<script>
+const CD_REFRESH_MS = 30000;
+let cdTimer = null;
+
+async function cdFetch() {
+  try {
+    const r = await fetch('/api/command-deck');
+    if (!r.ok) return;
+    const d = await r.json();
+    cdRender(d);
+  } catch(e) { /* silent */ }
+}
+
+function cdPrice(p) {
+  if (!p) return '—';
+  return '$' + Number(p).toLocaleString('en-US', {maximumFractionDigits: 2});
+}
+
+function cdPct(p) {
+  if (p === null || p === undefined) return '—';
+  const v = Number(p);
+  const sign = v >= 0 ? '+' : '';
+  return sign + v.toFixed(2) + '%';
+}
+
+function cdColor(p) {
+  const v = Number(p || 0);
+  if (v > 0) return 'var(--accent)';
+  if (v < 0) return '#ef4444';
+  return 'var(--muted-foreground)';
+}
+
+function cdRender(d) {
+  // MARKET
+  let mh = '';
+  if (d.market && d.market.length) {
+    d.market.forEach(m => {
+      const chg = m.change_pct || 0;
+      mh += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0">
+        <span style="font-size:1.2em;font-weight:600">${m.symbol.toUpperCase()}</span>
+        <span style="font-size:1.3em;font-weight:700">${cdPrice(m.price)}</span>
+        <span style="color:${cdColor(chg)};font-weight:600">${cdPct(chg)}</span>
+      </div>`;
+      if (m.volume) mh += `<div style="font-size:0.8em;color:var(--muted-foreground);text-align:right">Vol: $${(m.volume/1e6).toFixed(1)}M</div>`;
+    });
+  } else { mh = '<span class="muted">No data</span>'; }
+  document.getElementById('cdMarketData').innerHTML = mh;
+
+  // CONSENSUS
+  let ch = '';
+  if (d.consensus && d.consensus.roles) {
+    const c = d.consensus;
+    const vColor = c.verdict === 'bullish' ? 'var(--accent)' : c.verdict === 'bearish' ? '#ef4444' : 'var(--muted-foreground)';
+    ch += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <span style="font-weight:600">Base: ${cdPrice(c.base_price)}</span>
+      <span style="font-size:1.1em;font-weight:700;color:${vColor}">${c.verdict.toUpperCase()}</span>
+      <span style="font-size:0.85em">${c.agreement}</span>
+    </div>`;
+    c.roles.forEach(r => {
+      const dColor = r.direction === 'bullish' ? 'var(--accent)' : r.direction === 'bearish' ? '#ef4444' : 'var(--muted-foreground)';
+      ch += `<div style="display:grid;grid-template-columns:70px 70px 60px 1fr 1fr;gap:4px;padding:2px 0;font-size:0.85em;align-items:center">
+        <span style="font-weight:600">${r.role}</span>
+        <span style="color:${dColor};font-weight:600">${r.direction}</span>
+        <span>conf ${r.avg_confidence}%</span>
+        <span style="text-align:right">${cdPrice(r.target_low)}</span>
+        <span style="text-align:right">${cdPrice(r.target_high)}</span>
+      </div>`;
+    });
+  } else { ch = '<span class="muted">No active forecast. Click New Forecast.</span>'; }
+  document.getElementById('cdConsensusData').innerHTML = ch;
+
+  // POSITIONS
+  let ph = '';
+  if (d.positions && d.positions.length) {
+    d.positions.forEach(p => {
+      const pnlColor = p.pnl >= 0 ? 'var(--accent)' : '#ef4444';
+      ph += `<div style="display:grid;grid-template-columns:50px 60px 50px 1fr 1fr 80px;gap:4px;padding:4px 0;align-items:center;border-bottom:1px solid var(--border)">
+        <span style="font-weight:600">#${p.id}</span>
+        <span style="font-weight:600;color:${p.direction==='long'?'var(--accent)':'#ef4444'}">${p.direction.toUpperCase()}</span>
+        <span>x${p.leverage}</span>
+        <span style="font-size:0.8em">entry ${cdPrice(p.entry_price)}</span>
+        <span style="font-size:0.8em">live ${cdPrice(p.live_price)}</span>
+        <span style="text-align:right;font-weight:700;color:${pnlColor}">${p.pnl >= 0 ? '+' : ''}$${p.pnl.toFixed(0)} (${p.roi >= 0 ? '+' : ''}${p.roi}%)</span>
+      </div>`;
+    });
+    ph += `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">`;
+    d.positions.forEach(p => {
+      ph += `<button class="ghost-button" style="font-size:0.75em;padding:2px 8px" onclick="cdClose(${p.id})">🔒 #${p.id}</button>`;
+    });
+    ph += `</div>`;
+  } else { ph = '<span class="muted">No open positions</span>'; }
+  document.getElementById('cdPositionsData').innerHTML = ph;
+
+  // SESSION
+  let sh = '';
+  if (d.session && d.session.id) {
+    const s = d.session;
+    sh += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <span style="font-weight:600">${s.status.toUpperCase()}</span>
+      <span>${s.risk_mode}</span>
+    </div>`;
+    if (s.plan_regime) sh += `<div style="font-size:0.85em;margin:2px 0">Regime: <strong>${s.plan_regime}</strong></div>`;
+    if (s.plan_thesis) sh += `<div style="font-size:0.8em;color:var(--muted-foreground);margin:2px 0">${s.plan_thesis}</div>`;
+  } else { sh = '<span class="muted">No active session</span>'; }
+  document.getElementById('cdSessionData').innerHTML = sh;
+
+  // ACCURACY
+  let ah = '';
+  if (d.accuracy && Object.keys(d.accuracy).length) {
+    ah += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">';
+    for (const [key, acc] of Object.entries(d.accuracy)) {
+      const dirColor = acc.direction_rate >= 55 ? 'var(--accent)' : acc.direction_rate >= 45 ? 'var(--muted-foreground)' : '#ef4444';
+      ah += `<div style="padding:8px;border:1px solid var(--border);border-radius:6px">
+        <div style="font-weight:600;text-transform:capitalize">${key}</div>
+        <div style="font-size:1.2em;font-weight:700;color:${dirColor}">${acc.direction_rate}%</div>
+        <div style="font-size:0.75em;color:var(--muted-foreground)">${acc.direction_correct}/${acc.total} dir · avg ${acc.avg_score}</div>
+      </div>`;
+    };
+    ah += '</div>';
+  } else { ah = '<span class="muted">No evaluated forecasts yet</span>'; }
+  document.getElementById('cdAccuracyData').innerHTML = ah;
+
+  // HEALTH (topbar)
+  if (d.health) {
+    const h = d.health;
+    const setDot = (el, ok) => { if (el) { el.className = 'health-dot ' + (ok ? 'is-ok' : 'is-bad'); } };
+    setDot(document.getElementById('healthRedis'), h.redis);
+    setDot(document.getElementById('healthPostgres'), h.postgres);
+    setDot(document.getElementById('healthCollector'), h.collector_feed);
+  }
+}
+
+async function cdQuickForecast() {
+  const el = document.getElementById('cdActionResult');
+  el.textContent = 'Launching forecast...';
+  try {
+    const r = await fetch('/api/forecast/quick', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbol: 'btcusdt', horizon_steps: 4})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      el.innerHTML = `<span style="color:var(--accent)">✅ ${d.message}</span>`;
+      setTimeout(() => cdFetch(), 5000);
+    } else { el.innerHTML = `<span style="color:#ef4444">❌ ${d.detail || 'Failed'}</span>`; }
+  } catch(e) { el.innerHTML = `<span style="color:#ef4444">❌ ${e.message}</span>`; }
+}
+
+async function cdOpenPos(dir) {
+  const el = document.getElementById('cdActionResult');
+  el.textContent = `Opening ${dir}...`;
+  try {
+    const r = await fetch('/api/positions/open', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({symbol: 'btcusdt', direction: dir, leverage: 100, margin: 10, user_id: 0})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      el.innerHTML = `<span style="color:var(--accent)">✅ #${d.id} ${d.direction.toUpperCase()} @ ${cdPrice(d.entry_price)}</span>`;
+      setTimeout(() => cdFetch(), 2000);
+    } else { el.innerHTML = `<span style="color:#ef4444">❌ ${d.detail || 'Failed'}</span>`; }
+  } catch(e) { el.innerHTML = `<span style="color:#ef4444">❌ ${e.message}</span>`; }
+}
+
+async function cdClose(id) {
+  const el = document.getElementById('cdActionResult');
+  el.textContent = `Closing #${id}...`;
+  try {
+    const r = await fetch(`/api/positions/${id}/close`, {method: 'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      el.innerHTML = `<span style="color:var(--accent)">✅ #${id} closed @ ${cdPrice(d.close_price)} PnL=$${d.realized_pnl}</span>`;
+      setTimeout(() => cdFetch(), 1000);
+    } else { el.innerHTML = `<span style="color:#ef4444">❌ ${d.detail || 'Failed'}</span>`; }
+  } catch(e) { el.innerHTML = `<span style="color:#ef4444">❌ ${e.message}</span>`; }
+}
+
+async function cdCloseAll() {
+  const data = await (await fetch('/api/command-deck')).json();
+  if (!data.positions || !data.positions.length) { return; }
+  for (const p of data.positions) {
+    await cdClose(p.id);
+    await new Promise(r => setTimeout(r, 300));
+  }
+}
+
+async function cdBriefing() {
+  const el = document.getElementById('cdActionResult');
+  el.textContent = 'Generating briefing...';
+  try {
+    const r = await fetch('/api/briefing');
+    const d = await r.json();
+    el.innerHTML = `<pre style="white-space:pre-wrap;font-size:0.85em;margin:0">${d.briefing}</pre>`;
+  } catch(e) { el.innerHTML = `<span style="color:#ef4444">❌ ${e.message}</span>`; }
+}
+
+// Init
+cdFetch();
+cdTimer = setInterval(cdFetch, CD_REFRESH_MS);
+</script>
+
+{% endblock %}

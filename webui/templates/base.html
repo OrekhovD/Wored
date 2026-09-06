@@ -15,6 +15,7 @@
       <a class="brand" href="/">WORED</a>
       <div class="topbar-links">
         <a class="{% if current_path == '/' %}is-current{% endif %}" href="/">Dashboard</a>
+        <a class="{% if current_path == '/command-deck' %}is-current{% endif %}" href="/command-deck">⚡ Command</a>
         <a class="{% if current_path == '/alerts' %}is-current{% endif %}" href="/alerts">Alerts<span id="navAlertBadge"></span></a>
         <a class="{% if current_path.startswith('/predictions') %}is-current{% endif %}" href="/predictions">Predictions</a>
         <a class="{% if current_path.startswith('/journal') %}is-current{% endif %}" href="/journal">AI Journal</a>

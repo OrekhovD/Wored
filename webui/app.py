@@ -3627,6 +3627,413 @@ async def api_daily_session_events_stream(
     return EventSourceResponse(event_generator())
 
 
+# ═══════════════════════════════════════════════════════════════════
+# COMMAND DECK — единый оперативный экран для торговли
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/command-deck")
+async def api_command_deck(request: Request):
+    """Единый JSON со всеми данными для оперативного торгового экрана."""
+    pool = request.app.state.pg_pool
+    redis_client = request.app.state.redis_client
+
+    # 1. MARKET — live tickers
+    watchlist = get_watchlist()
+    market: list[dict[str, Any]] = []
+    for sym in watchlist[:2]:
+        snap = await get_symbol_snapshot(request, sym)
+        market.append(snap)
+
+    # 2. CONSENSUS — latest active forecast
+    consensus: dict[str, Any] = {}
+    if pool:
+        async with pool.acquire() as conn:
+            req_row = await conn.fetchrow(
+                """SELECT id, symbol, base_price, created_at
+                   FROM forecast_requests WHERE status='active'
+                   ORDER BY created_at DESC LIMIT 1"""
+            )
+            if req_row:
+                models = await conn.fetch(
+                    """SELECT fmr.model_key, fmr.model_id, fmr.status, fmr.agent_role,
+                              count(fp.id) as points,
+                              avg(fp.confidence) as avg_conf,
+                              min(fp.predicted_change_pct) as min_chg,
+                              max(fp.predicted_change_pct) as max_chg,
+                              min(fp.predicted_price) as min_price,
+                              max(fp.predicted_price) as max_price
+                       FROM forecast_model_runs fmr
+                       LEFT JOIN forecast_points fp ON fp.model_run_id = fmr.id
+                       WHERE fmr.request_id = $1 AND fmr.status = 'completed'
+                       GROUP BY fmr.id ORDER BY fmr.model_key""",
+                    req_row["id"],
+                )
+                roles: list[dict[str, Any]] = []
+                for m in models:
+                    role = m["agent_role"] or "neutral"
+                    roles.append({
+                        "model_key": m["model_key"],
+                        "model_id": m["model_id"],
+                        "role": role,
+                        "direction": "bullish" if (m["max_chg"] or 0) > 0 and (m["min_chg"] or 0) >= 0 else "bearish" if (m["max_chg"] or 0) <= 0 else "mixed",
+                        "avg_confidence": round(float(m["avg_conf"] or 0), 1),
+                        "target_low": float(m["min_price"] or 0),
+                        "target_high": float(m["max_price"] or 0),
+                        "change_low": round(float(m["min_chg"] or 0), 4),
+                        "change_high": round(float(m["max_chg"] or 0), 4),
+                    })
+
+                bear_count = sum(1 for r in roles if r["direction"] == "bearish")
+                bull_count = sum(1 for r in roles if r["direction"] == "bullish")
+                consensus = {
+                    "request_id": req_row["id"],
+                    "symbol": req_row["symbol"],
+                    "base_price": float(req_row["base_price"]),
+                    "created_at": serialize_dt(req_row["created_at"].replace(tzinfo=timezone.utc) if req_row["created_at"].tzinfo is None else req_row["created_at"]),
+                    "roles": roles,
+                    "verdict": "bearish" if bear_count > bull_count else "bullish" if bull_count > bear_count else "neutral",
+                    "agreement": f"{max(bear_count, bull_count)}/{len(roles)}",
+                }
+
+    # 3. POSITIONS — open sim positions with live PnL
+    positions: list[dict[str, Any]] = []
+    if pool:
+        async with pool.acquire() as conn:
+            pos_rows = await conn.fetch(
+                """SELECT id, symbol, direction, leverage, margin, entry_price,
+                          size, notional, opened_at, ai_managed
+                   FROM sim_positions WHERE status = 'open'
+                   ORDER BY opened_at DESC LIMIT 5"""
+            )
+            for p in pos_rows:
+                entry = float(p["entry_price"])
+                # Get live price from Redis
+                live_price = 0.0
+                if redis_client:
+                    raw = await redis_client.get(f"ticker:{p['symbol']}")
+                    if raw:
+                        live_price = float(safe_json(raw).get("price", 0))
+                if live_price == 0:
+                    live_price = entry
+                direction = p["direction"]
+                notional = float(p["notional"])
+                if direction == "long":
+                    pnl = (live_price - entry) * float(p["size"])
+                else:
+                    pnl = (entry - live_price) * float(p["size"])
+                roi = (pnl / float(p["margin"]) * 100) if float(p["margin"]) else 0
+                positions.append({
+                    "id": p["id"],
+                    "symbol": p["symbol"],
+                    "direction": direction,
+                    "leverage": p["leverage"],
+                    "margin": float(p["margin"]),
+                    "entry_price": entry,
+                    "live_price": live_price,
+                    "pnl": round(pnl, 2),
+                    "roi": round(roi, 1),
+                    "ai_managed": p["ai_managed"],
+                    "opened_at": serialize_dt(p["opened_at"].replace(tzinfo=timezone.utc) if p["opened_at"].tzinfo is None else p["opened_at"]),
+                })
+
+    # 4. SESSION — active trading session
+    session_info: dict[str, Any] = {}
+    if pool:
+        async with pool.acquire() as conn:
+            sess = await conn.fetchrow(
+                """SELECT id, symbol, status, risk_mode, session_start, session_end,
+                          trade_direction, target_net_profit_usdt
+                   FROM trading_sessions
+                   WHERE status NOT IN ('completed', 'stopped', 'failed')
+                   ORDER BY created_at DESC LIMIT 1"""
+            )
+            if sess:
+                plan = await conn.fetchrow(
+                    """SELECT version, plan_json->>'thesis' as thesis,
+                              plan_json->>'market_regime' as regime
+                       FROM session_plans WHERE session_id = $1
+                       ORDER BY version DESC LIMIT 1""",
+                    sess["id"],
+                )
+                session_info = {
+                    "id": str(sess["id"]),
+                    "symbol": sess["symbol"],
+                    "status": sess["status"],
+                    "risk_mode": sess["risk_mode"],
+                    "session_start": serialize_dt(sess["session_start"]),
+                    "session_end": serialize_dt(sess["session_end"]),
+                    "trade_direction": sess["trade_direction"],
+                    "target_profit": float(sess["target_net_profit_usdt"]),
+                    "plan_thesis": plan["thesis"][:200] if plan else "",
+                    "plan_regime": plan["regime"] if plan else "",
+                }
+
+    # 5. MODEL ACCURACY — historical stats
+    accuracy: dict[str, Any] = {}
+    if pool:
+        async with pool.acquire() as conn:
+            acc_rows = await conn.fetch(
+                """SELECT fmr.model_key,
+                          count(*) as total,
+                          count(*) FILTER (WHERE fp.direction_match) as dir_correct,
+                          round(avg(fp.accuracy_score)::numeric, 1) as avg_score
+                   FROM forecast_points fp
+                   JOIN forecast_model_runs fmr ON fmr.id = fp.model_run_id
+                   WHERE fp.evaluated_at IS NOT NULL
+                   GROUP BY fmr.model_key ORDER BY fmr.model_key"""
+            )
+            models_acc = {}
+            for a in acc_rows:
+                models_acc[a["model_key"]] = {
+                    "total": a["total"],
+                    "direction_correct": a["dir_correct"],
+                    "direction_rate": round(a["dir_correct"] / a["total"] * 100, 1) if a["total"] else 0,
+                    "avg_score": float(a["avg_score"]) if a["avg_score"] else 0,
+                }
+            accuracy = models_acc
+
+    # 6. HEALTH
+    health = await fetch_health_snapshot(request)
+
+    # 7. RECENT ALERTS (last 24h)
+    recent_alerts: list[dict[str, Any]] = []
+    if pool:
+        async with pool.acquire() as conn:
+            alerts = await conn.fetch(
+                """SELECT id, symbol, threshold, triggered, timestamp
+                   FROM alerts WHERE timestamp > NOW() - INTERVAL '24 hours'
+                   ORDER BY timestamp DESC LIMIT 5"""
+            )
+            for a in alerts:
+                recent_alerts.append({
+                    "id": a["id"],
+                    "symbol": a["symbol"],
+                    "threshold": round(float(a["threshold"]), 2),
+                    "triggered": a["triggered"],
+                    "timestamp": serialize_dt(a["timestamp"].replace(tzinfo=timezone.utc) if a["timestamp"].tzinfo is None else a["timestamp"]),
+                })
+
+    return {
+        "market": market,
+        "consensus": consensus,
+        "positions": positions,
+        "session": session_info,
+        "accuracy": accuracy,
+        "health": health,
+        "alerts": recent_alerts,
+    }
+
+
+@app.get("/command-deck", response_class=HTMLResponse)
+async def command_deck_page(request: Request):
+    """Единый оперативный торговый экран."""
+    return TEMPLATES.TemplateResponse(request, "command_deck.html", {
+        "title": "Command Deck",
+        "current_path": "/command-deck",
+        "auth_enabled": False,
+        "authenticated": False,
+        "chart_notice": "",
+    })
+
+
+@app.post("/api/positions/open")
+async def api_open_position(request: Request, payload: dict[str, Any] = Body(...)):
+    """Быстрое открытие сим-позиции из Command Deck."""
+    require_api_auth(request)
+    pool = request.app.state.pg_pool
+    if not pool:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+
+    symbol = normalize_symbol(str(payload.get("symbol", "btcusdt")))
+    direction = str(payload.get("direction", "long")).lower()
+    leverage = int(payload.get("leverage", 100))
+    margin = float(payload.get("margin", 10.0))
+
+    # Get live price
+    snap = await get_symbol_snapshot(request, symbol)
+    entry_price = float(snap.get("price", 0))
+    if entry_price <= 0:
+        raise HTTPException(status_code=503, detail=f"No live price for {symbol}")
+
+    # Insert directly
+    notional = margin * leverage
+    size = notional / entry_price
+    fee = notional * 0.0006  # taker fee
+    user_id = int(payload.get("user_id", 0))
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO sim_positions
+               (user_id, symbol, direction, order_type, margin_mode, leverage,
+                margin, entry_price, size, notional, entry_fee, status, ai_managed, opened_at)
+               VALUES ($1, $2, $3, 'market', 'isolated', $4, $5, $6, $7, $8, $9, 'open', false, NOW())
+               RETURNING id, opened_at""",
+            user_id, symbol, direction, leverage, margin, entry_price, size, notional, fee,
+        )
+
+    return {
+        "ok": True,
+        "id": row["id"],
+        "symbol": symbol,
+        "direction": direction,
+        "leverage": leverage,
+        "margin": margin,
+        "entry_price": entry_price,
+        "opened_at": serialize_dt(row["opened_at"].replace(tzinfo=timezone.utc) if row["opened_at"].tzinfo is None else row["opened_at"]),
+    }
+
+
+@app.post("/api/positions/{position_id}/close")
+async def api_close_position(request: Request, position_id: int):
+    """Быстрое закрытие сим-позиции из Command Deck."""
+    require_api_auth(request)
+    pool = request.app.state.pg_pool
+    if not pool:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+
+    async with pool.acquire() as conn:
+        pos = await conn.fetchrow(
+            "SELECT * FROM sim_positions WHERE id=$1 AND status='open'", position_id
+        )
+        if not pos:
+            raise HTTPException(status_code=404, detail="Position not found or already closed")
+
+        # Get live price
+        redis_client = request.app.state.redis_client
+        live_price = 0.0
+        if redis_client:
+            raw = await redis_client.get(f"ticker:{pos['symbol']}")
+            if raw:
+                live_price = float(safe_json(raw).get("price", 0))
+        if live_price == 0:
+            raise HTTPException(status_code=503, detail="No live price")
+
+        entry = float(pos["entry_price"])
+        size = float(pos["size"])
+        notional = float(pos["notional"])
+        close_fee = notional * 0.0006
+
+        if pos["direction"] == "long":
+            pnl = (live_price - entry) * size
+        else:
+            pnl = (entry - live_price) * size
+
+        await conn.execute(
+            """UPDATE sim_positions
+               SET status='closed', close_price=$1, close_fee=$2,
+                   realized_pnl=$3, closed_at=NOW(), close_reason='manual_command_deck'
+               WHERE id=$4""",
+            live_price, close_fee, pnl, position_id,
+        )
+
+    return {
+        "ok": True,
+        "id": position_id,
+        "close_price": live_price,
+        "realized_pnl": round(pnl, 2),
+        "close_fee": close_fee,
+    }
+
+
+@app.post("/api/forecast/quick")
+async def api_quick_forecast(request: Request, payload: dict[str, Any] = Body(...)):
+    """Быстрый прогноз из Command Deck — BTC 4h default."""
+    require_api_auth(request)
+    pool = request.app.state.pg_pool
+    if not pool:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+
+    symbol = normalize_symbol(str(payload.get("symbol", "btcusdt")))
+    horizon_steps = int(payload.get("horizon_steps", 4))
+
+    snap = await get_symbol_snapshot(request, symbol)
+    base_price = float(snap.get("price", 0))
+    if base_price <= 0:
+        raise HTTPException(status_code=503, detail=f"No live price for {symbol}")
+
+    created_at = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO forecast_requests
+               (symbol, horizon_hours, base_timeframe, depth, base_price, status, source, requested_by, created_at, updated_at)
+               VALUES ($1, $2, '60min', 3, $3, 'pending', 'command-deck', 'command-deck', $4, $5)
+               RETURNING id""",
+            symbol, horizon_steps, base_price,
+            to_db_timestamp(created_at), to_db_timestamp(created_at),
+        )
+
+    request_id = row["id"]
+    # Launch background prediction
+    background_tasks = BackgroundTasks()
+    background_tasks.add_task(
+        run_prediction_request_async,
+        request.app, request_id, symbol, horizon_steps, base_price,
+        "command-deck", "command-deck", "60min", 3,
+    )
+
+    return {
+        "ok": True,
+        "request_id": request_id,
+        "symbol": symbol,
+        "base_price": base_price,
+        "status": "pending",
+        "message": f"Forecast #{request_id} queued. Refresh in ~60s.",
+    }
+
+
+@app.get("/api/briefing")
+async def api_briefing(request: Request):
+    """Текстовый intelligence briefing для Command Deck."""
+    deck = await api_command_deck(request)
+
+    market = deck.get("market", [])
+    consensus = deck.get("consensus", {})
+    positions = deck.get("positions", [])
+    session = deck.get("session", {})
+    health = deck.get("health", {})
+
+    lines = []
+
+    # Market
+    if market:
+        for m in market:
+            sym = m["symbol"].upper()
+            price = m["price"]
+            chg = m.get("change_pct", 0)
+            lines.append(f"{sym} ${price:,.0f} ({chg:+.2f}%)")
+
+    # Consensus
+    if consensus:
+        verdict = consensus.get("verdict", "N/A")
+        agreement = consensus.get("agreement", "")
+        roles = consensus.get("roles", [])
+        lines.append(f"\nConsensus: {verdict.upper()} ({agreement})")
+        for r in roles:
+            lines.append(f"  {r['role']:7s} {r['direction']:7s} conf={r['avg_confidence']}%")
+
+    # Positions
+    if positions:
+        lines.append(f"\nPositions: {len(positions)} open")
+        for p in positions:
+            lines.append(f"  #{p['id']} {p['direction'].upper()} x{p['leverage']} PnL=${p['pnl']:+.0f} ({p['roi']:+.1f}%)")
+    else:
+        lines.append("\nPositions: none")
+
+    # Session
+    if session:
+        lines.append(f"\nSession: {session['status'].upper()} {session['risk_mode']}")
+        if session.get("plan_regime"):
+            lines.append(f"  Regime: {session['plan_regime']}")
+    else:
+        lines.append("\nSession: none active")
+
+    # Health
+    h = health
+    lines.append(f"\nSystem: Redis={'✅' if h.get('redis') else '❌'} PG={'✅' if h.get('postgres') else '❌'} Feed={'✅' if h.get('collector_feed') else '❌'}")
+
+    return {"briefing": "\n".join(lines)}
+
+
 @app.exception_handler(401)
 async def unauthorized_handler(request: Request, exc: HTTPException):
     if request.url.path.startswith("/api/"):
