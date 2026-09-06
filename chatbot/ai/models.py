@@ -216,7 +216,7 @@ MODELS = {
     ),
     "analyst_ollama": ModelConfig(
         name="Analyst (Ollama Cloud)",
-        model_id=os.getenv("OLLAMA_ANALYST_MODEL", "deepseek-v4-pro"),
+        model_id=os.getenv("OLLAMA_CHATBOT_ANALYST_MODEL", "minimax-m3"),
         endpoint=OLLAMA_CLOUD_ENDPOINT,
         api_key_env="OLLAMA_CLOUD_API_KEY",
         tier="analyst",
@@ -225,7 +225,7 @@ MODELS = {
     ),
     "premium_ollama": ModelConfig(
         name="Strategist (Ollama Cloud)",
-        model_id=os.getenv("OLLAMA_PREMIUM_MODEL", "glm-5.2"),
+        model_id=os.getenv("OLLAMA_CHATBOT_PREMIUM_MODEL", "minimax-m3"),
         endpoint=OLLAMA_CLOUD_ENDPOINT,
         api_key_env="OLLAMA_CLOUD_API_KEY",
         tier="premium",

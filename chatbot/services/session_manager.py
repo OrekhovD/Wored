@@ -584,6 +584,16 @@ async def generate_initial_plan(session_id: str) -> dict:
                 timeout=cfg.timeout,
             )
             raw = (response.choices[0].message.content or "").strip()
+            # Reasoning models (glm-5.1, glm-5.2, kimi-k2.6) return empty content
+            # with reasoning in a separate field — fallback to it for JSON extraction
+            if not raw:
+                _msg = response.choices[0].message
+                reasoning = getattr(_msg, "reasoning", None) or ""
+                if not reasoning:
+                    _dump = _msg.model_dump() if hasattr(_msg, "model_dump") else {}
+                    reasoning = _dump.get("reasoning", "") or ""
+                if reasoning:
+                    raw = reasoning.strip()
             # Strip markdown fences
             if raw.startswith("```"):
                 lines = raw.splitlines()
