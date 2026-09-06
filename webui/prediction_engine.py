@@ -22,6 +22,7 @@ RETRY_BACKOFF_SECONDS = (2.0, 5.0)
 GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
+NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 
 PREDICTION_SYSTEM_PROMPT = """
 You are a crypto market forecasting agent inside a model-vs-model evaluation lab.
@@ -120,6 +121,7 @@ class RuntimeModelCandidate:
     base_url: str
     api_key_env: str
     timeout: float
+    provider: str = "ollama"  # "ollama" (native /api/chat) or "nvidia" (OpenAI /v1/chat/completions)
 
 
 @dataclass(frozen=True)
@@ -449,6 +451,20 @@ def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                         timeout=config.timeout,
                     )
                 )
+        # NVIDIA NIM fallback for worker role
+        nvidia_model = os.getenv("NVIDIA_WORKER_MODEL", "deepseek-ai/deepseek-v4-flash-0731").strip()
+        nvidia_key = os.getenv("NVIDIA_DEEPSEEK_V4_FLASH_API_KEY", "").strip()
+        if nvidia_model and nvidia_key:
+            candidates.append(
+                RuntimeModelCandidate(
+                    cache_key=f"worker:nvidia:{nvidia_model}",
+                    model_id=nvidia_model,
+                    base_url=NVIDIA_BASE_URL,
+                    api_key_env="NVIDIA_DEEPSEEK_V4_FLASH_API_KEY",
+                    timeout=config.timeout,
+                    provider="nvidia",
+                )
+            )
         return candidates
 
     if config.key == "analyst":
@@ -467,10 +483,24 @@ def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                         timeout=config.timeout,
                     )
                 )
+        # NVIDIA NIM fallback for analyst role
+        nvidia_model = os.getenv("NVIDIA_ANALYST_MODEL", "deepseek-ai/deepseek-v4-pro-0813").strip()
+        nvidia_key = os.getenv("NVIDIA_DEEPSEEK_V4_PRO_API_KEY", "").strip()
+        if nvidia_model and nvidia_key:
+            candidates.append(
+                RuntimeModelCandidate(
+                    cache_key=f"analyst:nvidia:{nvidia_model}",
+                    model_id=nvidia_model,
+                    base_url=NVIDIA_BASE_URL,
+                    api_key_env="NVIDIA_DEEPSEEK_V4_PRO_API_KEY",
+                    timeout=config.timeout,
+                    provider="nvidia",
+                )
+            )
         return candidates
 
     if config.key == "premium":
-        # Ollama primary — glm-5.2, fallback kimi-k2:1t
+        # Ollama primary — glm-5.2, fallback kimi-k2.6
         ollama_primary = os.getenv("OLLAMA_PREMIUM_MODEL", "glm-5.2").strip()
         ollama_fallback = os.getenv("OLLAMA_PREMIUM_FALLBACK_MODEL", "kimi-k2.6").strip()
         candidates = []
@@ -485,6 +515,20 @@ def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                         timeout=config.timeout,
                     )
                 )
+        # NVIDIA NIM fallback for premium role
+        nvidia_model = os.getenv("NVIDIA_PREMIUM_MODEL", "moonshotai/kimi-k3").strip()
+        nvidia_key = os.getenv("NVIDIA_KIMI_K3_API_KEY", "").strip()
+        if nvidia_model and nvidia_key:
+            candidates.append(
+                RuntimeModelCandidate(
+                    cache_key=f"premium:nvidia:{nvidia_model}",
+                    model_id=nvidia_model,
+                    base_url=NVIDIA_BASE_URL,
+                    api_key_env="NVIDIA_KIMI_K3_API_KEY",
+                    timeout=config.timeout,
+                    provider="nvidia",
+                )
+            )
         return candidates
 
     # Oracle — Ollama only: minimax-m3 → glm-5.1 (structured content models)
@@ -502,6 +546,20 @@ def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                     timeout=config.timeout,
                 )
             )
+    # NVIDIA NIM fallback for oracle role
+    nvidia_model = os.getenv("NVIDIA_ORACLE_MODEL", "minimaxai/minimax-m3").strip()
+    nvidia_key = os.getenv("NVIDIA_MINIMAX_M3_API_KEY", "").strip()
+    if nvidia_model and nvidia_key:
+        candidates.append(
+            RuntimeModelCandidate(
+                cache_key=f"minimax:nvidia:{nvidia_model}",
+                model_id=nvidia_model,
+                base_url=NVIDIA_BASE_URL,
+                api_key_env="NVIDIA_MINIMAX_M3_API_KEY",
+                timeout=config.timeout,
+                provider="nvidia",
+            )
+        )
     return candidates
 
 
@@ -643,6 +701,50 @@ async def _ollama_chat(
     return content
 
 
+async def _nvidia_chat(
+    candidate: RuntimeModelCandidate,
+    config: PredictionModelConfig,
+    context_payload: dict[str, Any],
+    system_prompt: str | None = None,
+    peer_outputs: list[dict[str, Any]] | None = None,
+) -> str:
+    """Call NVIDIA NIM OpenAI-compatible /v1/chat/completions endpoint."""
+    import httpx
+
+    api_key = os.getenv(candidate.api_key_env, "").strip()
+    if not api_key:
+        raise RuntimeError(f"{candidate.api_key_env} is not set")
+
+    url = f"{candidate.base_url.rstrip('/')}/chat/completions"
+    messages = _build_prediction_messages(context_payload, system_prompt, peer_outputs)
+
+    payload = {
+        "model": candidate.model_id,
+        "messages": messages,
+        "max_tokens": config.max_tokens,
+        "temperature": config.temperature,
+        "stream": False,
+    }
+
+    async with httpx.AsyncClient(timeout=candidate.timeout) as hc:
+        resp = await hc.post(
+            url,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    content = (data.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
+    if not content:
+        raise ValueError("Model returned empty content")
+    return content
+
+
 def _role_system_prompt(role: str | None) -> str | None:
     if role == "bull":
         return BULL_SYSTEM_PROMPT
@@ -700,7 +802,10 @@ async def generate_model_prediction(
 
             try:
                 last_model_id = candidate.model_id
-                content = await _ollama_chat(candidate, config, context_payload, system_prompt, peer_outputs)
+                if candidate.provider == "nvidia":
+                    content = await _nvidia_chat(candidate, config, context_payload, system_prompt, peer_outputs)
+                else:
+                    content = await _ollama_chat(candidate, config, context_payload, system_prompt, peer_outputs)
 
                 summary, points = parse_prediction_payload(
                     raw_text=content,
