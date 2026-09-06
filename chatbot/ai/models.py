@@ -207,7 +207,7 @@ MODELS = {
     ),
     "worker_ollama": ModelConfig(
         name="Robotyaga (Ollama Cloud)",
-        model_id=os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4-flash"),
+        model_id=os.getenv("OLLAMA_CHATBOT_WORKER_MODEL", "minimax-m3"),
         endpoint=OLLAMA_CLOUD_ENDPOINT,
         api_key_env="OLLAMA_CLOUD_API_KEY",
         tier="worker",
@@ -407,7 +407,7 @@ MODELS = {
 }
 
 
-WORKER_MODEL_CHAIN = ["worker_ollama", "omniroute_execution", "worker", "worker_qwen35", "worker_qwen_legacy", "worker_deepseek", "worker_deepseek_or", "worker_glm", "worker_gemini", "worker_gemma_nim", "worker_nemotron_nano30", "worker_mixtral", "worker_ministral"]
+WORKER_MODEL_CHAIN = ["worker_ollama", "omniroute_execution"]
 ANALYST_MODEL_CHAIN = ["analyst_ollama", "omniroute_reasoning", "analyst", "analyst_qwen27b", "analyst_qwen_extra", "analyst_deepseek", "analyst_deepseek_or", "analyst_glm", "analyst_minimax_m3", "analyst_minimax_m27", "analyst_kimi", "analyst_glm_nim", "analyst_mistral_medium", "analyst_mistral_small", "analyst_qwen35_nim", "analyst_qwen_next", "analyst_mistral_nemotron"]
 PREMIUM_MODEL_CHAIN = ["premium_ollama", "omniroute_reasoning", "premium", "premium_qwen35b", "analyst_deepseek_or", "premium_glm", "premium_nemotron_ultra", "premium_nemotron_super", "premium_nemotron_49b", "premium_nemotron_49b_v15", "premium_mistral_large", "premium_dracarys"]
 

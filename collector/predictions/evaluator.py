@@ -25,10 +25,8 @@ async def _get_pool():
 
 
 def _normalize_symbol(symbol: str) -> str:
-    s = symbol.strip().lower()
-    if s.endswith("usdt") and len(s) > 4:
-        return s[:-4] + "-usdt"
-    return s
+    """HTX API expects lowercase symbol without dash (e.g. 'btcusdt', not 'btc-usdt')."""
+    return symbol.strip().lower()
 
 
 async def _fetch_htx_kline(symbol: str, period: str = "60min", size: int = 1) -> list[dict[str, Any]]:
@@ -91,7 +89,7 @@ async def evaluate_due_forecasts():
             JOIN forecast_model_runs fmr ON fmr.id = fp.model_run_id
             WHERE fp.evaluated_at IS NULL
               AND fp.target_time <= NOW() AT TIME ZONE 'UTC'
-            ORDER BY fp.target_time
+            ORDER BY fp.target_time DESC
             LIMIT 200
             """
         )
@@ -105,10 +103,10 @@ async def evaluate_due_forecasts():
         key = (row["symbol"], row["base_timeframe"] or "60min")
         groups.setdefault(key, []).append(row)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     for (symbol, period), group_rows in groups.items():
         try:
-            candles = await _fetch_htx_kline(symbol, period, size=10)
+            candles = await _fetch_htx_kline(symbol, period, size=200)
         except Exception as exc:
             log.warning("evaluate_due_forecasts: skip %s %s due to fetch error: %s", symbol, period, exc)
             continue
@@ -123,11 +121,14 @@ async def evaluate_due_forecasts():
             target_ts = int(row["target_time"].replace(tzinfo=timezone.utc).timestamp()) if row["target_time"] else 0
             actual_close = close_by_time.get(target_ts)
             if actual_close is None:
-                # try nearest older candle
+                # target_time may fall inside a candle (e.g. 12:28 -> candle 12:00)
+                # find the candle whose start time is the largest <= target_ts
+                best_ts = -1
                 for c in candles:
-                    if c["time"] <= target_ts:
-                        actual_close = c["close"]
-                        break
+                    if c["time"] <= target_ts and c["time"] > best_ts:
+                        best_ts = c["time"]
+                if best_ts >= 0:
+                    actual_close = close_by_time.get(best_ts)
             if actual_close is None:
                 continue
 
