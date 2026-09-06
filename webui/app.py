@@ -3826,14 +3826,9 @@ async def api_command_deck(request: Request):
 
 @app.get("/command-deck", response_class=HTMLResponse)
 async def command_deck_page(request: Request):
-    """Единый оперативный торговый экран."""
-    return TEMPLATES.TemplateResponse(request, "command_deck.html", {
-        "title": "Command Deck",
-        "current_path": "/command-deck",
-        "auth_enabled": False,
-        "authenticated": False,
-        "chart_notice": "",
-    })
+    """Единый оперативный торговый экран — standalone mobile-first HTML."""
+    html_path = BASE_DIR / "templates" / "command_deck.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
 
 @app.post("/api/positions/open")
