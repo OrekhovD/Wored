@@ -8,7 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from htx.websocket import ws_listen
 from indicators.calculator import calculate_indicators
 from journal.writer import write_entry
-from predictions.evaluator import evaluate_due_forecasts, refresh_historical_forecast_scores
+from predictions.evaluator import evaluate_due_forecasts, refresh_historical_forecast_scores, regenerate_hourly_correction
 from scheduler.alert_checker import check_alerts
 from scheduler.sim_monitor import check_sim_positions
 from scheduler.pipeline_jobs import register_pipeline_jobs
