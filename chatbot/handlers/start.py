@@ -19,22 +19,16 @@ async def _has_active_session(user_id: int) -> bool:
 
 
 def get_main_keyboard(has_session: bool = True) -> ReplyKeyboardMarkup:
-    """ТЗ §5.1 — 6 разделов + главный CTA.
-    ТЗ §5.2 — CTA dynamic: 'Mini App' если сессия активна, 'Старт сессии' если нет.
-    """
-    miniapp_url = os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8080/daily-session"
+    """Command Deck keyboard — быстрый доступ к оперативному экрану + разделы."""
+    miniapp_url = os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8080/command-deck"
 
-    if has_session:
-        # ТЗ §5.2 — Mini App когда сессия активна
-        cta_row = [KeyboardButton(text="📱 Сессия", web_app=WebAppInfo(url=miniapp_url))]
-    else:
-        # ТЗ §5.2 — Старт сессии когда сессии нет
-        cta_row = [KeyboardButton(text="🚀 Старт сессии")]
+    # Главная кнопка — всегда Mini App с Command Deck
+    cta_row = [KeyboardButton(text="⚡ Command Deck", web_app=WebAppInfo(url=miniapp_url))]
 
     return ReplyKeyboardMarkup(
         keyboard=[
             cta_row,
-            # Row 1-2: 6 разделов (ТЗ §5.1)
+            # Row 1-2: 6 разделов
             [KeyboardButton(text="📊 Рынок"), KeyboardButton(text="🧠 Аналитика")],
             [KeyboardButton(text="🔮 Прогнозы"), KeyboardButton(text="📦 Портфель")],
             [KeyboardButton(text="🔔 Алерты"), KeyboardButton(text="🎯 Сессия")],
