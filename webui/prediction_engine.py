@@ -192,7 +192,7 @@ MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
     "minimax": PredictionModelConfig(
         key="minimax",
         name="Oracle / Ollama Thinking",
-        model_id=os.getenv("OLLAMA_ORACLE_MODEL", "kimi-k2-thinking"),
+        model_id=os.getenv("OLLAMA_ORACLE_MODEL", "minimax-m3"),
         base_url=OLLAMA_BASE_URL,
         api_key_env="OLLAMA_API_KEY",
         tier="minimax",
@@ -472,7 +472,7 @@ def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
     if config.key == "premium":
         # Ollama primary — glm-5.2, fallback kimi-k2:1t
         ollama_primary = os.getenv("OLLAMA_PREMIUM_MODEL", "glm-5.2").strip()
-        ollama_fallback = os.getenv("OLLAMA_PREMIUM_FALLBACK_MODEL", "kimi-k2:1t").strip()
+        ollama_fallback = os.getenv("OLLAMA_PREMIUM_FALLBACK_MODEL", "kimi-k2.6").strip()
         candidates = []
         for model_id in [ollama_primary, ollama_fallback]:
             if model_id:
@@ -487,9 +487,9 @@ def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                 )
         return candidates
 
-    # Oracle — Ollama only: kimi-k2-thinking → deepseek-v4-flash
-    ollama_primary = os.getenv("OLLAMA_ORACLE_MODEL", "kimi-k2-thinking").strip()
-    ollama_fallback = os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4-flash").strip()
+    # Oracle — Ollama only: minimax-m3 → glm-5.1 (structured content models)
+    ollama_primary = os.getenv("OLLAMA_ORACLE_MODEL", "minimax-m3").strip()
+    ollama_fallback = os.getenv("OLLAMA_ORACLE_FALLBACK_MODEL", "glm-5.1").strip()
     candidates = []
     for model_id in [ollama_primary, ollama_fallback]:
         if model_id:

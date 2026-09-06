@@ -1293,6 +1293,7 @@ async def create_prediction_request_record(
         raise HTTPException(status_code=503, detail="Postgres is unavailable")
 
     step_minutes = period_to_minutes(base_timeframe)
+    horizon_hours = max(1, int((horizon_steps * step_minutes) / 60))
     created_at = datetime.now(timezone.utc)
 
     request_query = """
