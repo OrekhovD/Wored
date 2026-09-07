@@ -483,31 +483,31 @@
     }
 
     chart.timeScale().fitContent();
-  }
 
-  // Keep references to series keyed by role so tabs can toggle visibility
-  var seriesByRole = {};
-  comparisonModels.forEach(function(model, idx) {
-    var role = (model.agent_role || model.role_name || 'neutral').toLowerCase();
-    if (!seriesByRole[role]) seriesByRole[role] = [];
-    if (forecastSeries[idx]) seriesByRole[role].push(forecastSeries[idx]);
-  });
+    // Keep references to series keyed by role so tabs can toggle visibility
+    var seriesByRole = {};
+    comparisonModels.forEach(function(model, idx) {
+      var role = (model.agent_role || model.role_name || 'neutral').toLowerCase();
+      if (!seriesByRole[role]) seriesByRole[role] = [];
+      if (forecastSeries[idx]) seriesByRole[role].push(forecastSeries[idx]);
+    });
 
-  document.querySelectorAll('.forecast-role-tab').forEach(function(tab) {
-    tab.addEventListener('click', function() {
-      var filter = tab.dataset.filter;
-      document.querySelectorAll('.forecast-role-tab').forEach(function(t) { t.classList.remove('is-active'); });
-      tab.classList.add('is-active');
-      document.querySelectorAll('.forecast-legend-item[data-role]').forEach(function(item) {
-        var visible = filter === 'all' || item.dataset.role === filter;
-        item.classList.toggle('is-hidden', !visible);
-      });
-      Object.keys(seriesByRole).forEach(function(role) {
-        var visible = filter === 'all' || role === filter;
-        seriesByRole[role].forEach(function(s) { s.applyOptions({ visible: visible }); });
+    document.querySelectorAll('.forecast-role-tab').forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        var filter = tab.dataset.filter;
+        document.querySelectorAll('.forecast-role-tab').forEach(function(t) { t.classList.remove('is-active'); });
+        tab.classList.add('is-active');
+        document.querySelectorAll('.forecast-legend-item[data-role]').forEach(function(item) {
+          var visible = filter === 'all' || item.dataset.role === filter;
+          item.classList.toggle('is-hidden', !visible);
+        });
+        Object.keys(seriesByRole).forEach(function(role) {
+          var visible = filter === 'all' || role === filter;
+          seriesByRole[role].forEach(function(s) { s.applyOptions({ visible: visible }); });
+        });
       });
     });
-  });
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initChart);
