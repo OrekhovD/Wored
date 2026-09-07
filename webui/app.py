@@ -3683,6 +3683,32 @@ async def api_command_deck(request: Request):
                         "change_high": round(float(m["max_chg"] or 0), 4),
                     })
 
+                # Per-step candle data for visual forecast
+                candle_rows = await conn.fetch(
+                    """SELECT fmr.model_key, fmr.agent_role, fp.step_index,
+                              fp.predicted_price, fp.predicted_change_pct,
+                              fp.predicted_low, fp.predicted_high, fp.confidence,
+                              fp.target_time
+                       FROM forecast_points fp
+                       JOIN forecast_model_runs fmr ON fmr.id = fp.model_run_id
+                       WHERE fp.request_id = $1 AND fmr.status = 'completed'
+                       ORDER BY fp.step_index, fmr.model_key""",
+                    req_row["id"],
+                )
+                candles: list[dict[str, Any]] = []
+                for cr in candle_rows:
+                    candles.append({
+                        "step": cr["step_index"],
+                        "model": cr["model_key"],
+                        "role": cr["agent_role"] or "neutral",
+                        "price": float(cr["predicted_price"] or 0),
+                        "change_pct": round(float(cr["predicted_change_pct"] or 0), 4),
+                        "low": float(cr["predicted_low"] or 0),
+                        "high": float(cr["predicted_high"] or 0),
+                        "confidence": round(float(cr["confidence"] or 0), 1),
+                        "target_time": serialize_dt(cr["target_time"].replace(tzinfo=timezone.utc) if cr["target_time"].tzinfo is None else cr["target_time"]) if cr["target_time"] else None,
+                    })
+
                 bear_count = sum(1 for r in roles if r["direction"] == "bearish")
                 bull_count = sum(1 for r in roles if r["direction"] == "bullish")
                 consensus = {
@@ -3691,6 +3717,7 @@ async def api_command_deck(request: Request):
                     "base_price": float(req_row["base_price"]),
                     "created_at": serialize_dt(req_row["created_at"].replace(tzinfo=timezone.utc) if req_row["created_at"].tzinfo is None else req_row["created_at"]),
                     "roles": roles,
+                    "candles": candles,
                     "verdict": "bearish" if bear_count > bull_count else "bullish" if bull_count > bear_count else "neutral",
                     "agreement": f"{max(bear_count, bull_count)}/{len(roles)}",
                 }
@@ -3829,6 +3856,62 @@ async def command_deck_page(request: Request):
     """Единый оперативный торговый экран — standalone mobile-first HTML."""
     html_path = BASE_DIR / "templates" / "command_deck.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/api/trade/preview")
+async def api_trade_preview(
+    request: Request,
+    direction: str = "long",
+    leverage: int = 100,
+    margin: float = 10.0,
+    symbol: str = "btcusdt",
+):
+    """Pre-trade preview: entry price, liquidation, fees, notional, PnL scenarios."""
+    symbol = normalize_symbol(symbol)
+    snap = await get_symbol_snapshot(request, symbol)
+    entry_price = float(snap.get("price", 0))
+    if entry_price <= 0:
+        raise HTTPException(status_code=503, detail=f"No live price for {symbol}")
+
+    leverage = max(1, min(200, int(leverage)))
+    margin = max(1, float(margin))
+    direction = direction.lower()
+    if direction not in ("long", "short"):
+        direction = "long"
+
+    notional = margin * leverage
+    size = notional / entry_price
+    taker_fee = notional * 0.0006
+    liq_margin = 0.005
+
+    if direction == "long":
+        liq_price = entry_price * (1 - 1 / leverage + liq_margin)
+    else:
+        liq_price = entry_price * (1 + 1 / leverage - liq_margin)
+
+    # PnL scenarios: +1%, -1%, +5%, -5%
+    scenarios = {}
+    for pct in [1, -1, 5, -5]:
+        target = entry_price * (1 + pct / 100)
+        if direction == "long":
+            pnl = (target - entry_price) * size
+        else:
+            pnl = (entry_price - target) * size
+        scenarios[f"{pct:+d}%"] = round(pnl, 2)
+
+    return {
+        "symbol": symbol,
+        "direction": direction,
+        "entry_price": round(entry_price, 2),
+        "leverage": leverage,
+        "margin": margin,
+        "notional": round(notional, 2),
+        "size": round(size, 6),
+        "taker_fee": round(taker_fee, 4),
+        "liquidation_price": round(liq_price, 2),
+        "liq_distance_pct": round(abs(liq_price - entry_price) / entry_price * 100, 2),
+        "scenarios": scenarios,
+    }
 
 
 @app.post("/api/positions/open")
