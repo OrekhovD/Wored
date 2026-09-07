@@ -3722,6 +3722,36 @@ async def api_command_deck(request: Request):
                     "agreement": f"{max(bear_count, bull_count)}/{len(roles)}",
                 }
 
+    # 2b. HISTORICAL CANDLES — last 5 real HTX 1h candles for the primary symbol
+    hist_candles: list[dict[str, Any]] = []
+    hist_symbol = consensus.get("symbol") if consensus else (watchlist[0] if watchlist else "btcusdt")
+    if not hist_symbol:
+        hist_symbol = "btcusdt"
+    try:
+        hc = request.app.state.http_client
+        hresp = await hc.get(
+            f"{HTX_REST_URL}/market/history/kline",
+            params={"symbol": hist_symbol, "period": "60min", "size": 5},
+        )
+        hresp.raise_for_status()
+        hdata = hresp.json()
+        if hdata.get("status") == "ok":
+            for item in reversed(hdata.get("data", [])):
+                hist_candles.append({
+                    "time": item["id"],
+                    "open": float(item["open"]),
+                    "high": float(item["high"]),
+                    "low": float(item["low"]),
+                    "close": float(item["close"]),
+                    "volume": float(item.get("vol", 0)),
+                })
+    except Exception:
+        pass
+    if consensus:
+        consensus["history"] = hist_candles
+    else:
+        consensus = {"history": hist_candles, "symbol": hist_symbol}
+
     # 3. POSITIONS — open sim positions with live PnL
     positions: list[dict[str, Any]] = []
     if pool:
