@@ -1979,7 +1979,7 @@ async def predictions_page(
             symbol = selected_request.get("symbol", "btcusdt")
             horizon = selected_request.get("horizon_hours", 4)
             base_timeframe = selected_request.get("base_timeframe", "60min")
-            fetch_size = min(72 + horizon + 6, 200)
+            fetch_size = min(72 + horizon + 24, 200)
             all_candles = await fetch_klines(request, symbol, base_timeframe, fetch_size)
 
             created_str = selected_request.get("created_at")

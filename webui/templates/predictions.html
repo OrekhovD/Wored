@@ -482,6 +482,47 @@
       });
     }
 
+    // Forecast candles — average across models per step, drawn as candlesticks
+    if (comparisonRows && comparisonRows.length) {
+      var fcCandles = [];
+      comparisonRows.forEach(function(row) {
+        var ts = row.target_time_ts;
+        if (!ts && row.target_time) ts = Math.floor(new Date(row.target_time).getTime() / 1000);
+        if (!ts) return;
+        var prices = [], lows = [], highs = [];
+        row.model_cells.forEach(function(cell) {
+          if (cell.point) {
+            prices.push(cell.point.predicted_price);
+            if (cell.point.predicted_low) lows.push(cell.point.predicted_low);
+            if (cell.point.predicted_high) highs.push(cell.point.predicted_high);
+          }
+        });
+        if (!prices.length) return;
+        var avg = prices.reduce(function(a,b){return a+b}) / prices.length;
+        var lo = lows.length ? Math.min.apply(null, lows) : avg;
+        var hi = highs.length ? Math.max.apply(null, highs) : avg;
+        // Determine open: use previous forecast candle close or base price
+        var openVal = fcCandles.length ? fcCandles[fcCandles.length-1].close : basePrice;
+        fcCandles.push({
+          time: ts,
+          open: openVal,
+          high: hi,
+          low: lo,
+          close: avg
+        });
+      });
+      if (fcCandles.length) {
+        var fcSeries = createCandlestickSeries({
+          upColor: '#f97316', downColor: '#a78bfa',
+          borderUpColor: '#f97316', borderDownColor: '#a78bfa',
+          wickUpColor: '#f97316', wickDownColor: '#a78bfa'
+        });
+        if (fcSeries) {
+          fcSeries.setData(fcCandles);
+        }
+      }
+    }
+
     chart.timeScale().fitContent();
 
     // Keep references to series keyed by role so tabs can toggle visibility
