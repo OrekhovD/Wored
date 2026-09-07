@@ -489,6 +489,11 @@
         var ts = row.target_time_ts;
         if (!ts && row.target_time) ts = Math.floor(new Date(row.target_time).getTime() / 1000);
         if (!ts) return;
+        // Round to the START of the next hour so forecast candles sit on
+        // clean hourly boundaries and don't overlap live/historical candles.
+        // target_time is the END of the forecast hour (e.g. 08:59:39);
+        // ceil to the next hour boundary (09:00:00) for a distinct bar.
+        ts = Math.ceil(ts / 3600) * 3600;
         var prices = [], lows = [], highs = [];
         row.model_cells.forEach(function(cell) {
           if (cell.point) {
