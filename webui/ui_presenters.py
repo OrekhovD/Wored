@@ -314,7 +314,8 @@ def present_deck_ui(market: List[Dict[str, Any]], consensus: Dict[str, Any],
     # Metrics availability
     metrics_ui = {
         'available': bool(accuracy) and any(
-            m.get('total', 0) >= 30 for m in accuracy.values()
+            (m.get('total', 0) if isinstance(m, dict) else m) >= 30
+            for m in accuracy.values()
         ) if accuracy else False,
         'reason_code': 'insufficient_independent_samples' if accuracy else 'no_metrics',
     }

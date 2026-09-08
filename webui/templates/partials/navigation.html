@@ -55,7 +55,12 @@
 
   {# ── Data status + auth ── #}
   <div class="wored-nav-status">
-    <span class="wored-data-status" id="dataStatus" aria-live="polite">—</span>
+    <span class="wored-data-status" id="dataStatus" aria-live="polite" aria-label="Статус данных">—</span>
+    <span class="wored-health-dots" aria-label="Состояние сервисов">
+      <span class="wored-health-dot is-idle" id="healthRedis" title="Redis">R</span>
+      <span class="wored-health-dot is-idle" id="healthPostgres" title="PostgreSQL">PG</span>
+      <span class="wored-health-dot is-idle" id="healthCollector" title="Сбор данных">Feed</span>
+    </span>
     {% if auth_enabled %}
       {% if authenticated %}
         <span class="wored-auth-pill wored-auth-ok">{{ admin_username }}</span>

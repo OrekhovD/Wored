@@ -122,7 +122,9 @@ class Test48StepChart:
     async def test_predictions_page_shows_1_48_range(self, client):
         await _login(client)
         resp = await client.get("/predictions")
-        assert "1–48" in resp.text or "1-48" in resp.text
+        # The forecast form has horizon max="48" and shortcut buttons
+        assert 'max="48"' in resp.text
+        assert 'data-h="48"' in resp.text
 
     async def test_predictions_page_has_chart_area(self, client):
         await _login(client)
