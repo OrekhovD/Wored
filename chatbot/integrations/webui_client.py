@@ -8,7 +8,18 @@ from typing import Any
 
 import httpx
 
-from forecast_input import validate_idempotency_key
+# Inline idempotency key validation (duplicated from webui/forecast_input.py
+# to avoid cross-container import; chatbot runs on Python 3.9 without webui package)
+_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+def validate_idempotency_key(key: str) -> str:
+    """Validate and return a cleaned idempotency key, or raise ValueError."""
+    if not key or not key.strip():
+        raise ValueError("Idempotency-Key must not be empty")
+    cleaned = key.strip()
+    if not _IDEMPOTENCY_KEY_RE.match(cleaned):
+        raise ValueError(f"Invalid Idempotency-Key: {key!r}")
+    return cleaned
 
 
 def get_webui_internal_base_url() -> str:

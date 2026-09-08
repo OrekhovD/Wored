@@ -1,7 +1,7 @@
 """Version 2 outcome metrics. Scores are heuristic, never calibrated probabilities."""
 import math
 from dataclasses import dataclass
-
+from typing import Optional, List
 
 @dataclass(frozen=True)
 class ForecastScore:
@@ -11,8 +11,7 @@ class ForecastScore:
     price_error_pct: float
     change_error_pct: float
     baseline_error_pct: float
-    skill_vs_baseline: float | None
-
+    skill_vs_baseline: Optional[float]
 
 def score_forecast(base_price: float, predicted_price: float, predicted_change_pct: float,
                    actual_price: float) -> ForecastScore:
@@ -33,8 +32,7 @@ def score_forecast(base_price: float, predicted_price: float, predicted_change_p
     return ForecastScore(direction, score, round(100 - score, 2), error, change_error,
                          baseline, 1 - error / baseline if baseline > 0 else None)
 
-
-def closed_target_price(candles: list[dict], target_ts: int, period_seconds: int, now_ts: float) -> float | None:
+def closed_target_price(candles: List[dict], target_ts: int, period_seconds: int, now_ts: float) -> Optional[float]:
     # Legacy targets within a candle are explicitly evaluated at that candle's
     # close. No older/newer available candle is silently substituted across gaps.
     boundary = math.ceil(target_ts / period_seconds) * period_seconds
