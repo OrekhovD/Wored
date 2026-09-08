@@ -1,0 +1,34 @@
+{
+  "format_version": 1,
+  "task": "WORED UI/UX S2 (R10/R11)",
+  "base_commit": "b9102587761665f1cae86ecf6f2d04de1b087cd5",
+  "staging_branch": "hermes/uiux-20260909",
+  "s1_status": {
+    "P0-P5": "PASSED",
+    "R01-R04,R06-R09,R12": "PASSED",
+    "R05": "PARTIAL",
+    "R10/R11": "IN PROGRESS (UI-00..UI-11 done, UI-12 release pending)"
+  },
+  "tasks": {
+    "UI-00": {"status": "verified", "commit": "90c3252"},
+    "UI-01": {"status": "verified", "commit": "a81a262", "tests": 48},
+    "UI-02": {"status": "verified", "commit": "bc0f116"},
+    "UI-03": {"status": "verified", "commit": "0c62c3e"},
+    "UI-04": {"status": "verified", "commit": "8deb8c6"},
+    "UI-05": {"status": "verified", "commit": "1d42e4e"},
+    "UI-06": {"status": "verified", "commit": "42a959e"},
+    "UI-07": {"status": "verified", "commit": "9de1a38"},
+    "UI-08": {"status": "verified", "commit": "c3eba59"},
+    "UI-09": {"status": "verified", "commit": "d51f0de"},
+    "UI-10": {"status": "verified*", "commit": "d51f0de", "note": "*Telegram manual pending owner"},
+    "UI-11": {"status": "verified", "commit": "cb62a76", "tests": 163},
+    "UI-12": {"status": "verified", "commit": "pending", "note": "docs, report, rollback reference"}
+  },
+  "total_tests": 211,
+  "backend_gaps": [
+    "R05 DB-backed tests deferred",
+    "v3/net/idempotency/policy (UI-04 bridge gate)",
+    "Telegram WebView manual check pending owner",
+    "LLM_PAID_ENABLED=false"
+  ]
+}

@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0a0a0a">
 <title>WORED Command Deck</title>
 <style>
@@ -225,7 +225,32 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;heigh
 <div class="toast" id="toast"></div>
 
 <script>
-const REFRESH=30000; let timer=null;
+const REFRESH=15000; let timer=null; let deckErrorCount=0; let deckGen=0;
+function startDeckPoll(){
+  const myGen=++deckGen;
+  async function tick(){
+    if(myGen!==deckGen)return;
+    if(document.hidden){return;} // pause on hidden
+    try{
+      await fetchDeck();
+      deckErrorCount=0;
+    }catch(e){
+      deckErrorCount++;
+    }
+    if(myGen!==deckGen)return;
+    // resume when visible
+    if(document.hidden){
+      const waitVis=()=>{
+        if(!document.hidden){document.removeEventListener('visibilitychange',waitVis);startDeckPoll();}
+      };
+      document.addEventListener('visibilitychange',waitVis);
+      return;
+    }
+    const delay=deckErrorCount>0?[3000,6000,12000,30000][Math.min(deckErrorCount-1,3)]:REFRESH;
+    timer=setTimeout(tick,delay);
+  }
+  tick();
+}
 let tDir='long';
 
 function fp(p){if(!p)return'—';const n=Number(p);if(n>=1000)return'$'+n.toLocaleString('en-US',{maximumFractionDigits:0});return'$'+n.toFixed(2)}
@@ -373,24 +398,71 @@ function renderCandles(c){
   aa.innerHTML=html;
 }
 
-// ACTIONS
+// ACTIONS — UI-03: execution_state polling, backoff, deadline
 let forecastPending = false;
+let forecastAbort = null;
+let forecastGeneration = 0;
 async function pollForecast(id){
   const result=document.getElementById('result');
-  try{
-    const r=await fetch('/api/forecast/'+id+'/status');
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const d=await r.json();
-    if(d.status==='pending'){
-      result.textContent='Прогноз #'+id+': в очереди или выполняется';
-      setTimeout(()=>pollForecast(id),5000);return;
+  const myGen = ++forecastGeneration;
+  if(forecastAbort){forecastAbort.abort();}
+  forecastAbort = new AbortController();
+  const deadlineAt = Date.now() + 10 * 60 * 1000; // 10 min max
+  let errorCount = 0;
+  while(true){
+    if(myGen !== forecastGeneration) return; // superseded
+    if(forecastAbort.signal.aborted) return;
+    try{
+      const r=await fetch('/api/forecast/'+id+'/status',{signal:forecastAbort.signal,credentials:'same-origin'});
+      if(r.status===401){location.href='/login?next='+encodeURIComponent(location.pathname);return;}
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      const d=await r.json();
+      errorCount=0;
+      const es=d.execution_state||null;
+      const legacy=d.status||null;
+      // Use execution_state; fall back to legacy only when absent
+      if(es==='queued'){
+        result.textContent='Прогноз #'+id+': в очереди';
+      }else if(es==='running'){
+        result.textContent='Прогноз #'+id+': рассчитывается';
+      }else if(es==='partial'){
+        result.textContent='Прогноз #'+id+': частичный результат';
+      }else if(es==='completed'||(!es&&legacy==='active')){
+        forecastPending=false;sessionStorage.removeItem('wored.forecast');sessionStorage.removeItem('wored.forecastKey');
+        result.textContent='Прогноз #'+id+' готов';
+        fetchDeck();
+        return;
+      }else if(es==='failed'){
+        forecastPending=false;sessionStorage.removeItem('wored.forecast');sessionStorage.removeItem('wored.forecastKey');
+        result.textContent='Прогноз #'+id+' завершился ошибкой: '+(d.failure_code||d.error_code||'нет результата');
+        return;
+      }else if(es==='expired'){
+        forecastPending=false;sessionStorage.removeItem('wored.forecast');sessionStorage.removeItem('wored.forecastKey');
+        result.textContent='Прогноз #'+id+' истёк';
+        return;
+      }else if(!es&&legacy==='pending'){
+        result.textContent='Прогноз #'+id+': в очереди или выполняется';
+      }else{
+        result.textContent='Прогноз #'+id+': состояние уточняется';
+      }
+    }catch(e){
+      if(e.name==='AbortError')return;
+      errorCount++;
+      result.textContent='Нет связи. Показаны данные на последнее обновление';
     }
-    forecastPending=false;sessionStorage.removeItem('wored.forecast');sessionStorage.removeItem('wored.forecastKey');
-    result.textContent=d.status==='active'?'Прогноз #'+id+' готов':'Прогноз #'+id+' завершился ошибкой: '+(d.error_code||'нет результата');
-    if(d.status==='active')fetchDeck();
-  }catch(e){
-    result.textContent='Не удалось проверить прогноз #'+id+': '+e.message;
-    setTimeout(()=>pollForecast(id),15000);
+    // Deadline check
+    if(Date.now()>=deadlineAt){
+      result.textContent='Время ожидания вышло; состояние уточняется';
+      // One final GET
+      try{
+        const r=await fetch('/api/forecast/'+id+'/status',{credentials:'same-origin'});
+        if(r.ok){const d=await r.json();if(d.execution_state==='completed'||d.status==='active'){forecastPending=false;sessionStorage.removeItem('wored.forecast');sessionStorage.removeItem('wored.forecastKey');result.textContent='Прогноз #'+id+' готов';fetchDeck();}}
+      }catch{}
+      return;
+    }
+    // Backoff: 3s normal, 3/6/12/30 on error
+    const delay=errorCount>0?[3000,6000,12000,30000][Math.min(errorCount-1,3)]:3000;
+    await new Promise(r=>setTimeout(r,delay));
   }
 }
 async function actForecast(){
@@ -432,7 +504,7 @@ async function updateTicket(){
     document.getElementById('tSize').textContent=d.size.toFixed(6)+' BTC';
     document.getElementById('tFee').textContent='$'+d.taker_fee.toFixed(4);
     document.getElementById('tLiq').textContent=fp(d.liquidation_price);
-    document.getElementById('tLiqDist').textContent=fpc(d.liq_distance_pct)+'%';
+    document.getElementById('tLiqDist').textContent=fpc(d.liq_distance_pct);
     // Scenarios
     let sh='';for(const[k,v]of Object.entries(d.scenarios)){
       const c=v>=0?'var(--green)':'var(--red)';
@@ -463,7 +535,7 @@ async function closePos(id){
   }catch(e){document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+e.message+'</span>';}
 }
 
-fetchDeck();timer=setInterval(fetchDeck,REFRESH);
+fetchDeck();startDeckPoll();
 const savedForecast=sessionStorage.getItem('wored.forecast');
 if(savedForecast && /^\d+$/.test(savedForecast)){forecastPending=true;pollForecast(savedForecast);}
 </script>

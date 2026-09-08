@@ -3,50 +3,15 @@
 <head>
   {% block head_extra %}{% endblock %}
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>{{ page_title or "WORED Web UI" }}</title>
-  <link rel="stylesheet" href="/static/styles.css?v=4">
+  <link rel="stylesheet" href="/static/ui/tokens.css">
+  <link rel="stylesheet" href="/static/styles.css?v=5">
   <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
   <div class="shell">
-    <div class="hero-grid"></div>
-
-    <nav class="topbar">
-      <a class="brand" href="/">WORED</a>
-      <div class="topbar-links">
-        <a class="{% if current_path == '/' %}is-current{% endif %}" href="/">Dashboard</a>
-        <a class="{% if current_path == '/command-deck' %}is-current{% endif %}" href="/command-deck">⚡ Command</a>
-        <a class="{% if current_path == '/alerts' %}is-current{% endif %}" href="/alerts">Alerts<span id="navAlertBadge"></span></a>
-        <a class="{% if current_path.startswith('/predictions') %}is-current{% endif %}" href="/predictions">Predictions</a>
-        <a class="{% if current_path.startswith('/journal') %}is-current{% endif %}" href="/journal">AI Journal</a>
-        <a class="{% if current_path == '/futures-lab' %}is-current{% endif %}" href="/futures-lab">Futures Lab</a>
-        <a class="{% if current_path == '/daily-session' %}is-current{% endif %}" href="/daily-session">Daily Session</a>
-        <a class="{% if current_path == '/strategy' %}is-current{% endif %}" href="/strategy">Strategy</a>
-        <a class="{% if current_path == '/model-management' %}is-current{% endif %}" href="/model-management">Models</a>
-      </div>
-      <div class="topbar-health" id="topbarHealth">
-        <span class="health-dot is-idle" id="healthRedis">Redis</span>
-        <span class="health-dot is-idle" id="healthPostgres">PG</span>
-        <span class="health-dot is-idle" id="healthCollector">Feed</span>
-        <span class="health-dot is-idle" id="topbarAlerts">Alerts —</span>
-      </div>
-      <div class="topbar-auth">
-        {% if auth_enabled %}
-          {% if authenticated %}
-            <span class="auth-pill auth-ok">Signed in as {{ admin_username }}</span>
-            <form method="post" action="/logout" class="inline-form">
-              <button type="submit" class="ghost-button">Logout</button>
-            </form>
-          {% else %}
-            <span class="auth-pill auth-warn">Auth required</span>
-            <a class="ghost-button link-button" href="/login">Login</a>
-          {% endif %}
-        {% else %}
-          <span class="auth-pill auth-warn">Local mode</span>
-        {% endif %}
-      </div>
-    </nav>
+    {% include "partials/navigation.html" %}
 
     {% if flash %}
       <div class="flash flash-{{ flash.level }}">{{ flash.message }}</div>
@@ -55,7 +20,7 @@
     {% block content %}{% endblock %}
 
     <footer class="footer">
-      <div>WORED browser control surface for local operations.</div>
+      <div>WORED — интерфейс управления</div>
       <div class="attribution">
         {{ chart_notice }}
         <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a>
@@ -65,14 +30,61 @@
 
   <div id="globalToast" class="toast"></div>
 
+  {# Ticket dialog — UI-07: shared Long/Short dialog #}
+  <div class="ticket-dialog" id="ticketDialog" hidden>
+    <div class="ticket-dialog-content" role="dialog" aria-modal="true" aria-labelledby="ticketDialogTitle">
+      <div class="ticket-dialog-header">
+        <h2 id="ticketDialogTitle" tabindex="-1">Учебная позиция <span data-ticket-dir class="ticket-dir">Long</span></h2>
+        <span data-ticket-sim class="ticket-sim-badge">Симуляция</span>
+      </div>
+      <div class="ticket-field-row">
+        <div class="ticket-field">
+          <label for="ticketMargin">Margin (USDT)</label>
+          <input type="number" id="ticketMargin" data-ticket-margin value="10" min="1" step="0.1">
+          <span data-ticket-mar-display>10,00 USDT</span>
+        </div>
+        <div class="ticket-field">
+          <label for="ticketLeverage">Плечо</label>
+          <input type="number" id="ticketLeverage" data-ticket-leverage value="10" min="1" max="200" step="1">
+          <span data-ticket-lev-display>10x</span>
+        </div>
+      </div>
+      <div class="ticket-preview-section">
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Символ</span><span data-ticket-symbol class="ticket-preview-value">BTCUSDT</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Цена входа</span><span data-preview-entry class="ticket-preview-value">—</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Объём</span><span data-preview-notional class="ticket-preview-value">—</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Размер</span><span data-preview-size class="ticket-preview-value">—</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Комиссия входа</span><span data-preview-fee class="ticket-preview-value">—</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Ликвидация</span><span data-preview-liq class="ticket-preview-value">—</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">До ликвидации</span><span data-preview-liq-dist class="ticket-preview-value">—</span></div>
+        <div data-preview-scenarios></div>
+      </div>
+      <div class="ticket-error" data-ticket-error role="alert"></div>
+      <input type="hidden" data-csrf value="{{ csrf_token }}">
+      <div class="ticket-actions">
+        <button type="button" class="ticket-close-btn" onclick="window.WORED?.closeDialog?.()">Закрыть</button>
+        <button type="button" class="wored-btn" data-ticket-confirm disabled>Открыть Long</button>
+      </div>
+    </div>
+  </div>
+
   <script>
   (function() {
-    async function refreshGlobalHealth() {
-      try {
-        const r = await fetch("/api/health");
-        if (!r.ok) return;
-        const h = await r.json();
+    /* Global health + data status polling — UI-03: setTimeout-after-completion, pause on hidden */
+    let healthErrCount = 0;
+    let alertErrCount = 0;
+    let healthTimer = null;
+    let alertTimer = null;
 
+    async function refreshGlobalHealth() {
+      if (document.hidden) return;
+      try {
+        const r = await fetch("/api/health", {credentials: 'same-origin'});
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const h = await r.json();
+        healthErrCount = 0;
+
+        /* Nav health dots */
         const dots = {
           healthRedis: h.redis,
           healthPostgres: h.postgres,
@@ -81,16 +93,41 @@
         for (const [id, ok] of Object.entries(dots)) {
           const el = document.getElementById(id);
           if (!el) continue;
-          el.className = "health-dot " + (ok ? "is-ok" : "is-warn");
+          el.className = "wored-health-dot " + (ok ? "is-ok" : "is-warn");
         }
-      } catch (_) {}
+
+        /* Data freshness status */
+        const label = document.getElementById("dataStatusLabel");
+        if (label) {
+          if (h.redis && h.postgres && h.collector_feed) {
+            label.textContent = "Данные доступны";
+            label.className = "ui-text-success";
+          } else if (h.postgres) {
+            label.textContent = "Данные устарели";
+            label.className = "ui-text-accent";
+          } else {
+            label.textContent = "Нет связи";
+            label.className = "ui-text-danger";
+          }
+        }
+      } catch (_) {
+        healthErrCount++;
+        const label = document.getElementById("dataStatusLabel");
+        if (label) { label.textContent = "Нет связи"; label.className = "ui-text-danger"; }
+      }
+      const delay = healthErrCount > 0
+        ? [3000,6000,12000,30000][Math.min(healthErrCount-1,3)]
+        : 15000;
+      healthTimer = setTimeout(refreshGlobalHealth, delay);
     }
 
     async function refreshAlertBadge() {
+      if (document.hidden) return;
       try {
-        const r = await fetch("/api/alerts?limit=1");
-        if (!r.ok) return;
+        const r = await fetch("/api/alerts?limit=1", {credentials: 'same-origin'});
+        if (!r.ok) throw new Error('HTTP ' + r.status);
         const data = await r.json();
+        alertErrCount = 0;
         const badge = document.getElementById("navAlertBadge");
         if (!badge) return;
         const openCount = data.counts?.open ?? 0;
@@ -101,13 +138,27 @@
           badge.className = "";
           badge.textContent = "";
         }
-      } catch (_) {}
+      } catch (_) {
+        alertErrCount++;
+      }
+      const delay = alertErrCount > 0
+        ? [3000,6000,12000,30000][Math.min(alertErrCount-1,3)]
+        : 30000;
+      alertTimer = setTimeout(refreshAlertBadge, delay);
     }
+
+    /* Resume polling when page becomes visible */
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) {
+        clearTimeout(healthTimer); clearTimeout(alertTimer);
+        healthErrCount = 0; alertErrCount = 0;
+        refreshGlobalHealth();
+        refreshAlertBadge();
+      }
+    });
 
     refreshGlobalHealth();
     refreshAlertBadge();
-    setInterval(refreshGlobalHealth, 15000);
-    setInterval(refreshAlertBadge, 30000);
   })();
 
   window.WORED_TOAST = function(message, level) {
@@ -119,5 +170,11 @@
     toast._timer = setTimeout(() => { toast.className = "toast"; }, 3000);
   };
   </script>
+  <script type="module" src="/static/ui/core.js"></script>
+  <script type="module" src="/static/ui/async-patterns.js"></script>
+  <script type="module" src="/static/ui/forecast-chart.js"></script>
+  <script type="module" src="/static/ui/forecast.js"></script>
+  <script type="module" src="/static/ui/ticket.js"></script>
+  <script type="module" src="/static/ui/session.js"></script>
 </body>
 </html>

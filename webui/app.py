@@ -58,6 +58,7 @@ from services.market_data import fresh_ticker
 from services.sim_math import preview as simulate_preview, validate_order, settlement
 
 from prediction_timeframes import period_to_minutes, STEP_MINUTES_MAP
+from ui_presenters import present_deck_ui, present_preview_ui
 
 
 log = logging.getLogger("webui")
@@ -2827,6 +2828,15 @@ async def model_management_page(request: Request):
     return template_response(request, "models.html", page_title="Model Management")
 
 
+@app.get("/system", response_class=HTMLResponse)
+async def system_page(request: Request):
+    """System Status page — health, diagnostics, admin controls (UI-02)."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(request, "system.html", page_title="Состояние системы")
+
+
 # ─── Daily Pipeline v2 — Telegram Mini App API (ТЗ backend_contract v1) ─
 
 VALID_REVISION_COMMANDS = {"continue", "tighten", "reduce", "pause", "close_all"}
@@ -3917,14 +3927,17 @@ async def api_command_deck(request: Request):
         "accuracy": accuracy,
         "health": health,
         "alerts": recent_alerts,
+        **present_deck_ui(market, consensus, positions, session_info, accuracy, health),
     }
 
 
 @app.get("/command-deck", response_class=HTMLResponse)
 async def command_deck_page(request: Request):
-    """Единый оперативный торговый экран — standalone mobile-first HTML."""
-    html_path = BASE_DIR / "templates" / "command_deck.html"
-    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+    """Единый оперативный торговый экран (UI-04: template_response)."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(request, "command_deck.html", page_title="Панель управления")
 
 
 @app.get("/api/trade/preview")

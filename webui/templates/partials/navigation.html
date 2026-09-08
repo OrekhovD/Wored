@@ -1,0 +1,78 @@
+{# WORED Navigation Partial — UI-02
+   Groups: Обзор, Сессия, Исследование, Система
+   Variables: current_path (from build_template_context), auth_enabled, authenticated
+#}
+<nav class="wored-nav" aria-label="Основная навигация">
+  <div class="wored-nav-brand">
+    <a class="wored-brand" href="/command-deck">WORED</a>
+  </div>
+
+  <div class="wored-nav-groups">
+    {# ── Обзор ── #}
+    <div class="wored-nav-group{% if current_path in ('/command-deck', '/', '/alerts') %} is-active{% endif %}">
+      <a class="wored-nav-link{% if current_path == '/command-deck' %} is-current{% endif %}"
+         href="/command-deck" aria-current="{% if current_path == '/command-deck' %}page{% else %}false{% endif %}">Панель</a>
+      <div class="wored-nav-secondary">
+        <a class="wored-nav-sublink{% if current_path == '/' %} is-current{% endif %}"
+           href="/" aria-current="{% if current_path == '/' %}page{% else %}false{% endif %}">Рынок</a>
+        <a class="wored-nav-sublink{% if current_path == '/alerts' %} is-current{% endif %}"
+           href="/alerts" aria-current="{% if current_path == '/alerts' %}page{% else %}false{% endif %}">Оповещения</a>
+      </div>
+    </div>
+
+    {# ── Сессия ── #}
+    <div class="wored-nav-group{% if current_path in ('/daily-session', '/futures-lab', '/strategy') %} is-active{% endif %}">
+      <a class="wored-nav-link{% if current_path == '/daily-session' %} is-current{% endif %}"
+         href="/daily-session" aria-current="{% if current_path == '/daily-session' %}page{% else %}false{% endif %}">Сессия</a>
+      <div class="wored-nav-secondary">
+        <a class="wored-nav-sublink{% if current_path == '/futures-lab' %} is-current{% endif %}"
+           href="/futures-lab" aria-current="{% if current_path == '/futures-lab' %}page{% else %}false{% endif %}">Позиции</a>
+        <a class="wored-nav-sublink{% if current_path == '/strategy' %} is-current{% endif %}"
+           href="/strategy" aria-current="{% if current_path == '/strategy' %}page{% else %}false{% endif %}">Стратегия</a>
+      </div>
+    </div>
+
+    {# ── Исследование ── #}
+    <div class="wored-nav-group{% if current_path.startswith('/predictions') or current_path.startswith('/journal') %} is-active{% endif %}">
+      <a class="wored-nav-link{% if current_path.startswith('/predictions') %} is-current{% endif %}"
+         href="/predictions" aria-current="{% if current_path.startswith('/predictions') %}page{% else %}false{% endif %}">Прогнозы</a>
+      <div class="wored-nav-secondary">
+        <a class="wored-nav-sublink{% if current_path.startswith('/journal') %} is-current{% endif %}"
+           href="/journal" aria-current="{% if current_path.startswith('/journal') %}page{% else %}false{% endif %}">Журнал</a>
+      </div>
+    </div>
+
+    {# ── Система ── #}
+    <div class="wored-nav-group{% if current_path in ('/system', '/model-management') %} is-active{% endif %}">
+      <a class="wored-nav-link{% if current_path == '/system' %} is-current{% endif %}"
+         href="/system" aria-current="{% if current_path == '/system' %}page{% else %}false{% endif %}">Состояние</a>
+      <div class="wored-nav-secondary">
+        <a class="wored-nav-sublink{% if current_path == '/model-management' %} is-current{% endif %}"
+           href="/model-management" aria-current="{% if current_path == '/model-management' %}page{% else %}false{% endif %}">Модели</a>
+      </div>
+    </div>
+  </div>
+
+  {# ── Data status + auth ── #}
+  <div class="wored-nav-status">
+    <span class="wored-data-status" id="dataStatus" aria-live="polite" aria-label="Статус данных">—</span>
+    <span class="wored-health-dots" aria-label="Состояние сервисов">
+      <span class="wored-health-dot is-idle" id="healthRedis" title="Redis">R</span>
+      <span class="wored-health-dot is-idle" id="healthPostgres" title="PostgreSQL">PG</span>
+      <span class="wored-health-dot is-idle" id="healthCollector" title="Сбор данных">Feed</span>
+    </span>
+    {% if auth_enabled %}
+      {% if authenticated %}
+        <span class="wored-auth-pill wored-auth-ok">{{ admin_username }}</span>
+        <form method="post" action="/logout" class="wored-inline-form">
+          <button type="submit" class="wored-ghost-btn">Выход</button>
+        </form>
+      {% else %}
+        <span class="wored-auth-pill wored-auth-warn">Требуется вход</span>
+        <a class="wored-ghost-btn" href="/login">Войти</a>
+      {% endif %}
+    {% else %}
+      <span class="wored-auth-pill">Локальный режим</span>
+    {% endif %}
+  </div>
+</nav>

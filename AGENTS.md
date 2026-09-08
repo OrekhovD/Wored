@@ -105,16 +105,16 @@ Docker Compose runtime содержит 5 сервисов:
 ### WebUI
 
 - webui/app.py
-- webui/templates/base.html
-- webui/templates/index.html
-- webui/templates/alerts.html
-- webui/templates/predictions.html
-- webui/templates/journal.html
-- webui/templates/login.html
+- webui/ui_presenters.py
+- webui/templates/base.html, partials/navigation.html, partials/forecast_form.html
+- webui/templates/{index,command_deck,predictions,daily_session,futures_lab,strategy,alerts,journal,models,system,login}.html
 - webui/static/styles.css
 - webui/static/app.js
+- webui/static/ui/{tokens.css,core.js,async-patterns.js,forecast-chart.js,forecast.js,ticket.js,session.js}
 
 Правило: не заменять весь WebUI шаблоном с нуля. Развивать текущую дизайн-систему инкрементально.
+UI QA: `python -m pytest tests/test_ui_presenters.py -v` (48 tests)
+UI Acceptance: `python scripts/run_ui_acceptance.py --host 127.0.0.1 --port 18080 --browser all`
 
 ### Collector
 
