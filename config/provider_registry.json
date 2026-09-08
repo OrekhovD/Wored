@@ -1,0 +1,153 @@
+{
+  "registry_version": 1,
+  "verified_at": "2026-09-08T00:00:00Z",
+  "models": [
+    {
+      "provider": "ollama-cloud",
+      "model_id": "glm-5.2",
+      "endpoint_type": "native",
+      "enabled": true,
+      "cost_class": "free",
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": true,
+        "vision": false
+      },
+      "context_tokens": 131072,
+      "max_output_tokens": 8192,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null
+    },
+    {
+      "provider": "ollama-cloud",
+      "model_id": "glm-5.1",
+      "endpoint_type": "native",
+      "enabled": true,
+      "cost_class": "free",
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": true,
+        "vision": false
+      },
+      "context_tokens": 131072,
+      "max_output_tokens": 8192,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null
+    },
+    {
+      "provider": "ollama-cloud",
+      "model_id": "deepseek-v4-pro",
+      "endpoint_type": "openai",
+      "enabled": true,
+      "cost_class": "free",
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": true,
+        "vision": false
+      },
+      "context_tokens": 131072,
+      "max_output_tokens": 8192,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null
+    },
+    {
+      "provider": "ollama-cloud",
+      "model_id": "deepseek-v4-flash",
+      "endpoint_type": "openai",
+      "enabled": true,
+      "cost_class": "free",
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": false,
+        "vision": false
+      },
+      "context_tokens": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null
+    },
+    {
+      "provider": "ollama-cloud",
+      "model_id": "minimax-m3",
+      "endpoint_type": "openai",
+      "enabled": true,
+      "cost_class": "free",
+      "capabilities": {
+        "tools": false,
+        "thinking": false,
+        "json_schema": true,
+        "vision": false
+      },
+      "context_tokens": 24576,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null
+    },
+    {
+      "provider": "ollama-cloud",
+      "model_id": "kimi-k2.6",
+      "endpoint_type": "native",
+      "enabled": true,
+      "cost_class": "included",
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": true,
+        "vision": false
+      },
+      "context_tokens": 131072,
+      "max_output_tokens": 8192,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null
+    },
+    {
+      "provider": "ollama-cloud",
+      "model_id": "kimi-k2:1t",
+      "endpoint_type": "native",
+      "enabled": true,
+      "cost_class": "included",
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": true,
+        "vision": false
+      },
+      "context_tokens": 131072,
+      "max_output_tokens": 8192,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null
+    }
+  ]
+}
