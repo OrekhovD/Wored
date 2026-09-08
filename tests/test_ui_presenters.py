@@ -4,7 +4,7 @@ import pytest
 from webui.ui_presenters import (
     fmt_usdt, fmt_price, fmt_pct, fmt_fraction_as_pct, fmt_pnl, fmt_qty,
     fmt_time, fmt_time_ago, state_label, present_forecast_summary, present_health,
-    is_terminal, is_valid_forecast,
+    is_terminal, is_valid_forecast, present_deck_ui, present_preview_ui,
 )
 
 
@@ -169,3 +169,50 @@ class TestPresentHealth:
     def test_broken(self):
         r = present_health({'postgres': True, 'redis': False, 'collector_feed': True})
         assert r['all_ok'] is False
+
+
+class TestPresentDeckUI:
+    def test_empty(self):
+        r = present_deck_ui([], {}, [], {}, {}, {})
+        assert r['ui_schema_version'] == 1
+        assert r['ui']['forecast'] is None
+        assert r['ui']['market']['symbol'] == 'btcusdt'
+
+    def test_with_data(self):
+        r = present_deck_ui(
+            market=[{'symbol': 'btcusdt', 'fetched_at': '2026-09-09T12:00:00Z', 'fresh': True}],
+            consensus={'request_id': 9001, 'created_at': '2026-09-09T11:00:00Z',
+                       'roles': [{'role': 'bull'}], 'candles': []},
+            positions=[{'id': 1, 'symbol': 'btcusdt', 'direction': 'long'}],
+            session={'id': 's1'},
+            accuracy={'model_a': {'total': 50}},
+            health={'postgres': True, 'redis': True, 'forecast_worker': True},
+        )
+        assert r['ui']['market']['symbol'] == 'btcusdt'
+        assert r['ui']['forecast']['request_id'] == 9001
+        assert r['ui']['actions']['forecast']['allowed'] is True
+        assert r['ui']['metrics']['available'] is True
+
+    def test_insufficient_samples(self):
+        r = present_deck_ui([], {}, [], {}, {'model_a': {'total': 10}}, {})
+        assert r['ui']['metrics']['available'] is False
+        assert r['ui']['metrics']['reason_code'] == 'insufficient_independent_samples'
+
+    def test_no_forecast_worker(self):
+        r = present_deck_ui([], {}, [], {}, {}, {'postgres': True, 'redis': True, 'forecast_worker': False})
+        assert r['ui']['actions']['forecast']['allowed'] is False
+
+
+class TestPresentPreviewUI:
+    def test_basic(self):
+        r = present_preview_ui({'taker_fee': 0.5, 'scenarios': {}})
+        assert r['ui']['preview']['entry_fee'] == 0.5
+        assert r['ui']['preview']['scenarios'] == []
+
+    def test_with_scenarios(self):
+        r = present_preview_ui({
+            'scenarios': {'-2%': {'price': 60000, 'net_pnl': -10, 'liquidation_crossed': True}},
+        })
+        assert len(r['ui']['preview']['scenarios']) == 1
+        assert r['ui']['preview']['scenarios'][0]['label'] == '-2%'
+        assert r['ui']['preview']['scenarios'][0]['liquidation_crossed'] is True

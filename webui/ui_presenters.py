@@ -251,6 +251,116 @@ def present_health(health: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# ── Command Deck UI presenter (UI-04) ───────────────────────────────────────────
+
+def present_deck_ui(market: List[Dict[str, Any]], consensus: Dict[str, Any],
+                     positions: List[Dict[str, Any]], session: Dict[str, Any],
+                     accuracy: Dict[str, Any], health: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the `ui` object for /api/command-deck response (UI-04 spec)."""
+    import datetime as _dt
+
+    generated_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
+
+    # Market freshness
+    primary = market[0] if market else {}
+    market_ui = {
+        'symbol': primary.get('symbol', 'btcusdt'),
+        'as_of': primary.get('fetched_at') or primary.get('as_of'),
+        'fresh': primary.get('fresh'),
+        'stale_after_seconds': primary.get('stale_after_seconds', 60),
+        'reason_code': primary.get('reason_code'),
+    }
+
+    # Forecast UI
+    forecast_ui = None
+    if consensus and consensus.get('request_id'):
+        forecast_ui = {
+            'request_id': consensus.get('request_id'),
+            'execution_state': consensus.get('execution_state'),
+            'evaluation_state': consensus.get('evaluation_state'),
+            'as_of': consensus.get('created_at'),
+            'valid_until': consensus.get('valid_until'),
+            'base_timeframe': consensus.get('base_timeframe', '60min'),
+            'roles': consensus.get('roles', []),
+            'points': consensus.get('candles', []),
+        }
+
+    # Actions allowed (from server policy — not client-side)
+    actions_ui = {
+        'forecast': {'allowed': bool(health.get('forecast_worker', False) and health.get('postgres', False)),
+                      'reason_code': None if health.get('forecast_worker') else 'forecast_worker_unavailable'},
+        'open_position': {'allowed': bool(health.get('postgres', False)),
+                          'reason_code': None if health.get('postgres') else 'postgres_unavailable'},
+    }
+
+    # Positions UI
+    positions_ui = []
+    for p in positions:
+        positions_ui.append({
+            'id': p.get('id'),
+            'symbol': p.get('symbol'),
+            'direction': p.get('direction'),
+            'leverage': p.get('leverage'),
+            'margin': p.get('margin'),
+            'entry_price': p.get('entry_price'),
+            'live_price': p.get('live_price'),
+            'price_as_of': p.get('price_as_of'),
+            'unrealized_net_pnl': p.get('net_pnl'),  # may be None
+            'estimated_close_fee': p.get('close_fee'),
+            'funding': p.get('funding'),
+            'calculation_version': p.get('calculation_version', 2),
+        })
+
+    # Metrics availability
+    metrics_ui = {
+        'available': bool(accuracy) and any(
+            m.get('total', 0) >= 30 for m in accuracy.values()
+        ) if accuracy else False,
+        'reason_code': 'insufficient_independent_samples' if accuracy else 'no_metrics',
+    }
+
+    return {
+        'ui_schema_version': 1,
+        'ui': {
+            'generated_at': generated_at,
+            'market': market_ui,
+            'forecast': forecast_ui,
+            'actions': actions_ui,
+            'positions': positions_ui,
+            'metrics': metrics_ui,
+        },
+    }
+
+
+# ── Trade preview UI presenter (UI-04) ──────────────────────────────────────────
+
+def present_preview_ui(preview: Dict[str, Any], price_as_of: Optional[str] = None) -> Dict[str, Any]:
+    """Build `ui.preview` for /api/trade/preview response (UI-04 spec)."""
+    return {
+        'ui': {
+            'preview': {
+                'allowed': preview.get('allowed', True),
+                'reasons': preview.get('reasons', []),
+                'price_as_of': price_as_of,
+                'expires_at': preview.get('expires_at'),
+                'calculation_version': preview.get('calculation_version', 2),
+                'entry_fee': preview.get('taker_fee'),
+                'estimated_exit_fee': preview.get('estimated_exit_fee'),
+                'funding_assumption': preview.get('funding_assumption'),
+                'scenarios': [
+                    {
+                        'label': k,
+                        'price': v.get('price'),
+                        'net_pnl': v.get('net_pnl', v.get('pnl')),
+                        'liquidation_crossed': v.get('liquidation_crossed', False),
+                    }
+                    for k, v in (preview.get('scenarios') or {}).items()
+                ],
+            },
+        },
+    }
+
+
 # ── Internal helpers ────────────────────────────────────────────────────────────
 
 def _ru_format(value: float, min_decimals: int = 2, max_decimals: int = 2) -> str:
