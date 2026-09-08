@@ -173,6 +173,41 @@ CREATE INDEX IF NOT EXISTS idx_forecast_requests_parent ON forecast_requests (pa
 -- This is a one-time data migration, not DDL
 """,
     },
+    {
+        "version": "20260908_04",
+        "description": "LLM reservations and routing decisions tables (from R04 specification)",
+        "sql": """
+-- LLM reservations for atomic budget reservation tracking
+CREATE TABLE IF NOT EXISTS llm_reservations (
+    attempt_id UUID NOT NULL REFERENCES llm_attempts(id) ON DELETE CASCADE,
+    scope_key TEXT NOT NULL,
+    period_kind TEXT NOT NULL CHECK (period_kind IN ('day', 'week', 'month')),
+    period_start TIMESTAMPTZ NOT NULL,
+    requests BIGINT NOT NULL DEFAULT 0 CHECK (requests >= 0),
+    tokens BIGINT NOT NULL DEFAULT 0 CHECK (tokens >= 0),
+    cost NUMERIC(20, 8) NOT NULL DEFAULT 0 CHECK (cost >= 0),
+    settled_at TIMESTAMPTZ,
+    PRIMARY KEY (attempt_id, scope_key, period_kind, period_start),
+    FOREIGN KEY (scope_key, period_kind, period_start)
+        REFERENCES llm_budget_buckets(scope_key, period_kind, period_start)
+        ON DELETE RESTRICT
+);
+
+-- LLM routing decisions for audit trail
+CREATE TABLE IF NOT EXISTS llm_routing_decisions (
+    request_id UUID NOT NULL REFERENCES llm_requests(id) ON DELETE CASCADE,
+    sequence INT NOT NULL,
+    candidate_provider_model TEXT NOT NULL,
+    decision TEXT NOT NULL CHECK (decision IN ('allowed', 'skipped')),
+    reason_code TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (request_id, sequence, candidate_provider_model)
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_reservations_attempt ON llm_reservations(attempt_id);
+CREATE INDEX IF NOT EXISTS idx_llm_routing_decisions_request ON llm_routing_decisions(request_id);
+""",
+    },
 ]
 
 
@@ -248,18 +283,16 @@ def get_dsn() -> str:
 
     env_path = Path(__file__).resolve().parents[1] / ".env.postgres"
     if env_path.exists():
+        parts = {}
         for line in env_path.read_text().splitlines():
             if line.startswith("DATABASE_URL="):
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
-            # Construct DSN from individual components
-            parts = {}
             for key in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB"):
                 if line.startswith(f"{key}="):
                     parts[key] = line.split("=", 1)[1].strip().strip('"').strip("'")
             if len(parts) == 3:
                 return f"postgresql://{parts['POSTGRES_USER']}:{parts['POSTGRES_PASSWORD']}@localhost:5432/{parts['POSTGRES_DB']}"
 
-    # Fallback to wored_qa default
     return "postgresql://bot@localhost:5432/wored_qa"
 
 
