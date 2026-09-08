@@ -4,41 +4,46 @@
 {% block content %}
 <main class="auth-layout">
   <section class="panel auth-panel">
-    <div class="panel-kicker">Authentication</div>
-    <h2>Вход в WORED Web UI</h2>
+    <div class="panel-kicker">Аутентификация</div>
+    <h1>Вход в WORED</h1>
     <p class="auth-copy">
-      Эта сессия защищает браузерный доступ к alert history, AI journal drill-down и admin actions.
+      Доступ для разрешённых администраторов.
     </p>
     <form method="post" action="/login" class="auth-form">
       <input type="hidden" name="next" value="{{ next_target }}">
       <label class="field">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <span>Username</span>
+        <span>Имя пользователя</span>
         <input type="text" name="username" value="{{ admin_username }}" autocomplete="username" required>
       </label>
       <label class="field">
-        <span>Password</span>
+        <span>Пароль</span>
         <input type="password" name="password" autocomplete="current-password" required>
       </label>
-      <button type="submit" class="primary-button">Open control room</button>
+      <button type="submit" class="primary-button">Войти</button>
     </form>
   </section>
 </main>
 <p id="telegram-auth-status" role="status" aria-live="polite"></p>
 <script>
-(async function () {
-  const telegram = window.Telegram && window.Telegram.WebApp;
+(function () {
+  var telegram = window.Telegram && window.Telegram.WebApp;
   if (!telegram || !telegram.initData) return;
-  const status = document.getElementById('telegram-auth-status');
-  status.textContent = 'Проверяю вход из Telegram…';
-  try {
-    const response = await fetch('/api/auth/telegram', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({init_data: telegram.initData, csrf_token: {{ csrf_token | tojson }}})
-    });
-    if (!response.ok) throw new Error('Вход из Telegram не подтверждён. Откройте Mini App заново или войдите с паролем.');
+  var status = document.getElementById('telegram-auth-status');
+  status.textContent = 'Проверяем доступ из Telegram\u2026';
+  fetch('/api/auth/telegram', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    credentials: 'same-origin',
+    body: JSON.stringify({init_data: telegram.initData, csrf_token: {{ csrf_token | tojson }}})
+  }).then(function (response) {
+    if (!response.ok) throw new Error('Вход из Telegram не подтверждён. Войдите с паролем.');
+    return response.json();
+  }).then(function () {
     window.location.replace({{ next_target | tojson }});
-  } catch (error) { status.textContent = error.message; }
+  }).catch(function (err) {
+    status.textContent = err.message;
+  });
 })();
 </script>
 {% endblock %}

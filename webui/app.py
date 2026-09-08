@@ -2827,6 +2827,15 @@ async def model_management_page(request: Request):
     return template_response(request, "models.html", page_title="Model Management")
 
 
+@app.get("/system", response_class=HTMLResponse)
+async def system_page(request: Request):
+    """System Status page — health, diagnostics, admin controls (UI-02)."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(request, "system.html", page_title="Состояние системы")
+
+
 # ─── Daily Pipeline v2 — Telegram Mini App API (ТЗ backend_contract v1) ─
 
 VALID_REVISION_COMMANDS = {"continue", "tighten", "reduce", "pause", "close_all"}

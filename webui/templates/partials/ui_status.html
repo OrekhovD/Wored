@@ -1,0 +1,12 @@
+{# WORED UI Status Partial — UI-03
+   Inline status indicators: Data freshness, Redis, PG
+   Used inside navigation and page headers
+#}
+<span class="wored-data-status" id="dataStatus" aria-live="polite">
+  <span id="dataStatusLabel">—</span>
+</span>
+<span class="wored-health-dots" id="healthDots" aria-label="Состояние сервисов">
+  <span class="wored-health-dot is-idle" id="healthRedis" title="Redis">R</span>
+  <span class="wored-health-dot is-idle" id="healthPostgres" title="PostgreSQL">PG</span>
+  <span class="wored-health-dot is-idle" id="healthCollector" title="Сбор данных">Feed</span>
+</span>

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block head_extra %}
+<title>{{ page_title }} — WORED</title>
+{% endblock %}
+
+{% block content %}
+<div class="page system-page">
+  <div class="page-header">
+    <h1 class="page-title">Состояние системы</h1>
+  </div>
+
+  <section class="card" aria-label="Доступность сервисов">
+    <h2>Доступность сервисов</h2>
+    <div id="systemHealthGrid" class="system-health-grid">
+      <div class="system-health-item" id="sysPostgres">
+        <span class="system-health-label">PostgreSQL</span>
+        <span class="system-health-value" id="sysPgStatus">Проверяется…</span>
+      </div>
+      <div class="system-health-item" id="sysRedis">
+        <span class="system-health-label">Redis</span>
+        <span class="system-health-value" id="sysRedisStatus">Проверяется…</span>
+      </div>
+      <div class="system-health-item" id="sysCollector">
+        <span class="system-health-label">Сбор данных</span>
+        <span class="system-health-value" id="sysFeedStatus">Проверяется…</span>
+      </div>
+      <div class="system-health-item" id="sysForecast">
+        <span class="system-health-label">Прогнозный воркер</span>
+        <span class="system-health-value" id="sysForecastStatus">Проверяется…</span>
+      </div>
+    </div>
+    <p class="system-health-age" id="systemHealthAge">—</p>
+  </section>
+
+  <section class="card" aria-label="Диагностика">
+    <h2>Диагностика</h2>
+    <details class="system-details">
+      <summary>API Health (raw)</summary>
+      <pre id="systemHealthRaw" class="system-raw">Загрузка…</pre>
+    </details>
+    <details class="system-details">
+      <summary>Readiness</summary>
+      <pre id="systemReadyRaw" class="system-raw">Загрузка…</pre>
+    </details>
+  </section>
+
+  {% if can_admin %}
+  <section class="card" aria-label="Администрирование">
+    <h2>Администрирование</h2>
+    <form method="post" action="/admin/journal-snapshot" class="wored-inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="/system">
+      <button type="submit" class="wored-btn">Создать снимок журнала</button>
+    </form>
+    <form method="post" action="/admin/clear-acknowledged-alerts" class="wored-inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="/system">
+      <button type="submit" class="wored-btn wored-btn-danger">Очистить подтверждённые оповещения</button>
+    </form>
+  </section>
+  {% endif %}
+</div>
+
+<script>
+(function() {
+  async function loadSystemHealth() {
+    try {
+      const r = await fetch('/api/health');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const h = await r.json();
+
+      const items = [
+        { id: 'sysPgStatus', ok: h.postgres, up: 'Доступен', down: 'Недоступен' },
+        { id: 'sysRedisStatus', ok: h.redis, up: 'Доступен', down: 'Недоступен' },
+        { id: 'sysFeedStatus', ok: h.collector_feed, up: 'Работает', down: 'Нет данных' },
+        { id: 'sysForecastStatus', ok: h.forecast_worker, up: 'Работает', down: 'Остановлен' },
+      ];
+      for (const item of items) {
+        const el = document.getElementById(item.id);
+        if (!el) continue;
+        el.textContent = item.ok ? item.up : item.down;
+        el.className = 'system-health-value ' + (item.ok ? 'is-ok' : 'is-warn');
+      }
+      document.getElementById('systemHealthAge').textContent =
+        'Данные на ' + (h.as_of || '—') + ' UTC';
+      document.getElementById('systemHealthRaw').textContent = JSON.stringify(h, null, 2);
+    } catch (err) {
+      document.getElementById('systemHealthAge').textContent = 'Нет связи';
+    }
+  }
+
+  async function loadReadiness() {
+    try {
+      const r = await fetch('/readyz');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      document.getElementById('systemReadyRaw').textContent = JSON.stringify(d, null, 2);
+    } catch (err) {
+      document.getElementById('systemReadyRaw').textContent = 'Ошибка: ' + err.message;
+    }
+  }
+
+  loadSystemHealth();
+  loadReadiness();
+  setInterval(loadSystemHealth, 30000);
+  setInterval(loadReadiness, 30000);
+})();
+</script>
+{% endblock %}
