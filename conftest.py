@@ -18,9 +18,9 @@ if os.name == 'nt' and os.environ.get('SSL_CERT_FILE', None) == '':
         # Remove the empty value so Python falls back to its default
         del os.environ['SSL_CERT_FILE']
 
-# Ensure webui and chatbot are importable from test dirs
+# Ensure webui, chatbot, and collector are importable from test dirs
 root = os.path.dirname(os.path.abspath(__file__))
-for subdir in ('webui', 'chatbot'):
+for subdir in ('webui', 'chatbot', 'collector'):
     p = os.path.join(root, subdir)
     if p not in sys.path:
         sys.path.insert(0, p)

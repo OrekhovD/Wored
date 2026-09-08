@@ -66,7 +66,7 @@ class PostgresQueueTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError):
             await task
         self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM qa_results"), 0)
-        self.assertEqual(await self.pool.fetchval("SELECT state FROM forecast_jobs"), "pending")
+        self.assertEqual(await self.pool.fetchval("SELECT state FROM forecast_jobs"), "queued")
         await process_one(self.pool, self.save_result)
         self.assertEqual(await self.pool.fetchval("SELECT count(*) FROM qa_results"), 1)
 
