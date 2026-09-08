@@ -1,60 +1,15 @@
 {% extends "base.html" %}
 
 {% block content %}
-{# Top prediction launcher: always visible at the top of the page #}
-<section class="panel prediction-launcher-panel">
-  <div class="prediction-launcher-header">
-    <div>
-      <div class="panel-kicker">New Prediction</div>
-      <h2>Launch a model-vs-model forecast</h2>
-    </div>
-    <p class="prediction-launcher-hint">
-      Pick symbol, timeframe and horizon. Bull, Bear and Arbiter roles run side-by-side.
-    </p>
+{# UI-06: Single forecast form partial (replaces two launcher copies) #}
+<div class="page predictions-page">
+  <div class="page-header">
+    <h1 class="page-title">Прогнозы</h1>
   </div>
 
-  <form method="post" action="/predictions" class="prediction-launcher-form">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label class="field-compact field-launcher">
-      <span>Symbol</span>
-      <select name="symbol">
-        {% for symbol in watchlist %}
-        <option value="{{ symbol }}" {% if symbol == default_symbol %}selected{% endif %}>{{ symbol | upper }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="field-compact field-launcher">
-      <span>Timeframe</span>
-      <select name="base_timeframe">
-        <option value="60min" selected>1h</option>
-        <option value="15min">15m</option>
-        <option value="4hour">4h</option>
-        <option value="1day">1d</option>
-      </select>
-    </label>
-    <label class="field-compact field-launcher">
-      <span>Steps</span>
-      <select name="horizon_steps">
-        <option value="1" selected>1</option>
-        <option value="4">4</option>
-        <option value="8">8</option>
-        <option value="12">12</option>
-        <option value="24">24</option>
-        <option value="48">48</option>
-      </select>
-    </label>
-    <label class="field-compact field-launcher">
-      <span>Depth</span>
-      <select name="depth">
-        <option value="1">1</option>
-        <option value="3" selected>3</option>
-        <option value="6">6</option>
-        <option value="9">9</option>
-      </select>
-    </label>
-    <button type="submit" class="primary-button prediction-launcher-button">Generate forecast</button>
-  </form>
-</section>
+  {% include "partials/forecast_form.html" %}
+
+  <div id="forecastStatus" class="forecast-status-area"></div>
 
 {% if selected_request %}
 {# DETAIL PAGE: compact, no header/form/stats #}

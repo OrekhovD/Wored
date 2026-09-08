@@ -1,0 +1,65 @@
+{# WORED Forecast Form Partial — UI-06
+   Single form for creating new forecasts.
+   Used on /predictions page.
+   Variables: csrf_token, watchlist, default_symbol, current_forecast_id
+#}
+<div class="forecast-form-wrap" id="forecastFormWrap">
+  <form id="forecastForm" class="forecast-form" method="post" action="/api/predictions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <div class="forecast-form-row">
+      <label class="forecast-field">
+        <span class="forecast-label">Инструмент</span>
+        <select name="symbol" id="forecastSymbol" class="forecast-select" required>
+          {% for sym in watchlist %}
+          <option value="{{ sym }}" {% if sym == default_symbol %}selected{% endif %}>{{ sym|upper }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="forecast-field">
+        <span class="forecast-label">Шаг времени</span>
+        <select name="timeframe" id="forecastTimeframe" class="forecast-select" required>
+          <option value="1min">1 мин</option>
+          <option value="5min">5 мин</option>
+          <option value="15min" selected>15 мин</option>
+          <option value="30min">30 мин</option>
+          <option value="60min">1 ч</option>
+          <option value="4hour">4 ч</option>
+          <option value="1day">1 день</option>
+        </select>
+      </label>
+
+      <label class="forecast-field">
+        <span class="forecast-label">Количество шагов</span>
+        <div class="forecast-input-group">
+          <input type="number" name="horizon_steps" id="forecastHorizon" value="4" min="1" max="48" required>
+          <div class="forecast-shortcuts">
+            <button type="button" data-h="1">1</button>
+            <button type="button" data-h="4">4</button>
+            <button type="button" data-h="8">8</button>
+            <button type="button" data-h="12">12</button>
+            <button type="button" data-h="24">24</button>
+            <button type="button" data-h="48">48</button>
+          </div>
+        </div>
+        <span class="forecast-hint" id="forecastHorizonHint">4 × 15 мин = 1 час</span>
+      </label>
+    </div>
+
+    <div class="forecast-form-row">
+      <label class="forecast-field">
+        <span class="forecast-label">Исторических аналогов</span>
+        <input type="number" name="depth" id="forecastDepth" value="3" min="1" max="10" required>
+        <span class="forecast-hint">Сколько наиболее похожих исторических участков включить в контекст прогноза. Это не оценка уверенности.</span>
+      </label>
+    </div>
+
+    <div class="forecast-form-actions">
+      <button type="submit" class="wored-btn" id="forecastSubmit">Новый прогноз</button>
+      <span class="forecast-pending" id="forecastPending" hidden>Отправка…</span>
+    </div>
+  </form>
+
+  <div class="forecast-result" id="forecastResult" aria-live="polite"></div>
+</div>
