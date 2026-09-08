@@ -52,7 +52,8 @@ from forecast_queue import (
     EXPIRED,
     PARTIAL,
 )
-from access_control import verify_telegram, allowed_origin, safe_next_url
+from access_control import verify_telegram, verify_telegram_multi, allowed_origin, safe_next_url
+from principal import Principal, create_from_cookie, create_from_telegram, create_from_internal_token
 from services.market_data import fresh_ticker
 from services.sim_math import preview as simulate_preview, validate_order, settlement
 
@@ -187,6 +188,27 @@ def get_session_secret() -> str:
     return secrets.token_urlsafe(32)
 
 
+def get_telegram_bot_tokens() -> list[str]:
+    """Parse WEBUI_TELEGRAM_BOT_TOKENS (JSON array) or fall back to single token.
+
+    Invalid JSON or empty list when auth is enabled is a configuration error.
+    """
+    raw = os.getenv("WEBUI_TELEGRAM_BOT_TOKENS", "").strip()
+    if raw:
+        try:
+            tokens = json.loads(raw)
+        except json.JSONDecodeError:
+            raise RuntimeError("WEBUI_TELEGRAM_BOT_TOKENS must be valid JSON")
+        if not isinstance(tokens, list) or not all(isinstance(t, str) for t in tokens):
+            raise RuntimeError("WEBUI_TELEGRAM_BOT_TOKENS must be a JSON array of strings")
+        if not tokens:
+            raise RuntimeError("WEBUI_TELEGRAM_BOT_TOKENS must not be empty when set")
+        return tokens
+    # Fall back to single-token env vars for compatibility
+    single = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
+    return [single] if single else []
+
+
 def get_internal_api_token() -> str:
     return os.getenv("WEBUI_INTERNAL_TOKEN", "").strip()
 
@@ -202,14 +224,47 @@ def validate_auth_config() -> None:
         raise RuntimeError("WEBUI_AUTH_ENABLED=true requires WEBUI_ADMIN_PASSWORD to be set")
     if get_auth_enabled() and len(os.getenv("WEBUI_SESSION_SECRET", "")) < 32:
         raise RuntimeError("Authentication requires a stable WEBUI_SESSION_SECRET of at least 32 characters")
+    if get_auth_enabled():
+        # Validate bot tokens config — must be valid if Telegram auth is needed
+        try:
+            get_telegram_bot_tokens()
+        except RuntimeError:
+            raise
 
 
 def is_authenticated(request: Request) -> bool:
+    """Check if the request carries a valid Principal (cookie or Telegram header).
+
+    Returns True immediately if auth is disabled (local dev mode).
+    """
     if not get_auth_enabled():
         return True
-    if request.session.get("auth_type") == "telegram":
-        return bool(_get_telegram_user(request))
-    return (bool(request.session.get("authenticated")) and request.session.get("username") == get_admin_username()) or bool(_get_telegram_user(request))
+    principal = resolve_principal(request)
+    return principal is not None
+
+
+def resolve_principal(request: Request) -> Principal | None:
+    """Resolve the Principal from the request, checking cookie session first, then Telegram header."""
+    # 1. Cookie-based session
+    principal = create_from_cookie(dict(request.session))
+    if principal is not None:
+        return principal
+    # 2. Telegram initData header (for Mini App requests)
+    init_data = request.headers.get("X-Telegram-Init-Data", "")
+    if init_data:
+        return _resolve_telegram_principal(init_data)
+    return None
+
+
+def _resolve_telegram_principal(init_data: str) -> Principal | None:
+    """Resolve a Principal from Telegram initData using multi-token verification."""
+    bot_tokens = get_telegram_bot_tokens()
+    raw_ids = os.getenv("TELEGRAM_ADMIN_IDS", os.getenv("TELEGRAM_ADMIN_ID", ""))
+    try:
+        allowed_ids = {int(v.strip()) for v in raw_ids.split(",") if v.strip()}
+    except ValueError:
+        return None
+    return create_from_telegram(init_data, bot_tokens, allowed_ids)
 
 
 def ensure_csrf_token(request: Request) -> str:
@@ -1759,9 +1814,11 @@ async def administrative_boundary(request: Request, call_next):
     if path in {"/login", "/api/auth/telegram", "/api/health", "/healthz", "/readyz"} or path.startswith("/static/"):
         return await call_next(request)
     if path.startswith("/api/internal/"):
-        try:
-            verify_internal_api_token(request.headers.get("X-Internal-Token"))
-        except HTTPException:
+        principal = create_from_internal_token(
+            request.headers.get("X-Internal-Token"),
+            get_internal_api_token(),
+        )
+        if principal is None:
             return JSONResponse({"detail": "Invalid internal API token"}, status_code=403)
         return await call_next(request)
     if not get_auth_enabled():
@@ -1769,11 +1826,15 @@ async def administrative_boundary(request: Request, call_next):
         if (not request.client or request.client.host not in {"127.0.0.1", "::1"}
                 or any(h in request.headers for h in ("forwarded", "x-forwarded-for", "x-forwarded-host"))):
             return JSONResponse({"detail": "Local mode requires a direct loopback connection"}, status_code=403)
-    if not is_authenticated(request):
+        # Auth disabled: allow without principal
+        return await call_next(request)
+    principal = resolve_principal(request)
+    if principal is None:
         if path.startswith("/api/"):
             return JSONResponse({"detail": "Authentication required"}, status_code=401)
         return build_login_redirect(request)
-    if request.method not in {"GET", "HEAD", "OPTIONS"} and not _verify_telegram_init_data(request.headers.get("X-Telegram-Init-Data", "")):
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and principal.kind != "internal_service":
+        # CSRF: require Origin header to match current origin or public base URL
         origin = request.headers.get("origin", "")
         if not allowed_origin(origin, str(request.url), os.getenv("WEBUI_PUBLIC_BASE_URL", "")):
             return JSONResponse({"detail": "Invalid request origin"}, status_code=403)
@@ -2791,28 +2852,24 @@ TELEGRAM_WEBAPP_AUTH_DISABLED = os.getenv("TELEGRAM_WEBAPP_AUTH_DISABLED", "true
 
 
 def _verify_telegram_init_data(init_data: str) -> dict | None:
+    """Verify Telegram initData using multi-token support.
+
+    Delegates to verify_telegram_multi which handles the token list.
+    """
     raw_ids = os.getenv("TELEGRAM_ADMIN_IDS", os.getenv("TELEGRAM_ADMIN_ID", ""))
     try:
         admin_ids = {int(value.strip()) for value in raw_ids.split(",") if value.strip()}
     except ValueError:
         return None
-    token = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
-    return verify_telegram(init_data, token, admin_ids)
+    bot_tokens = get_telegram_bot_tokens()
+    return verify_telegram_multi(init_data, bot_tokens, admin_ids)
 
 
 def _get_telegram_user(request: Request) -> dict | None:
-    init_data = request.headers.get("X-Telegram-Init-Data", "")
-    if init_data:
-        return _verify_telegram_init_data(init_data)
-    if request.session.get("authenticated") and request.session.get("auth_type") == "telegram":
-        user = request.session.get("telegram_user")
-        raw_ids = os.getenv("TELEGRAM_ADMIN_IDS", os.getenv("TELEGRAM_ADMIN_ID", ""))
-        try:
-            allowed_ids = {int(value.strip()) for value in raw_ids.split(",") if value.strip()}
-        except ValueError:
-            return None
-        if isinstance(user, dict) and user.get("user_id") in allowed_ids:
-            return user
+    """Get Telegram user from header or session, re-checking allowed IDs."""
+    principal = resolve_principal(request)
+    if principal is not None and principal.kind == "telegram_admin":
+        return {"user_id": principal.telegram_user_id, "username": principal.subject}
     return None
 
 
