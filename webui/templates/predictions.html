@@ -493,7 +493,7 @@
         // clean hourly boundaries and don't overlap live/historical candles.
         // target_time is the END of the forecast hour (e.g. 08:59:39);
         // ceil to the next hour boundary (09:00:00) for a distinct bar.
-        ts = Math.ceil(ts / 3600) * 3600;
+        ts = Math.floor(ts); // Preserve the target timestamp for every configured timeframe.
         var prices = [], lows = [], highs = [];
         row.model_cells.forEach(function(cell) {
           if (cell.point) {

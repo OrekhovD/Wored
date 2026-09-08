@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import logging
 import os
 import re
@@ -208,26 +209,25 @@ _clients: dict[str, AsyncOpenAI | None] = {}
 
 
 def _coerce_float(value: Any) -> float | None:
-    if value is None or value == "":
+    if value is None:
         return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        normalized = value.strip().replace("%", "").replace(",", "")
-        if not normalized:
-            return None
-        return float(normalized)
-    return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(result):
+        raise ValueError("Prediction values must be finite")
+    return result
 
 
 def _extract_json_payload(raw_text: str) -> dict[str, Any] | list[Any]:
     text = raw_text.strip()
     text = re.sub(r"\<^.*?\$\>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
-    if text.startswith("\`\`\`"):
+    if text.startswith("```"):
         lines = text.splitlines()
-        if lines and lines[0].startswith("\`\`\`"):
+        if lines and lines[0].startswith("```"):
             lines = lines[1:]
-        if lines and lines[-1].startswith("\`\`\`"):
+        if lines and lines[-1].startswith("```"):
             lines = lines[:-1]
         text = "\n".join(lines).strip()
 
@@ -299,6 +299,7 @@ async def _fetch_role_accuracy(role: str) -> float | None:
                 WHERE fmr.agent_role = $1
                   AND fp.evaluated_at >= NOW() AT TIME ZONE 'UTC' - INTERVAL '7 days'
                   AND fp.accuracy_score IS NOT NULL
+                  AND fp.metrics_version = 2
                 """,
                 role,
             )
@@ -690,14 +691,11 @@ async def _ollama_chat(
         resp.raise_for_status()
         data = resp.json()
 
+    if data.get("done") is not True or data.get("done_reason") not in (None, "stop"):
+        raise ValueError("Model response is incomplete")
     content = (data.get("message", {}).get("content", "") or "").strip()
     if not content:
-        # Reasoning models: content may be empty, fallback to reasoning field
-        reasoning = (data.get("message", {}).get("reasoning", "") or "").strip()
-        if reasoning:
-            content = reasoning
-        else:
-            raise ValueError("Model returned empty content")
+        raise ValueError("Model returned no final content")
     return content
 
 

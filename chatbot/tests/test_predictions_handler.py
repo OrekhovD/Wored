@@ -4,6 +4,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 
+def test_pending_forecast_displays_saved_job_without_empty_scorecard():
+    from handlers.predictions import format_prediction_detail
+    text = format_prediction_detail({"id": 99, "symbol": "btcusdt", "status": "pending"})
+    assert "99" in text
+    assert "hit" not in text
+    assert "miss" not in text
+
+
 def test_format_prediction_detail_renders_hit_miss_scorecard():
     from handlers.predictions import format_prediction_detail
 
@@ -82,17 +90,19 @@ async def test_cb_prediction_run_acknowledges_before_internal_api():
 
     message = SimpleNamespace(edit_text=AsyncMock())
     call = SimpleNamespace(
+        id="qa-callback-1",
         data="prediction_run:ethusdt:4",
         answer=AsyncMock(),
         message=message,
         from_user=SimpleNamespace(username="alice", id=42),
     )
 
-    async def fake_create_prediction_request(symbol, horizon_hours, requested_by):
+    async def fake_create_prediction_request(symbol, horizon_hours, requested_by, idempotency_key):
         assert call.answer.await_count == 1
         assert symbol == "ethusdt"
         assert horizon_hours == 4
-        assert requested_by == "alice"
+        assert requested_by == "telegram:42"
+        assert idempotency_key == "tg-qa-callback-1"
         return {
             "id": 99,
             "symbol": "ethusdt",

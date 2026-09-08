@@ -34,7 +34,7 @@ MAKER_FEE_RATE = 0.0002      # 0.02% maker
 DEFAULT_SLIPPAGE_BPS = 2     # 0.02% slippage
 LIQUIDATION_MARGIN = 0.005   # 0.5% margin threshold
 
-ALLOWED_LEVERAGE = [100, 125, 150, 200]
+ALLOWED_LEVERAGE = [10, 25, 50, 100]
 MAX_SIMULTANEOUS_POSITIONS = 1
 
 # ─── §8 Межфайловые константы (ТЗ fast_modes_WORED v1.1) ──────────────
@@ -398,23 +398,10 @@ def calc_profit_factor(gross_profit_sum: float, gross_loss_sum: float) -> float 
     return round(gross_profit_sum / abs(gross_loss_sum), 8)
 
 
-def calc_liquidation_price(entry_price: float, leverage: int, side: str) -> float:
-    """Расчёт цены ликвидации (isolated margin).
-    
-    Формула: liq = entry * (1 - 1/leverage - maintenance_margin) для LONG
-             liq = entry * (1 + 1/leverage + maintenance_margin) для SHORT
-    
-    maintenance_margin (LIQUIDATION_MARGIN=0.005) — буфер биржи (0.5%).
-    При 200x: liq = entry * 0.99 (1% от входа)
-    При 100x: liq = entry * 0.985 (1.5% от входа)
-    При 10x:  liq = entry * 0.895 (10.5% от входа)
-    """
-    if leverage <= 0:
-        leverage = 1
-    if side.lower() == "long":
-        return round(entry_price * (1 - 1 / leverage - LIQUIDATION_MARGIN), 8)
-    else:
-        return round(entry_price * (1 + 1 / leverage + LIQUIDATION_MARGIN), 8)
+def calc_liquidation_price(entry_price: float, leverage: int, side: str, calculation_version: int = 2) -> float:
+    """Use versioned isolated policy; preserve the recorded legacy session policy."""
+    from services.sim_math import liquidation_price
+    return round(liquidation_price(entry_price, leverage, side, calculation_version, legacy_session=True), 8)
 
 
 def is_liquidated(current_price: float, liq_price: float, side: str) -> bool:
@@ -453,7 +440,7 @@ def get_risk_params(risk_mode: str) -> dict:
 
 def validate_leverage(leverage: int) -> bool:
     """ТЗ 9.1 — allowed_leverage_values."""
-    return leverage in ALLOWED_LEVERAGE
+    return type(leverage) is int and leverage in ALLOWED_LEVERAGE
 
 
 def validate_budget_share(budget_share_pct: float, risk_mode: str) -> bool:

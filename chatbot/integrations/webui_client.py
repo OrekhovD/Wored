@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
+import uuid
 from typing import Any
 
 import httpx
+
+from forecast_input import validate_idempotency_key
 
 
 def get_webui_internal_base_url() -> str:
@@ -44,24 +48,65 @@ def get_session_secret() -> str:
 
 
 def get_internal_api_token() -> str:
-    explicit = os.getenv("WEBUI_INTERNAL_TOKEN", "").strip()
-    if explicit:
-        return explicit
-
-    material = f"wored-internal::{get_session_secret()}::{os.getenv('TELEGRAM_TOKEN', 'local')}"
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+    token = os.getenv("WEBUI_INTERNAL_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("WEBUI_INTERNAL_TOKEN must match the WebUI configuration")
+    return token
 
 
-async def create_prediction_request(symbol: str, horizon_hours: int, requested_by: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=10.0)) as client:
+async def create_prediction_request(
+    symbol: str,
+    horizon_hours: int,
+    requested_by: str,
+    idempotency_key: str | None = None,
+    base_timeframe: str = "60min",
+    depth: int = 3,
+    horizon_steps: int | None = None,
+) -> dict[str, Any]:
+    """Create a forecast request via the internal API.
+
+    Supports both legacy horizon_hours and the new horizon_steps parameter.
+    The idempotency key is validated; if None, a random one is generated.
+    """
+    # Validate idempotency key if provided
+    if idempotency_key:
+        try:
+            idempotency_key = validate_idempotency_key(idempotency_key)
+        except ValueError:
+            pass  # Let the server validate — but try our best
+    effective_key = idempotency_key or uuid.uuid4().hex
+
+    payload: dict[str, Any] = {
+        "symbol": symbol,
+        "requested_by": requested_by,
+        "source": "telegram",
+        "base_timeframe": base_timeframe,
+        "depth": depth,
+    }
+    # Prefer horizon_steps when given; fall back to horizon_hours conversion
+    if horizon_steps is not None:
+        payload["horizon_steps"] = horizon_steps
+    else:
+        payload["horizon_hours"] = horizon_hours
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0)) as client:
         response = await client.post(
             f"{get_webui_internal_base_url()}/api/internal/predictions",
-            json={
-                "symbol": symbol,
-                "horizon_hours": horizon_hours,
-                "requested_by": requested_by,
-                "source": "telegram",
-            },
+            json=payload,
+            headers={"X-Internal-Token": get_internal_api_token(), "Idempotency-Key": effective_key},
+        )
+        response.raise_for_status()
+        return response.json()
+
+
+async def get_forecast_status(request_id: int) -> dict[str, Any]:
+    """Query the normalized forecast status via the internal API.
+
+    Returns execution_state, evaluation_state, failure_code, deadline_at, as_of, valid_until.
+    """
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+        response = await client.get(
+            f"{get_webui_internal_base_url()}/api/forecast/{request_id}/status",
             headers={"X-Internal-Token": get_internal_api_token()},
         )
         response.raise_for_status()

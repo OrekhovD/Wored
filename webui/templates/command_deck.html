@@ -201,7 +201,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;heigh
 
     <div class="slider-row">
       <div class="slider-lbl"><span>Плечо</span><span class="v" id="tLevVal">100x</span></div>
-      <input type="range" id="tLev" min="10" max="200" value="100" step="10" oninput="updateTicket()">
+      <input type="range" id="tLev" min="10" max="100" value="100" step="10" oninput="updateTicket()">
     </div>
     <div class="slider-row">
       <div class="slider-lbl"><span>Маржа (USDT)</span><span class="v" id="tMarVal">10</span></div>
@@ -235,10 +235,10 @@ function clr(p){const v=Number(p||0);if(v>0.01)return'var(--green)';if(v<-0.01)r
 function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),3e3)}
 
 async function fetchDeck(){
-  try{const r=await fetch('/api/command-deck');if(!r.ok)return;const d=await r.json();render(d);
+  try{const r=await fetch('/api/command-deck');if(r.status===401){location.href='/login?next=/command-deck';return;}if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();render(d);
   const b=document.getElementById('hbar');b.style.transition='none';b.style.width='0%';
   requestAnimationFrame(()=>{b.style.transition='width 30s linear';b.style.width='100%'});
-  }catch(e){}
+  }catch(e){document.getElementById('time').textContent='Данные не обновлены';toast('Ошибка обновления: '+e.message);}
 }
 
 function render(d){
@@ -344,7 +344,7 @@ function renderCandles(c){
     const t=new Date(h.time*1000).toLocaleTimeString('ru-RU',{hour:'2-digit'});
     html+='<div class="fc-col"><div class="fc-price mono">'+fp(h.close)+'</div>';
     html+='<div class="fc-wick" style="height:'+wh+'%;bottom:'+wt+'%"></div>';
-    html+='<div class="fc-candle '+dir+'" style="height:'+(bh+ch)+'%;bottom:0"></div>';
+    html+='<div class="fc-candle '+dir+'" style="height:'+Math.max(ch,.5)+'%;bottom:'+bh+'%"></div>';
     html+='<div class="fc-label">'+t+'</div></div>';
   });
   
@@ -358,13 +358,14 @@ function renderCandles(c){
     const avgLow=cds.reduce((s,x)=>s+(x.low||x.price),0)/cds.length;
     const avgHigh=cds.reduce((s,x)=>s+(x.high||x.price),0)/cds.length;
     const dir=avg>=(base||avg)?'fc-bull':'fc-bear';
-    const h=(avg-minP)/range*100;
+    const h=Math.abs(avg-base)/range*100;
+    const bottom=(Math.min(avg,base)-minP)/range*100;
     const wh=(avgHigh-avgLow)/range*100;
     const wt=(avgLow-minP)/range*100;
     const tt=cds[0].target_time?new Date(cds[0].target_time).toLocaleTimeString('ru-RU',{hour:'2-digit'})+'':'+'+sk+'h';
     html+='<div class="fc-col"><div class="fc-price mono">'+fp(avg)+'</div>';
     html+='<div class="fc-wick" style="height:'+wh+'%;bottom:'+wt+'%"></div>';
-    html+='<div class="fc-candle '+dir+'" style="height:'+h+'%"></div>';
+    html+='<div class="fc-candle '+dir+'" style="height:'+Math.max(h,.5)+'%;bottom:'+bottom+'%"></div>';
     html+='<div class="fc-label">'+tt+'</div></div>';
   });
   
@@ -373,11 +374,37 @@ function renderCandles(c){
 }
 
 // ACTIONS
+let forecastPending = false;
+async function pollForecast(id){
+  const result=document.getElementById('result');
+  try{
+    const r=await fetch('/api/forecast/'+id+'/status');
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    if(d.status==='pending'){
+      result.textContent='Прогноз #'+id+': в очереди или выполняется';
+      setTimeout(()=>pollForecast(id),5000);return;
+    }
+    forecastPending=false;sessionStorage.removeItem('wored.forecast');sessionStorage.removeItem('wored.forecastKey');
+    result.textContent=d.status==='active'?'Прогноз #'+id+' готов':'Прогноз #'+id+' завершился ошибкой: '+(d.error_code||'нет результата');
+    if(d.status==='active')fetchDeck();
+  }catch(e){
+    result.textContent='Не удалось проверить прогноз #'+id+': '+e.message;
+    setTimeout(()=>pollForecast(id),15000);
+  }
+}
 async function actForecast(){
-  document.getElementById('result').textContent='Запускаю прогноз...';
-  try{const r=await fetch('/api/forecast/quick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:'btcusdt',horizon_steps:4})});
-  const d=await r.json();if(d.ok){document.getElementById('result').innerHTML='<span style="color:var(--green)">✅ Прогноз #'+d.request_id+' запущен</span>';toast('Прогноз запущен');setTimeout(fetchDeck,5e3);}
-  else{document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+(d.detail||'Ошибка')+'</span>';}}catch(e){document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+e.message+'</span>';}
+  if(forecastPending){toast('Прогноз уже ожидает завершения');return;}
+  forecastPending=true;
+  const result=document.getElementById('result');result.textContent='Сохраняю задание...';
+  try{
+    let key=sessionStorage.getItem('wored.forecastKey');
+    if(!key){key=crypto.randomUUID();sessionStorage.setItem('wored.forecastKey',key);}
+    const r=await fetch('/api/forecast/quick',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},body:JSON.stringify({symbol:'btcusdt',horizon_steps:4})});
+    const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.detail||'HTTP '+r.status);
+    sessionStorage.setItem('wored.forecast',String(d.request_id));
+    pollForecast(d.request_id);
+  }catch(e){forecastPending=false;result.textContent='Не удалось поставить прогноз в очередь: '+e.message;}
 }
 
 // ORDER TICKET
@@ -420,7 +447,7 @@ async function confirmTicket(){
   const mar=parseFloat(document.getElementById('tMar').value);
   document.getElementById('result').textContent='Открываю '+tDir+'...';
   try{
-    const r=await fetch('/api/positions/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:'btcusdt',direction:tDir,leverage:lev,margin:mar,user_id:0})});
+    const r=await fetch('/api/positions/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:'btcusdt',direction:tDir,leverage:lev,margin:mar,simulation:true})});
     const d=await r.json();
     if(d.ok){document.getElementById('result').innerHTML='<span style="color:var(--green)">✅ #'+d.id+' '+d.direction.toUpperCase()+' @ '+fp(d.entry_price)+'</span>';toast('Позиция открыта');closeTicket();setTimeout(fetchDeck,2e3);}
     else{document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+(d.detail||'Ошибка')+'</span>';}
@@ -437,6 +464,8 @@ async function closePos(id){
 }
 
 fetchDeck();timer=setInterval(fetchDeck,REFRESH);
+const savedForecast=sessionStorage.getItem('wored.forecast');
+if(savedForecast && /^\d+$/.test(savedForecast)){forecastPending=true;pollForecast(savedForecast);}
 </script>
 </body>
 </html>

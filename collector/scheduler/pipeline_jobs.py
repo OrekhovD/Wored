@@ -35,67 +35,33 @@ STALE_THRESHOLD_SECONDS = 60  # SLA: WebSocket snapshot must be < 60s old
 
 
 async def stale_data_guard():
-    """
-    ТЗ 11, 10 — проверка свежести WebSocket/Redis snapshot.
-    Если stale → ставит execution в PAUSED для всех активных сессий.
-    """
-    try:
-        from storage.redis_client import get_redis
-        from storage.postgres_client import get_pool
-
-        redis = get_redis()
-        pool = await get_pool()
-        if not pool:
-            return
-
-        # Check BTCUSDT ticker freshness
-        ticker_raw = await redis.get("ticker:btcusdt")
-        is_stale = True
-        if ticker_raw:
-            data = json.loads(ticker_raw)
-            # Check if timestamp exists and is fresh
-            ts_str = data.get("timestamp") or data.get("ts")
-            if ts_str:
-                try:
-                    if isinstance(ts_str, (int, float)):
-                        ts = datetime.fromtimestamp(float(ts_str) / 1000 if float(ts_str) > 1e12 else float(ts_str), tz=timezone.utc)
-                    else:
-                        ts = datetime.fromisoformat(str(ts_str).replace("Z", "+00:00"))
-                    age = (_now_utc() - ts).total_seconds()
-                    is_stale = age > STALE_THRESHOLD_SECONDS
-                except Exception:
-                    is_stale = True  # can't parse → treat as stale
-            else:
-                # No timestamp — check if we got data at all
-                is_stale = False  # assume fresh if data exists
-
-        if is_stale:
-            log.warning("Stale data detected — pausing active sessions")
-            async with pool.acquire() as conn:
+    """Pause armed sessions per symbol; keep protective exit monitoring enabled."""
+    from storage.redis_client import get_redis
+    from storage.postgres_client import get_pool
+    from services.market_data import fresh_ticker
+    import uuid
+    pool = await get_pool()
+    if pool is None:
+        return
+    redis = get_redis()
+    sessions = await pool.fetch("SELECT id,symbol FROM trading_sessions WHERE status='armed'")
+    for session in sessions:
+        try:
+            ticker = json.loads(await redis.get(f"ticker:{session['symbol'].lower()}") or "{}")
+            fresh = fresh_ticker(ticker, max_age=STALE_THRESHOLD_SECONDS)
+        except Exception:
+            fresh = False
+        if fresh:
+            continue
+        async with pool.acquire() as conn, conn.transaction():
+            changed = await conn.fetchval(
+                "UPDATE trading_sessions SET status='paused',updated_at=NOW() "
+                "WHERE id=$1 AND status='armed' RETURNING id", session["id"])
+            if changed is not None:
                 await conn.execute(
-                    """
-                    UPDATE trading_sessions
-                    SET status = 'paused', updated_at = NOW()
-                    WHERE status IN ('armed', 'in_position')
-                    """,
-                )
-                # Log event for each paused session
-                sessions = await conn.fetch(
-                    "SELECT id FROM trading_sessions WHERE status = 'paused' AND updated_at > NOW() - INTERVAL '1 minute'"
-                )
-                for s in sessions:
-                    import uuid
-                    await conn.execute(
-                        """
-                        INSERT INTO execution_events (id, session_id, event_type, event_payload)
-                        VALUES ($1, $2, 'stale_data_pause', $3)
-                        """,
-                        str(uuid.uuid4()), str(s["id"]),
-                        json.dumps({"reason": "websocket_stale", "threshold_sec": STALE_THRESHOLD_SECONDS}),
-                    )
-
-    except Exception as exc:
-        log.error("stale_data_guard error: %s", exc)
+                    "INSERT INTO execution_events(id,session_id,event_type,event_payload) "
+                    "VALUES($1,$2,'stale_data_pause',$3)", str(uuid.uuid4()), str(changed),
+                    json.dumps({"symbol":session["symbol"],"reason":"ticker_stale_or_missing"}))
 
 
 # ─── Execution Watch Loop (ТЗ 11: каждые 10 сек) ───────────────────────

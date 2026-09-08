@@ -13,20 +13,20 @@ from typing import Any
 
 import asyncpg
 import httpx
+from predictions.scoring import score_forecast, closed_target_price
+from services.market_data import PERIOD_SECONDS
 
 log = logging.getLogger(__name__)
 
 
 async def _get_pool():
-    db_url = os.getenv("DATABASE_URL")
-    if db_url and "postgresql+asyncpg://" in db_url:
-        db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
-    return await asyncpg.create_pool(dsn=db_url)
+    from storage.postgres_client import get_pool
+    return await get_pool()
 
 
 def _normalize_symbol(symbol: str) -> str:
     """HTX API expects lowercase symbol without dash (e.g. 'btcusdt', not 'btc-usdt')."""
-    return symbol.strip().lower()
+    return symbol.strip().lower().replace("-", "").replace("/", "")
 
 
 async def _fetch_htx_kline(symbol: str, period: str = "60min", size: int = 1) -> list[dict[str, Any]]:
@@ -114,21 +114,10 @@ async def evaluate_due_forecasts():
         if not candles:
             continue
 
-        # map candle time -> close
-        close_by_time: dict[int, float] = {c["time"]: c["close"] for c in candles}
-
         for row in group_rows:
-            target_ts = int(row["target_time"].replace(tzinfo=timezone.utc).timestamp()) if row["target_time"] else 0
-            actual_close = close_by_time.get(target_ts)
-            if actual_close is None:
-                # target_time may fall inside a candle (e.g. 12:28 -> candle 12:00)
-                # find the candle whose start time is the largest <= target_ts
-                best_ts = -1
-                for c in candles:
-                    if c["time"] <= target_ts and c["time"] > best_ts:
-                        best_ts = c["time"]
-                if best_ts >= 0:
-                    actual_close = close_by_time.get(best_ts)
+            target_ts = int(row["target_time"].replace(tzinfo=timezone.utc).timestamp())
+            actual_close = closed_target_price(candles, target_ts, PERIOD_SECONDS[period],
+                                               datetime.now(timezone.utc).timestamp())
             if actual_close is None:
                 continue
 
@@ -145,15 +134,12 @@ async def evaluate_due_forecasts():
             if low is not None and high is not None:
                 in_range = float(low) <= actual_close <= float(high)
 
-            # accuracy score 0..100
-            score = max(0.0, 100.0 - price_error_pct)
-            if direction_match:
-                score += 10.0
-            if in_range:
-                score += 10.0
-            score = min(100.0, score)
+            outcome = score_forecast(base_price, predicted, float(row["predicted_change_pct"]), actual_close)
+            score = outcome.accuracy_score
+            direction_match = outcome.direction_match
+            change_error_pct = outcome.change_error_pct
 
-            verdict_parts = []
+            verdict_parts = ["metrics_v2"]
             if direction_match:
                 verdict_parts.append("direction_match")
             if in_range:
@@ -169,7 +155,7 @@ async def evaluate_due_forecasts():
             verdict = " ".join(verdict_parts)
 
             try:
-                async with pool.acquire() as conn:
+                async with pool.acquire() as conn, conn.transaction():
                     await conn.execute(
                         """
                         UPDATE forecast_points
@@ -181,8 +167,12 @@ async def evaluate_due_forecasts():
                             direction_match = $6,
                             in_range = $7,
                             verdict = $8,
-                            evaluated_at = $9
-                        WHERE id = $10
+                            evaluated_at = $9,
+                            metrics_version = 2,
+                            failure_score = 100 - $5,
+                            baseline_error_pct = $11,
+                            skill_vs_baseline = $12
+                        WHERE id = $10 AND evaluated_at IS NULL
                         """,
                         actual_close,
                         actual_change_pct,
@@ -194,6 +184,8 @@ async def evaluate_due_forecasts():
                         verdict,
                         now,
                         row["point_id"],
+                        outcome.baseline_error_pct,
+                        outcome.skill_vs_baseline,
                     )
                     await conn.execute(
                         """
@@ -230,117 +222,8 @@ async def evaluate_due_forecasts():
 
 
 async def refresh_historical_forecast_scores():
-    """Refresh aggregate scores per role/model. Lightweight rollup."""
-    pool = await _get_pool()
-    if not pool:
-        return
-
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT
-                fmr.agent_role,
-                COUNT(*) AS total,
-                AVG(fp.accuracy_score) AS avg_score,
-                AVG(fp.price_error_pct) AS avg_error,
-                SUM(CASE WHEN fp.direction_match THEN 1 ELSE 0 END) AS direction_hits
-            FROM forecast_points fp
-            JOIN forecast_model_runs fmr ON fmr.id = fp.model_run_id
-            WHERE fp.evaluated_at >= NOW() AT TIME ZONE 'UTC' - INTERVAL '7 days'
-              AND fp.accuracy_score IS NOT NULL
-            GROUP BY fmr.agent_role
-            """
-        )
-
-    if rows:
-        log.info("Historical forecast scores (7d): %s", [dict(r) for r in rows])
+    raise RuntimeError("Historical forecast scores are immutable; use an explicit versioned evaluation migration")
 
 
 async def regenerate_hourly_correction():
-    """Re-run arbiter oracle for active requests every hour using fresh market data."""
-    pool = await _get_pool()
-    if not pool:
-        return
-
-    active_window = datetime.now(timezone.utc) - timedelta(hours=24)
-    async with pool.acquire() as conn:
-        active_requests = await conn.fetch(
-            """
-            SELECT id, symbol, horizon_hours, base_timeframe, depth, base_price, status
-            FROM forecast_requests
-            WHERE status = 'active'
-              AND created_at >= $1
-            ORDER BY created_at DESC
-            LIMIT 20
-            """,
-            active_window,
-        )
-
-    if not active_requests:
-        log.debug("regenerate_hourly_correction: no active requests")
-        return
-
-    for req in active_requests:
-        request_id = req["id"]
-        symbol = req["symbol"]
-        base_timeframe = req["base_timeframe"] or "60min"
-        depth = req["depth"] or 3
-        horizon_hours = req["horizon_hours"] or 4
-        try:
-            async with httpx.AsyncClient(timeout=20.0) as hc:
-                symbol_htx = symbol.replace("usdt", "-usdt")
-                ticker_resp = await hc.get(
-                    "https://api.huobi.pro/market/detail/merged",
-                    params={"symbol": symbol_htx},
-                )
-                ticker_resp.raise_for_status()
-                ticker_data = ticker_resp.json()
-                base_price = float(ticker_data["tick"]["close"]) if ticker_data.get("tick") else float(req["base_price"])
-                kline_resp = await hc.get(
-                    "https://api.huobi.pro/market/history/kline",
-                    params={"symbol": symbol_htx, "period": base_timeframe, "size": 36},
-                )
-                kline_resp.raise_for_status()
-                kline_data = kline_resp.json()
-                recent_candles = [
-                    {
-                        "time": c["id"],
-                        "open": float(c["open"]),
-                        "high": float(c["high"]),
-                        "low": float(c["low"]),
-                        "close": float(c["close"]),
-                        "volume": float(c.get("vol", 0)),
-                    }
-                    for c in reversed(kline_data.get("data", []))
-                ]
-
-            context_payload = {
-                "symbol": symbol.upper(),
-                "base_timeframe": base_timeframe,
-                "step_minutes": {"1min": 1, "5min": 5, "15min": 15, "30min": 30, "60min": 60, "4hour": 240, "1day": 1440}.get(base_timeframe, 60),
-                "horizon_steps": horizon_hours,
-                "horizon_hours": horizon_hours,
-                "depth": depth,
-                "base_price": round(base_price, 8),
-                "requested_at": datetime.now(timezone.utc).isoformat(),
-                "spot_snapshot": {"price": round(base_price, 8), "change_pct_24h": 0.0, "volume": 0.0, "source": "htx-rest"},
-                "market_features": {},
-                "seasonal_patterns": [],
-                "recent_candles": recent_candles[-36:],
-                "journal_context": {},
-                "output_contract": {"steps": list(range(1, horizon_hours + 1)), "change_pct_basis": "relative to base_price", "neutrality": "do not force directional bias without evidence"},
-            }
-
-            import sys
-            webui_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "webui"))
-            if webui_path not in sys.path:
-                sys.path.insert(0, webui_path)
-            from prediction_engine import generate_model_prediction, MODEL_CONFIGS
-
-            arbiter_result = await generate_model_prediction(
-                MODEL_CONFIGS["minimax"], context_payload, role="arbiter"
-            )
-            await append_prediction_model_result(pool, request_id, arbiter_result)
-            log.info("Hourly correction appended arbiter for request %s", request_id)
-        except Exception as exc:
-            log.warning("Hourly correction failed for request %s: %s", request_id, exc)
+    raise RuntimeError("In-place corrections are disabled; create a new forecast request")

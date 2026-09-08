@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import math
 import hashlib
 import hmac
 import json
@@ -35,6 +37,25 @@ try:
 except Exception as _pattern_err:
     PatternMatcher = None  # type: ignore
 
+from forecast_input import parse_forecast_input, validate_idempotency_key
+from forecast_queue import (
+    SCHEMA as FORECAST_QUEUE_SCHEMA,
+    HEARTBEAT_KEY_PREFIX,
+    enqueue,
+    work_forecasts,
+    stop_worker,
+    resolve_execution_state,
+    QUEUED,
+    RUNNING,
+    COMPLETED,
+    FAILED,
+    EXPIRED,
+    PARTIAL,
+)
+from access_control import verify_telegram, allowed_origin, safe_next_url
+from services.market_data import fresh_ticker
+from services.sim_math import preview as simulate_preview, validate_order, settlement
+
 from prediction_timeframes import period_to_minutes, STEP_MINUTES_MAP
 
 
@@ -54,96 +75,7 @@ ALLOWED_PREDICTION_HORIZONS = set(range(1, 49))
 DEFAULT_PAGE_SIZE = 25
 SYNC_PREDICTION_MODEL_KEYS = ("analyst", "premium")
 CHART_NOTICE = "TradingView Lightweight Charts. Copyright (c) 2025 TradingView, Inc."
-PREDICTION_TABLES_SQL = """
-CREATE TABLE IF NOT EXISTS forecast_requests (
-    id SERIAL PRIMARY KEY,
-    symbol VARCHAR(15) NOT NULL,
-    horizon_hours INT NOT NULL,
-    base_timeframe VARCHAR(10) NOT NULL DEFAULT '60min',
-    depth INT NOT NULL DEFAULT 3,
-    base_price DECIMAL(20, 8) NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'active',
-    source VARCHAR(20) NOT NULL DEFAULT 'webui',
-    requested_by VARCHAR(64),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_forecast_requests_created_at ON forecast_requests (created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_forecast_requests_symbol_status ON forecast_requests (symbol, status);
-
-CREATE TABLE IF NOT EXISTS forecast_model_runs (
-    id SERIAL PRIMARY KEY,
-    request_id INT NOT NULL REFERENCES forecast_requests(id) ON DELETE CASCADE,
-    model_key VARCHAR(32) NOT NULL,
-    model_name VARCHAR(128) NOT NULL,
-    model_id VARCHAR(128) NOT NULL,
-    agent_role VARCHAR(20) NOT NULL DEFAULT 'neutral',
-    status VARCHAR(20) NOT NULL DEFAULT 'completed',
-    summary TEXT,
-    error_message TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_forecast_model_runs_request_id ON forecast_model_runs (request_id);
-CREATE INDEX IF NOT EXISTS idx_forecast_model_runs_role ON forecast_model_runs (request_id, agent_role);
-
-CREATE TABLE IF NOT EXISTS forecast_points (
-    id SERIAL PRIMARY KEY,
-    request_id INT NOT NULL REFERENCES forecast_requests(id) ON DELETE CASCADE,
-    model_run_id INT NOT NULL REFERENCES forecast_model_runs(id) ON DELETE CASCADE,
-    forecast_hour INT NOT NULL,
-    target_time TIMESTAMP NOT NULL,
-    predicted_price DECIMAL(20, 8) NOT NULL,
-    predicted_change_pct DECIMAL(10, 4) NOT NULL,
-    confidence DECIMAL(5, 2),
-    rationale TEXT,
-    actual_price DECIMAL(20, 8),
-    actual_change_pct DECIMAL(10, 4),
-    price_error_pct DECIMAL(10, 4),
-    change_error_pct DECIMAL(10, 4),
-    accuracy_score DECIMAL(6, 2),
-    failure_score DECIMAL(6, 2),
-    direction_match BOOLEAN,
-    verdict TEXT,
-    evaluated_at TIMESTAMP,
-    UNIQUE (model_run_id, forecast_hour)
-);
-
-CREATE INDEX IF NOT EXISTS idx_forecast_points_target_time ON forecast_points (target_time, evaluated_at);
-CREATE INDEX IF NOT EXISTS idx_forecast_points_request_id ON forecast_points (request_id, forecast_hour);
-
--- Additive migrations for Phase 2
-ALTER TABLE forecast_requests ADD COLUMN IF NOT EXISTS base_timeframe VARCHAR(10) DEFAULT '60min';
-ALTER TABLE forecast_requests ADD COLUMN IF NOT EXISTS depth INT DEFAULT 3;
-ALTER TABLE forecast_model_runs ADD COLUMN IF NOT EXISTS agent_role VARCHAR(20) DEFAULT 'neutral';
-ALTER TABLE forecast_points ADD COLUMN IF NOT EXISTS step_index INT DEFAULT 0;
-ALTER TABLE forecast_points ADD COLUMN IF NOT EXISTS predicted_low DECIMAL(20, 8);
-ALTER TABLE forecast_points ADD COLUMN IF NOT EXISTS predicted_high DECIMAL(20, 8);
-ALTER TABLE forecast_points ADD COLUMN IF NOT EXISTS in_range BOOLEAN DEFAULT NULL;
-ALTER TABLE forecast_points ADD COLUMN IF NOT EXISTS pattern_match_score DECIMAL(5,2) DEFAULT NULL;
-
-CREATE TABLE IF NOT EXISTS forecast_reports (
-    id SERIAL PRIMARY KEY,
-    request_id INT NOT NULL REFERENCES forecast_requests(id) ON DELETE CASCADE,
-    model_run_id INT NOT NULL REFERENCES forecast_model_runs(id) ON DELETE CASCADE,
-    agent_role VARCHAR(20) NOT NULL DEFAULT 'neutral',
-    evaluated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    step_index INT NOT NULL,
-    target_time TIMESTAMP NOT NULL,
-    factual_price DECIMAL(20, 8),
-    error_pct DECIMAL(10, 4),
-    in_range BOOLEAN,
-    confidence_before DECIMAL(5, 2),
-    confidence_after DECIMAL(5, 2),
-    reason_text TEXT,
-    model_response TEXT,
-    UNIQUE (model_run_id, step_index)
-);
-
-CREATE INDEX IF NOT EXISTS idx_forecast_reports_request_id ON forecast_reports (request_id);
-CREATE INDEX IF NOT EXISTS idx_forecast_reports_evaluated ON forecast_reports (evaluated_at);
-"""
+from forecast_schema import PREDICTION_TABLES_SQL
 
 
 def get_watchlist() -> list[str]:
@@ -235,11 +167,8 @@ def clamp_size(size: int) -> int:
 
 
 def get_auth_enabled() -> bool:
-    password = os.getenv("WEBUI_ADMIN_PASSWORD", "")
-    flag = os.getenv("WEBUI_AUTH_ENABLED")
-    if flag is None:
-        return bool(password)
-    return parse_bool(flag, default=False)
+    # Secure default. An explicit local development override is constrained by middleware.
+    return parse_bool(os.getenv("WEBUI_AUTH_ENABLED"), default=True)
 
 
 def get_admin_username() -> str:
@@ -259,28 +188,28 @@ def get_session_secret() -> str:
 
 
 def get_internal_api_token() -> str:
-    explicit = os.getenv("WEBUI_INTERNAL_TOKEN", "").strip()
-    if explicit:
-        return explicit
-    # Fallback to a random token if not configured
-    return secrets.token_urlsafe(32)
+    return os.getenv("WEBUI_INTERNAL_TOKEN", "").strip()
 
 
 def verify_internal_api_token(token: str | None) -> None:
     expected = get_internal_api_token()
-    if not token or not hmac.compare_digest(expected, token):
+    if not expected or not token or not hmac.compare_digest(expected, token):
         raise HTTPException(status_code=403, detail="Invalid internal API token")
 
 
 def validate_auth_config() -> None:
     if get_auth_enabled() and not get_admin_password():
         raise RuntimeError("WEBUI_AUTH_ENABLED=true requires WEBUI_ADMIN_PASSWORD to be set")
+    if get_auth_enabled() and len(os.getenv("WEBUI_SESSION_SECRET", "")) < 32:
+        raise RuntimeError("Authentication requires a stable WEBUI_SESSION_SECRET of at least 32 characters")
 
 
 def is_authenticated(request: Request) -> bool:
     if not get_auth_enabled():
         return True
-    return bool(request.session.get("authenticated")) and request.session.get("username") == get_admin_username()
+    if request.session.get("auth_type") == "telegram":
+        return bool(_get_telegram_user(request))
+    return (bool(request.session.get("authenticated")) and request.session.get("username") == get_admin_username()) or bool(_get_telegram_user(request))
 
 
 def ensure_csrf_token(request: Request) -> str:
@@ -523,13 +452,14 @@ async def get_symbol_snapshot(request: Request, symbol: str) -> dict[str, Any]:
         if raw:
             snapshot = safe_json(raw)
             price = float(snapshot.get("price", 0.0) or 0.0)
-            if price > 0:
+            if fresh_ticker(snapshot):
                 return {
                     "symbol": normalized_symbol,
                     "price": price,
                     "change_pct": float(snapshot.get("change_pct", 0.0) or 0.0),
                     "volume": float(snapshot.get("volume", 0.0) or 0.0),
                     "source": snapshot.get("source", "redis-cache"),
+                    "timestamp": snapshot.get("timestamp"),
                 }
 
     client: httpx.AsyncClient = request.app.state.http_client
@@ -542,6 +472,8 @@ async def get_symbol_snapshot(request: Request, symbol: str) -> dict[str, Any]:
     tick = payload.get("tick") or {}
     open_price = float(tick.get("open", 0.0) or 0.0)
     close_price = float(tick.get("close", 0.0) or 0.0)
+    if not fresh_ticker({"price": close_price, "timestamp": payload.get("ts")}):
+        raise HTTPException(status_code=503, detail="Market ticker is stale or invalid")
     change_pct = ((close_price - open_price) / open_price * 100.0) if open_price else 0.0
     return {
         "symbol": normalized_symbol,
@@ -549,6 +481,7 @@ async def get_symbol_snapshot(request: Request, symbol: str) -> dict[str, Any]:
         "change_pct": change_pct,
         "volume": float(tick.get("vol", 0.0) or 0.0),
         "source": "htx-rest-detail",
+        "timestamp": payload.get("ts"),
     }
 
 
@@ -1492,6 +1425,54 @@ async def finalize_oracle_prediction(
         log.warning("Background Oracle/Arbiter prediction failed for request %s: %s", request_id, exc)
 
 
+async def queue_prediction(request: Request, symbol: str, horizon_steps: int,
+                           requested_by: str, source: str, base_timeframe: str = "60min", depth: int = 3):
+    try:
+        spec = parse_forecast_input({"symbol": symbol,"horizon_steps": horizon_steps,"base_timeframe": base_timeframe,"depth": depth})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    symbol = ensure_prediction_symbol(spec.symbol)
+    base_timeframe, horizon_steps, depth = spec.base_timeframe, spec.horizon_steps, spec.depth
+    pool = request.app.state.pg_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+    horizon_hours = max(1, (horizon_steps * period_to_minutes(base_timeframe) + 59) // 60)
+    raw_idempotency_key = request.headers.get("Idempotency-Key", "")
+    try:
+        request_key = validate_idempotency_key(raw_idempotency_key) if raw_idempotency_key else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    scoped_key = f"{requested_by}:{source}:{request_key}" if request_key else None
+    async with pool.acquire() as connection:
+        async with connection.transaction():
+            if scoped_key:
+                await connection.execute("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", scoped_key)
+                previous = await connection.fetchrow(
+                    "SELECT j.request_id,j.payload,r.status,r.base_price FROM forecast_jobs j "
+                    "JOIN forecast_requests r ON r.id=j.request_id WHERE j.idempotency_key=$1", scoped_key)
+                if previous:
+                    saved = safe_json(previous["payload"])
+                    expected = {"symbol": symbol, "horizon_steps": horizon_steps, "base_timeframe": base_timeframe, "depth": depth}
+                    if any(saved.get(key) != value for key, value in expected.items()):
+                        raise HTTPException(status_code=409, detail="Idempotency-Key already used for different parameters")
+                    return {"ok": True, "id": previous["request_id"], "request_id": previous["request_id"],
+                            "symbol": symbol, "base_price": float(previous["base_price"]), "status": previous["status"]}
+            snap = await get_symbol_snapshot(request, symbol)
+            base_price = float(snap.get("price", 0))
+            if not math.isfinite(base_price) or base_price <= 0:
+                raise HTTPException(status_code=503, detail="Market price unavailable")
+            row = await connection.fetchrow(
+                "INSERT INTO forecast_requests (symbol,horizon_hours,base_timeframe,depth,base_price,status,source,requested_by) "
+                "VALUES ($1,$2,$3,$4,$5,'pending',$6,$7) RETURNING id",
+                symbol,horizon_hours,base_timeframe,depth,base_price,source,requested_by,
+            )
+            await enqueue(connection, row["id"], {"symbol": symbol,"horizon_steps": horizon_steps,
+                "base_price": base_price,"requested_by": requested_by,"source": source,
+                "base_timeframe": base_timeframe,"depth": depth}, scoped_key)
+    return {"ok": True,"id": row["id"],"request_id": row["id"],"symbol": symbol,
+            "base_price": base_price,"status": "pending", "message": "Forecast queued"}
+
+
 async def run_prediction_request_async(
     app: Any,
     request_id: int,
@@ -1502,139 +1483,90 @@ async def run_prediction_request_async(
     source: str,
     base_timeframe: str = "60min",
     depth: int = 3,
+    connection: Any = None,
 ) -> None:
     """Background completion of a pending prediction request."""
     fake_request = _FakeRequest(app)
     normalized_symbol = ensure_prediction_symbol(symbol)
     normalized_timeframe = normalize_period(base_timeframe)
     log.info("Starting background prediction request %s for %s", request_id, normalized_symbol)
-    try:
-        context_payload = await build_prediction_context(
-            fake_request, normalized_symbol, horizon_steps,
-            base_timeframe=base_timeframe, depth=depth
+    context_payload = await build_prediction_context(
+        fake_request, normalized_symbol, horizon_steps, base_timeframe=base_timeframe, depth=depth
+    )
+    as_of = datetime.now(timezone.utc)
+    role_results = list((await generate_role_prediction_bundle(context_payload)).values())
+    if not any(r.status == "completed" and r.points for r in role_results):
+        raise ValueError("No valid model predictions")
+    step_minutes = period_to_minutes(normalized_timeframe)
+    # Deadline miss check: if first target time has already passed, fail the job
+    first_target = as_of + timedelta(minutes=1 * step_minutes)
+    if first_target <= datetime.now(timezone.utc):
+        raise ValueError("forecast_deadline_missed")
+    if connection is None:
+        raise RuntimeError("Forecast completion requires a queue transaction")
+    # Determine execution_state: partial if some roles failed, completed if all ok
+    successful_roles = [r for r in role_results if r.status == "completed" and r.points]
+    failed_roles = [r for r in role_results if r.status != "completed" or not r.points]
+    final_exec_state = PARTIAL if failed_roles else COMPLETED
+    async with connection.transaction():
+        await connection.execute(
+            "UPDATE forecast_requests SET status='active',base_price=$2,as_of=$3,"
+            "execution_state=$4,updated_at=$3 WHERE id=$1",
+            request_id, float(context_payload["base_price"]), to_db_timestamp(as_of),
+            final_exec_state,
         )
-        role_bundle = await generate_role_prediction_bundle(context_payload)
-        role_results = list(role_bundle.values())
-    except Exception as exc:
-        log.exception("Background prediction context/role generation failed for request %s: %s", request_id, exc)
-        pool = getattr(app.state, "pg_pool", None)
-        if pool:
-            try:
-                async with pool.acquire() as connection:
-                    await connection.execute(
-                        "UPDATE forecast_requests SET status=$1, updated_at=$2 WHERE id=$3",
-                        "failed", to_db_timestamp(datetime.now(timezone.utc)), request_id
-                    )
-            except Exception as db_exc:
-                log.warning("Failed to mark request %s failed: %s", request_id, db_exc)
-        return
-
-    pool = getattr(app.state, "pg_pool", None)
-    if not pool:
-        log.warning("No pg_pool for background request %s", request_id)
-        return
-    try:
-        async with pool.acquire() as connection:
-            async with connection.transaction():
-                request_status = "active" if any(
-                    r.status == "completed" and r.points for r in role_results
-                ) else "failed"
+        model_query = """
+        INSERT INTO forecast_model_runs (request_id, model_key, model_name, model_id, agent_role, status, summary, error_message)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id
+        """
+        point_query = """
+        INSERT INTO forecast_points (
+            request_id, model_run_id, forecast_hour, step_index, target_time,
+            predicted_price, predicted_change_pct, predicted_low, predicted_high, confidence, rationale, pattern_match_score
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        """
+        step_minutes = period_to_minutes(normalized_timeframe)
+        created_at = as_of
+        for result in role_results:
+            agent_role = getattr(result, "agent_role", "neutral")
+            model_row = await connection.fetchrow(
+                model_query, request_id, result.key, result.name, result.model_id, agent_role,
+                result.status, result.summary, result.error_message
+            )
+            if result.status != "completed" or not result.points:
+                continue
+            model_run_id = model_row["id"]
+            seen_steps: set[int] = set()
+            for point in result.points:
+                step = int(getattr(point, "step_index", getattr(point, "hour", 0)))
+                # Validate step_index: strictly 1..horizon_steps, no duplicates or gaps
+                if step < 1 or step > horizon_steps:
+                    continue  # skip out-of-range steps
+                if step in seen_steps:
+                    continue  # skip duplicates
+                seen_steps.add(step)
+                p_price = float(point.predicted_price)
+                p_low = float(getattr(point, "predicted_low", 0) or 0)
+                p_high = float(getattr(point, "predicted_high", 0) or 0)
+                # Price/low/high must be finite and positive; low <= predicted_price <= high
+                if not (math.isfinite(p_price) and p_price > 0):
+                    continue
+                target_time = as_of + timedelta(minutes=step * step_minutes)
                 await connection.execute(
-                    "UPDATE forecast_requests SET status=$1, base_price=$2, updated_at=$3 WHERE id=$4",
-                    request_status, float(context_payload["base_price"]), to_db_timestamp(datetime.now(timezone.utc)), request_id
+                    point_query, request_id, model_run_id, step, step,
+                    to_db_timestamp(target_time), point.predicted_price, point.predicted_change_pct,
+                    getattr(point, "predicted_low", None), getattr(point, "predicted_high", None),
+                    point.confidence, point.rationale, getattr(point, "pattern_match_score", None)
                 )
-                model_query = """
-                INSERT INTO forecast_model_runs (request_id, model_key, model_name, model_id, agent_role, status, summary, error_message)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                RETURNING id
-                """
-                point_query = """
-                INSERT INTO forecast_points (
-                    request_id, model_run_id, forecast_hour, step_index, target_time,
-                    predicted_price, predicted_change_pct, predicted_low, predicted_high, confidence, rationale, pattern_match_score
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                """
-                step_minutes = period_to_minutes(normalized_timeframe)
-                created_at = datetime.now(timezone.utc)
-                for result in role_results:
-                    agent_role = getattr(result, "agent_role", "neutral")
-                    model_row = await connection.fetchrow(
-                        model_query, request_id, result.key, result.name, result.model_id, agent_role,
-                        result.status, result.summary, result.error_message
-                    )
-                    if result.status != "completed" or not result.points:
-                        continue
-                    model_run_id = model_row["id"]
-                    for point in result.points:
-                        step = int(getattr(point, "step_index", getattr(point, "hour", 0)))
-                        target_time = created_at + timedelta(minutes=step * step_minutes)
-                        await connection.execute(
-                            point_query, request_id, model_run_id, step, step,
-                            to_db_timestamp(target_time), point.predicted_price, point.predicted_change_pct,
-                            getattr(point, "predicted_low", None), getattr(point, "predicted_high", None),
-                            point.confidence, point.rationale, getattr(point, "pattern_match_score", None)
-                        )
-    except Exception as exc:
-        log.exception("Background prediction DB save failed for request %s: %s", request_id, exc)
-        return
-
-    oracle_model = next((item for item in list_prediction_models() if item["key"] == "minimax"), None)
-    if oracle_model and oracle_model["available"]:
-        try:
-            await finalize_oracle_prediction(app, request_id, context_payload, primary_results=role_results)
-        except Exception as exc:
-            log.warning("Background oracle failed for request %s: %s", request_id, exc)
 
 
 async def run_prediction_request(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    symbol: str,
-    horizon_steps: int,
-    requested_by: str,
-    source: str,
-    base_timeframe: str = "60min",
-    depth: int = 3,
+    request: Request, background_tasks: BackgroundTasks, symbol: str, horizon_steps: int,
+    requested_by: str, source: str, base_timeframe: str = "60min", depth: int = 3,
 ) -> dict[str, Any]:
-    normalized_symbol = ensure_prediction_symbol(symbol)
-    normalized_timeframe = normalize_period(base_timeframe)
-    if horizon_steps < 1 or horizon_steps > 48:
-        raise HTTPException(status_code=400, detail="horizon_steps must be between 1 and 48")
-
-    try:
-        context_payload = await build_prediction_context(
-            request, normalized_symbol, horizon_steps,
-            base_timeframe=base_timeframe, depth=depth
-        )
-        # Run role bundle (bull + bear + arbiter)
-        role_bundle = await generate_role_prediction_bundle(context_payload)
-        role_results = list(role_bundle.values())
-
-        detail = await create_prediction_request_record(
-            request,
-            symbol=normalized_symbol,
-            horizon_steps=horizon_steps,
-            base_price=float(context_payload["base_price"]),
-            requested_by=requested_by,
-            source=source,
-            model_results=role_results,
-            base_timeframe=base_timeframe,
-            depth=depth,
-        )
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch market context for {normalized_symbol}") from exc
-
-    oracle_model = next((item for item in list_prediction_models() if item["key"] == "minimax"), None)
-    if oracle_model and oracle_model["available"]:
-        background_tasks.add_task(
-            finalize_oracle_prediction, request.app, detail["id"], context_payload, primary_results=role_results
-        )
-        detail["oracle_status"] = "pending"
-    else:
-        detail["oracle_status"] = "unavailable"
-
-    return detail
+    return await queue_prediction(request, symbol, horizon_steps, requested_by, source, base_timeframe, depth)
 
 
 async def fetch_health_snapshot(request: Request) -> dict[str, Any]:
@@ -1665,7 +1597,14 @@ async def fetch_health_snapshot(request: Request) -> dict[str, Any]:
         if last_journal_at.tzinfo is None:
             last_journal_at = last_journal_at.replace(tzinfo=timezone.utc)
         journal_age_minutes = round((datetime.now(timezone.utc) - last_journal_at).total_seconds() / 60.0, 1)
-        collector_ok = journal_age_minutes <= 20.0
+        # Journal freshness is reported separately from the market feed.
+
+    if redis_client is not None:
+        try:
+            ticks = [safe_json(await redis_client.get(f"ticker:{sym}") or "{}") for sym in get_watchlist()]
+            collector_ok = bool(ticks) and all(fresh_ticker(tick) for tick in ticks)
+        except Exception:
+            collector_ok = False
 
     return {
         "generated_at": serialize_dt(datetime.now(timezone.utc)),
@@ -1779,6 +1718,7 @@ async def lifespan(app: FastAPI):
     app.state.http_client = httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0))
     app.state.redis_client = None
     app.state.pg_pool = None
+    app.state.forecast_worker = None
 
     try:
         app.state.redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
@@ -1790,12 +1730,21 @@ async def lifespan(app: FastAPI):
         try:
             app.state.pg_pool = await asyncpg.create_pool(dsn=db_url)
             await ensure_prediction_schema(app.state.pg_pool)
+            await app.state.pg_pool.execute(FORECAST_QUEUE_SCHEMA)
+            from services.sim_engine import SIM_TABLES_SQL
+            await app.state.pg_pool.execute(SIM_TABLES_SQL)
+            async def runner(request_id, payload, connection):
+                await run_prediction_request_async(app, request_id, **payload, connection=connection)
+            app.state.forecast_worker = asyncio.create_task(
+                work_forecasts(app.state.pg_pool, runner, redis_client=app.state.redis_client)
+            )
         except Exception as exc:
             log.warning("Postgres pool bootstrap failed: %s", exc)
 
     try:
         yield
     finally:
+        await stop_worker(app.state.forecast_worker)
         if app.state.pg_pool is not None:
             await app.state.pg_pool.close()
         if app.state.redis_client is not None:
@@ -1804,24 +1753,121 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="WORED Web UI", version="2.0.0", lifespan=lifespan)
+@app.middleware("http")
+async def administrative_boundary(request: Request, call_next):
+    path = request.url.path
+    if path in {"/login", "/api/auth/telegram", "/api/health", "/healthz", "/readyz"} or path.startswith("/static/"):
+        return await call_next(request)
+    if path.startswith("/api/internal/"):
+        try:
+            verify_internal_api_token(request.headers.get("X-Internal-Token"))
+        except HTTPException:
+            return JSONResponse({"detail": "Invalid internal API token"}, status_code=403)
+        return await call_next(request)
+    if not get_auth_enabled():
+        # The override is only usable by a direct loopback client, never a tunnel.
+        if (not request.client or request.client.host not in {"127.0.0.1", "::1"}
+                or any(h in request.headers for h in ("forwarded", "x-forwarded-for", "x-forwarded-host"))):
+            return JSONResponse({"detail": "Local mode requires a direct loopback connection"}, status_code=403)
+    if not is_authenticated(request):
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "Authentication required"}, status_code=401)
+        return build_login_redirect(request)
+    if request.method not in {"GET", "HEAD", "OPTIONS"} and not _verify_telegram_init_data(request.headers.get("X-Telegram-Init-Data", "")):
+        origin = request.headers.get("origin", "")
+        if not allowed_origin(origin, str(request.url), os.getenv("WEBUI_PUBLIC_BASE_URL", "")):
+            return JSONResponse({"detail": "Invalid request origin"}, status_code=403)
+    return await call_next(request)
+
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=get_session_secret(),
     session_cookie="wored_webui_session",
     same_site="lax",
-    https_only=False,
+    https_only=parse_bool(os.getenv("WEBUI_COOKIE_SECURE"), default=False),
     max_age=60 * 60 * 12,
 )
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
+@app.get("/healthz")
+async def liveness():
+    return {"alive": True}
+
+
+@app.get("/readyz")
+async def readiness(request: Request):
+    health = await fetch_health_snapshot(request)
+    worker = getattr(request.app.state, "forecast_worker", None)
+    health["forecast_worker"] = worker is not None and not worker.done()
+    ready = all(health[k] for k in ("redis", "postgres", "collector_feed", "forecast_worker"))
+    return JSONResponse({**health, "ready": ready}, status_code=200 if ready else 503)
+
+
+@app.get("/api/forecast/{request_id}/status")
+async def forecast_status(request: Request, request_id: int):
+    require_api_auth(request)
+    pool = request.app.state.pg_pool
+    if pool is None:
+        raise HTTPException(status_code=503, detail="Postgres unavailable")
+    row = await pool.fetchrow(
+        "SELECT r.id, r.status, r.execution_state, r.evaluation_state, "
+        "r.failure_code, r.as_of, r.valid_until, r.deadline_at, "
+        "j.error_code AS job_error_code, j.state AS job_state, j.deadline_at AS job_deadline_at "
+        "FROM forecast_requests r "
+        "LEFT JOIN forecast_jobs j ON j.request_id=r.id WHERE r.id=$1", request_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Forecast not found")
+    # Resolve execution_state with heartbeat
+    redis_client = request.app.state.redis_client
+    heartbeat_alive = False
+    if redis_client is not None:
+        try:
+            hb_val = await redis_client.get(f"{HEARTBEAT_KEY_PREFIX}{request_id}:heartbeat")
+            heartbeat_alive = hb_val is not None
+        except Exception:
+            pass
+    db_state = row["status"]
+    exec_state = row["execution_state"]
+    completed_or_failed = db_state in ("completed", "failed")
+    resolved = resolve_execution_state(db_state, exec_state, heartbeat_alive, completed_or_failed)
+    # Legacy status stays as-is for backward compatibility
+    return {
+        "id": row["id"],
+        "status": row["status"],
+        "execution_state": resolved,
+        "evaluation_state": row["evaluation_state"],
+        "failure_code": row["failure_code"] or row["job_error_code"],
+        "as_of": serialize_dt(row["as_of"]),
+        "valid_until": serialize_dt(row["valid_until"]),
+        "deadline_at": serialize_dt(row["deadline_at"] or row["job_deadline_at"]),
+    }
+
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, next: str = "/"):
+    next = safe_next_url(next)
     if not get_auth_enabled():
         return RedirectResponse(url="/", status_code=303)
     if is_authenticated(request):
         return RedirectResponse(url=next or "/", status_code=303)
     return template_response(request, "login.html", page_title="Web UI Login", next_target=next or "/")
+
+
+@app.post("/api/auth/telegram")
+async def telegram_login(request: Request, payload: dict[str, Any] = Body(...)):
+    verify_csrf_token(request, payload.get("csrf_token"))
+    init_data = payload.get("init_data")
+    user = _verify_telegram_init_data(init_data) if isinstance(init_data, str) else None
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired Telegram administrator session")
+    request.session.clear()
+    request.session.update({"authenticated": True, "username": get_admin_username(),
+                            "auth_type": "telegram", "telegram_user": user})
+    ensure_csrf_token(request)
+    return {"ok": True}
 
 
 @app.post("/login")
@@ -1830,12 +1876,17 @@ async def login_action(
     username: str = Form(...),
     password: str = Form(...),
     next: str = Form("/"),
+    csrf_token: str = Form(...),
 ):
+    next = safe_next_url(next)
+    verify_csrf_token(request, csrf_token)
     if not get_auth_enabled():
         return RedirectResponse(url="/", status_code=303)
 
     if hmac.compare_digest(username, get_admin_username()) and hmac.compare_digest(password, get_admin_password()):
+        request.session.clear()
         request.session["authenticated"] = True
+        request.session["auth_type"] = "password"
         request.session["username"] = username
         ensure_csrf_token(request)
         set_flash(request, "ok", "Web UI session opened.")
@@ -2026,83 +2077,36 @@ async def prediction_detail_redirect(request: Request, request_id: int):
     auth_redirect = require_page_auth(request)
     if auth_redirect is not None:
         return auth_redirect
-    return RedirectResponse(url="/predictions", status_code=307)
+    return RedirectResponse(url=f"/predictions?request_id={request_id}", status_code=307)
 
 
 @app.post("/predictions")
 async def create_prediction(
-    background_tasks: BackgroundTasks,
-    request: Request,
-    symbol: str = Form(...),
-    horizon_steps: int = Form(...),
-    base_timeframe: str = Form("60min"),
-    depth: int = Form(3),
-    csrf_token: str = Form(...),
+    background_tasks: BackgroundTasks, request: Request, symbol: str = Form(...),
+    horizon_steps: int = Form(...), base_timeframe: str = Form("60min"),
+    depth: int = Form(3), csrf_token: str = Form(...),
 ):
     require_api_auth(request)
     verify_csrf_token(request, csrf_token)
-    base_timeframe = normalize_period(base_timeframe)
-    normalized_symbol = ensure_prediction_symbol(symbol)
-
-    # Quick price snapshot and pending record; heavy model work goes to background
-    snapshot = await get_symbol_snapshot(request, normalized_symbol)
-    if snapshot["price"] <= 0:
-        raise HTTPException(status_code=503, detail=f"Current price for {normalized_symbol} is unavailable")
-    base_price = float(snapshot["price"])
-    horizon_hours = max(1, int((horizon_steps * period_to_minutes(base_timeframe)) / 60))
-
-    pool = request.app.state.pg_pool
-    if pool is None:
-        raise HTTPException(status_code=503, detail="Postgres is unavailable")
-    created_at = datetime.now(timezone.utc)
-    request_row = await pool.fetchrow(
-        """
-        INSERT INTO forecast_requests (symbol, horizon_hours, base_timeframe, depth, base_price, status, source, requested_by, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING id
-        """,
-        normalized_symbol, horizon_hours, base_timeframe, depth, base_price,
-        "pending", "webui", request.session.get("username", "local-webui"),
-        to_db_timestamp(created_at), to_db_timestamp(created_at)
-    )
-    request_id = request_row["id"]
-
-    background_tasks.add_task(
-        run_prediction_request_async,
-        request.app, request_id, normalized_symbol, horizon_steps, base_price,
-        request.session.get("username", "local-webui"), "webui", base_timeframe, depth
-    )
-
-    set_flash(
-        request,
-        "ok",
-        f"Prediction #{request_id} queued for {normalized_symbol.upper()} / {horizon_hours}h. Models run in background; refresh the page.",
-    )
-    response = RedirectResponse(url="/predictions", status_code=303)
-    response.background = background_tasks
-    return response
+    detail = await queue_prediction(request, symbol, horizon_steps,
+        request.session.get("username", "telegram-admin"), "webui", base_timeframe, depth)
+    set_flash(request, "ok", f"Prediction #{detail['id']} queued. Results appear after completion.")
+    return RedirectResponse(url="/predictions", status_code=303)
 
 
 @app.post("/api/internal/predictions")
 async def api_internal_create_prediction(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    payload: dict[str, Any] = Body(...),
+    request: Request, background_tasks: BackgroundTasks, payload: dict[str, Any] = Body(...),
     x_internal_token: str | None = Header(default=None),
 ):
     verify_internal_api_token(x_internal_token)
-    base_timeframe = normalize_period(str(payload.get("base_timeframe", "60min")))
-    detail = await run_prediction_request(
-        request=request,
-        background_tasks=background_tasks,
-        symbol=str(payload.get("symbol") or ""),
-        horizon_steps=int(payload.get("horizon_steps") or payload.get("horizon_hours") or 0),
-        requested_by=str(payload.get("requested_by") or "telegram-bot"),
-        source=str(payload.get("source") or "telegram"),
-        base_timeframe=base_timeframe,
-        depth=int(payload.get("depth", 3)),
-    )
-    return detail
+    try:
+        spec = parse_forecast_input(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    detail = await run_prediction_request(request, background_tasks, spec.symbol, spec.horizon_steps,
+        str(payload.get("requested_by") or "telegram-bot")[:64], "telegram", spec.base_timeframe, spec.depth)
+    return JSONResponse(detail, status_code=202)
 
 
 @app.post("/admin/actions/refresh-cache")
@@ -2240,7 +2244,7 @@ async def api_predictions_health(request: Request) -> JSONResponse:
                     "SELECT COUNT(*) AS n FROM forecast_requests WHERE created_at >= NOW() AT TIME ZONE 'UTC' - INTERVAL '24 hours'"
                 )
                 points_row = await conn.fetchrow(
-                    "SELECT COUNT(*) AS n, AVG(accuracy_score) AS avg FROM forecast_points WHERE evaluated_at >= NOW() AT TIME ZONE 'UTC' - INTERVAL '7 days' AND accuracy_score IS NOT NULL"
+                    "SELECT COUNT(*) AS n, AVG(accuracy_score) AS avg FROM forecast_points WHERE evaluated_at >= NOW() AT TIME ZONE 'UTC' - INTERVAL '7 days' AND accuracy_score IS NOT NULL AND metrics_version=2"
                 )
                 recent_stats["requests_last_24h"] = int(requests_row["n"]) if requests_row else 0
                 recent_stats["evaluated_points_last_24h"] = int(points_row["n"]) if points_row else 0
@@ -2267,14 +2271,12 @@ async def api_predictions(
     if request.method == "POST":
         try:
             payload = await request.json()
-        except Exception:
-            payload = {}
-        symbol = str(payload.get("symbol") or "")
-        horizon_steps = int(payload.get("horizon_steps") or payload.get("horizon_hours") or 4)
-        base_timeframe = normalize_period(str(payload.get("base_timeframe", "60min")))
-        depth = int(payload.get("depth", 3))
-        requested_by = str(payload.get("requested_by") or request.session.get("username", "api-webui"))
-        source = str(payload.get("source") or "webui-api")
+            spec = parse_forecast_input(payload)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        symbol, horizon_steps, base_timeframe, depth = spec.symbol, spec.horizon_steps, spec.base_timeframe, spec.depth
+        requested_by = request.session.get("username", "telegram-admin")
+        source = "webui-api"
         detail = await run_prediction_request(
             request=request,
             background_tasks=background_tasks,
@@ -2789,53 +2791,29 @@ TELEGRAM_WEBAPP_AUTH_DISABLED = os.getenv("TELEGRAM_WEBAPP_AUTH_DISABLED", "true
 
 
 def _verify_telegram_init_data(init_data: str) -> dict | None:
-    """
-    ТЗ 6.2 — валидация Telegram WebApp initData.
-    Возвращает {"user_id": int, "username": str} или None.
-    """
-    if TELEGRAM_WEBAPP_AUTH_DISABLED:
-        return {"user_id": 5249526259, "username": "admin"}
-
-    if not init_data:
-        return None
-
+    raw_ids = os.getenv("TELEGRAM_ADMIN_IDS", os.getenv("TELEGRAM_ADMIN_ID", ""))
     try:
-        import urllib.parse
-        import hmac
-        import hashlib
-
-        parsed = urllib.parse.parse_qs(init_data)
-        hash_val = parsed.get("hash", [None])[0]
-        if not hash_val:
-            return None
-
-        # Build data-check string
-        parsed.pop("hash", None)
-        data_check_string = "\n".join(f"{k}={v[0]}" for k, v in sorted(parsed.items()))
-
-        bot_token = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
-        if not bot_token:
-            return None
-
-        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-        computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-
-        if not hmac.compare_digest(computed_hash, hash_val):
-            return None
-
-        user_json = parsed.get("user", [None])[0]
-        if user_json:
-            user_data = json.loads(user_json)
-            return {"user_id": user_data.get("id"), "username": user_data.get("username", "")}
+        admin_ids = {int(value.strip()) for value in raw_ids.split(",") if value.strip()}
+    except ValueError:
         return None
-    except Exception:
-        return None
+    token = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN") or ""
+    return verify_telegram(init_data, token, admin_ids)
 
 
 def _get_telegram_user(request: Request) -> dict | None:
-    """Extract and verify Telegram user from request headers."""
     init_data = request.headers.get("X-Telegram-Init-Data", "")
-    return _verify_telegram_init_data(init_data)
+    if init_data:
+        return _verify_telegram_init_data(init_data)
+    if request.session.get("authenticated") and request.session.get("auth_type") == "telegram":
+        user = request.session.get("telegram_user")
+        raw_ids = os.getenv("TELEGRAM_ADMIN_IDS", os.getenv("TELEGRAM_ADMIN_ID", ""))
+        try:
+            allowed_ids = {int(value.strip()) for value in raw_ids.split(",") if value.strip()}
+        except ValueError:
+            return None
+        if isinstance(user, dict) and user.get("user_id") in allowed_ids:
+            return user
+    return None
 
 
 @app.get("/daily-session", response_class=HTMLResponse)
@@ -3036,7 +3014,8 @@ async def api_daily_session_start(request: Request, body: dict = Body(...)):
     budget = float(body.get("budget_usdt", 100.0))
     risk_mode = body.get("risk_mode", "balanced")
     duration = int(body.get("duration_hours", 8))
-    user_id = int(body.get("user_id", 5249526259))
+    principal = _get_telegram_user(request)
+    user_id = principal["user_id"] if principal else 0
 
     # §6 — Trade profile from body
     trade_direction = body.get("trade_direction", "auto")
@@ -3650,7 +3629,8 @@ async def api_command_deck(request: Request):
         async with pool.acquire() as conn:
             req_row = await conn.fetchrow(
                 """SELECT id, symbol, base_price, created_at
-                   FROM forecast_requests WHERE status='active'
+                   FROM forecast_requests fr WHERE status='active'
+                   AND EXISTS (SELECT 1 FROM forecast_points p WHERE p.request_id=fr.id AND p.target_time > (NOW() AT TIME ZONE 'UTC'))
                    ORDER BY created_at DESC LIMIT 1"""
             )
             if req_row:
@@ -3665,6 +3645,7 @@ async def api_command_deck(request: Request):
                        FROM forecast_model_runs fmr
                        LEFT JOIN forecast_points fp ON fp.model_run_id = fmr.id
                        WHERE fmr.request_id = $1 AND fmr.status = 'completed'
+                       AND fmr.id = (SELECT max(r.id) FROM forecast_model_runs r WHERE r.request_id=fmr.request_id AND r.agent_role=fmr.agent_role AND r.status='completed')
                        GROUP BY fmr.id ORDER BY fmr.model_key""",
                     req_row["id"],
                 )
@@ -3692,6 +3673,7 @@ async def api_command_deck(request: Request):
                        FROM forecast_points fp
                        JOIN forecast_model_runs fmr ON fmr.id = fp.model_run_id
                        WHERE fp.request_id = $1 AND fmr.status = 'completed'
+                       AND fmr.id = (SELECT max(r.id) FROM forecast_model_runs r WHERE r.request_id=fmr.request_id AND r.agent_role=fmr.agent_role AND r.status='completed')
                        ORDER BY fp.step_index, fmr.model_key""",
                     req_row["id"],
                 )
@@ -3836,7 +3818,7 @@ async def api_command_deck(request: Request):
                           round(avg(fp.accuracy_score)::numeric, 1) as avg_score
                    FROM forecast_points fp
                    JOIN forecast_model_runs fmr ON fmr.id = fp.model_run_id
-                   WHERE fp.evaluated_at IS NOT NULL
+                   WHERE fp.evaluated_at IS NOT NULL AND fp.metrics_version = 2
                    GROUP BY fmr.model_key ORDER BY fmr.model_key"""
             )
             models_acc = {}
@@ -3889,59 +3871,16 @@ async def command_deck_page(request: Request):
 
 
 @app.get("/api/trade/preview")
-async def api_trade_preview(
-    request: Request,
-    direction: str = "long",
-    leverage: int = 100,
-    margin: float = 10.0,
-    symbol: str = "btcusdt",
-):
-    """Pre-trade preview: entry price, liquidation, fees, notional, PnL scenarios."""
-    symbol = normalize_symbol(symbol)
+async def api_trade_preview(request: Request, direction: str = "long", leverage: int = 100,
+                            margin: float = 10.0, symbol: str = "btcusdt"):
+    require_api_auth(request)
+    symbol = ensure_prediction_symbol(symbol)
+    try:
+        validate_order(direction, leverage, margin, 1.0)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     snap = await get_symbol_snapshot(request, symbol)
-    entry_price = float(snap.get("price", 0))
-    if entry_price <= 0:
-        raise HTTPException(status_code=503, detail=f"No live price for {symbol}")
-
-    leverage = max(1, min(200, int(leverage)))
-    margin = max(1, float(margin))
-    direction = direction.lower()
-    if direction not in ("long", "short"):
-        direction = "long"
-
-    notional = margin * leverage
-    size = notional / entry_price
-    taker_fee = notional * 0.0006
-    liq_margin = 0.005
-
-    if direction == "long":
-        liq_price = entry_price * (1 - 1 / leverage + liq_margin)
-    else:
-        liq_price = entry_price * (1 + 1 / leverage - liq_margin)
-
-    # PnL scenarios: +1%, -1%, +5%, -5%
-    scenarios = {}
-    for pct in [1, -1, 5, -5]:
-        target = entry_price * (1 + pct / 100)
-        if direction == "long":
-            pnl = (target - entry_price) * size
-        else:
-            pnl = (entry_price - target) * size
-        scenarios[f"{pct:+d}%"] = round(pnl, 2)
-
-    return {
-        "symbol": symbol,
-        "direction": direction,
-        "entry_price": round(entry_price, 2),
-        "leverage": leverage,
-        "margin": margin,
-        "notional": round(notional, 2),
-        "size": round(size, 6),
-        "taker_fee": round(taker_fee, 4),
-        "liquidation_price": round(liq_price, 2),
-        "liq_distance_pct": round(abs(liq_price - entry_price) / entry_price * 100, 2),
-        "scenarios": scenarios,
-    }
+    return {"symbol": symbol, **simulate_preview(direction, leverage, margin, float(snap["price"]))}
 
 
 @app.post("/api/positions/open")
@@ -3954,8 +3893,12 @@ async def api_open_position(request: Request, payload: dict[str, Any] = Body(...
 
     symbol = normalize_symbol(str(payload.get("symbol", "btcusdt")))
     direction = str(payload.get("direction", "long")).lower()
-    leverage = int(payload.get("leverage", 100))
-    margin = float(payload.get("margin", 10.0))
+    try:
+        leverage = payload.get("leverage", 100)
+        margin = float(payload.get("margin", 10.0))
+        validate_order(direction, leverage, margin, 1.0)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     # Get live price
     snap = await get_symbol_snapshot(request, symbol)
@@ -3967,14 +3910,15 @@ async def api_open_position(request: Request, payload: dict[str, Any] = Body(...
     notional = margin * leverage
     size = notional / entry_price
     fee = notional * 0.0006  # taker fee
-    user_id = int(payload.get("user_id", 0))
+    telegram_user = _get_telegram_user(request)
+    user_id = telegram_user["user_id"] if telegram_user else 0  # authenticated dashboard administrator
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """INSERT INTO sim_positions
                (user_id, symbol, direction, order_type, margin_mode, leverage,
-                margin, entry_price, size, notional, entry_fee, status, ai_managed, opened_at)
-               VALUES ($1, $2, $3, 'market', 'isolated', $4, $5, $6, $7, $8, $9, 'open', false, NOW())
+                margin, entry_price, size, notional, entry_fee, status, ai_managed, opened_at, calculation_version)
+               VALUES ($1, $2, $3, 'market', 'isolated', $4, $5, $6, $7, $8, $9, 'open', false, NOW(), 2)
                RETURNING id, opened_at""",
             user_id, symbol, direction, leverage, margin, entry_price, size, notional, fee,
         )
@@ -3999,9 +3943,9 @@ async def api_close_position(request: Request, position_id: int):
     if not pool:
         raise HTTPException(status_code=503, detail="Postgres unavailable")
 
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         pos = await conn.fetchrow(
-            "SELECT * FROM sim_positions WHERE id=$1 AND status='open'", position_id
+            "SELECT * FROM sim_positions WHERE id=$1 AND status='open' FOR UPDATE", position_id
         )
         if not pos:
             raise HTTPException(status_code=404, detail="Position not found or already closed")
@@ -4012,25 +3956,22 @@ async def api_close_position(request: Request, position_id: int):
         if redis_client:
             raw = await redis_client.get(f"ticker:{pos['symbol']}")
             if raw:
-                live_price = float(safe_json(raw).get("price", 0))
+                ticker = safe_json(raw)
+                if fresh_ticker(ticker):
+                    live_price = float(ticker["price"])
         if live_price == 0:
             raise HTTPException(status_code=503, detail="No live price")
 
         entry = float(pos["entry_price"])
         size = float(pos["size"])
-        notional = float(pos["notional"])
-        close_fee = notional * 0.0006
-
-        if pos["direction"] == "long":
-            pnl = (live_price - entry) * size
-        else:
-            pnl = (entry - live_price) * size
+        pnl, close_fee = settlement(pos["direction"], entry, live_price, size,
+                                    float(pos["entry_fee"]), float(pos["funding_paid"] or 0), int(pos.get("calculation_version", 1)))
 
         await conn.execute(
             """UPDATE sim_positions
                SET status='closed', close_price=$1, close_fee=$2,
                    realized_pnl=$3, closed_at=NOW(), close_reason='manual_command_deck'
-               WHERE id=$4""",
+               WHERE id=$4 AND status='open'""",
             live_price, close_fee, pnl, position_id,
         )
 
@@ -4045,48 +3986,15 @@ async def api_close_position(request: Request, position_id: int):
 
 @app.post("/api/forecast/quick")
 async def api_quick_forecast(request: Request, payload: dict[str, Any] = Body(...)):
-    """Быстрый прогноз из Command Deck — BTC 4h default."""
     require_api_auth(request)
-    pool = request.app.state.pg_pool
-    if not pool:
-        raise HTTPException(status_code=503, detail="Postgres unavailable")
-
-    symbol = normalize_symbol(str(payload.get("symbol", "btcusdt")))
-    horizon_steps = int(payload.get("horizon_steps", 4))
-
-    snap = await get_symbol_snapshot(request, symbol)
-    base_price = float(snap.get("price", 0))
-    if base_price <= 0:
-        raise HTTPException(status_code=503, detail=f"No live price for {symbol}")
-
-    created_at = datetime.now(timezone.utc)
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """INSERT INTO forecast_requests
-               (symbol, horizon_hours, base_timeframe, depth, base_price, status, source, requested_by, created_at, updated_at)
-               VALUES ($1, $2, '60min', 3, $3, 'pending', 'command-deck', 'command-deck', $4, $5)
-               RETURNING id""",
-            symbol, horizon_steps, base_price,
-            to_db_timestamp(created_at), to_db_timestamp(created_at),
-        )
-
-    request_id = row["id"]
-    # Launch background prediction
-    background_tasks = BackgroundTasks()
-    background_tasks.add_task(
-        run_prediction_request_async,
-        request.app, request_id, symbol, horizon_steps, base_price,
-        "command-deck", "command-deck", "60min", 3,
-    )
-
-    return {
-        "ok": True,
-        "request_id": request_id,
-        "symbol": symbol,
-        "base_price": base_price,
-        "status": "pending",
-        "message": f"Forecast #{request_id} queued. Refresh in ~60s.",
-    }
+    try:
+        spec = parse_forecast_input(payload)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    detail = await queue_prediction(request, spec.symbol, spec.horizon_steps,
+                                    request.session.get("username", "telegram-admin"), "command-deck",
+                                    spec.base_timeframe, spec.depth)
+    return JSONResponse(detail, status_code=202)
 
 
 @app.get("/api/briefing")

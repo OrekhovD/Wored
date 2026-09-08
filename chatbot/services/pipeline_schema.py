@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS executed_trades (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE executed_trades ADD COLUMN IF NOT EXISTS calculation_version INT NOT NULL DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_executed_trades_session ON executed_trades (session_id, opened_at DESC);
 CREATE INDEX IF NOT EXISTS idx_executed_trades_status ON executed_trades (status) WHERE status = 'open';
 

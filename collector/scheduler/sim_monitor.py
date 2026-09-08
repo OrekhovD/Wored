@@ -7,6 +7,8 @@ Sim position monitor — периодическая проверка откры�
 from __future__ import annotations
 
 import asyncio
+from services.market_data import fresh_ticker
+from services.sim_math import settlement, liquidation_price
 import json
 import logging
 
@@ -48,7 +50,9 @@ async def check_sim_positions():
             if symbol not in current_prices:
                 ticker_data = await redis.get(f"ticker:{symbol}")
                 if ticker_data:
-                    current_prices[symbol] = json.loads(ticker_data)["price"]
+                    ticker = json.loads(ticker_data)
+                    if fresh_ticker(ticker):
+                        current_prices[symbol] = float(ticker["price"])
 
         if not current_prices:
             log.warning("No current prices for sim position check")
@@ -68,24 +72,20 @@ async def check_sim_positions():
             margin = float(row["margin"])
 
             if direction == "long":
-                liq_price = entry * (1 - 1 / leverage + LIQUIDATION_MARGIN)
+                liq_price = liquidation_price(entry, leverage, direction, int(row.get("calculation_version", 1)))
                 is_liq = price <= liq_price
             else:
-                liq_price = entry * (1 + 1 / leverage - LIQUIDATION_MARGIN)
+                liq_price = liquidation_price(entry, leverage, direction, int(row.get("calculation_version", 1)))
                 is_liq = price >= liq_price
 
             if is_liq:
                 # Close at liquidation price
-                close_fee = float(row["notional"]) * TAKER_FEE_RATE
-                if direction == "long":
-                    raw_pnl = (liq_price - entry) * size
-                else:
-                    raw_pnl = (entry - liq_price) * size
-                realized_pnl = raw_pnl - float(row["entry_fee"]) - close_fee - float(row["funding_paid"] or 0)
+                realized_pnl, close_fee = settlement(direction, entry, liq_price, size,
+                    float(row["entry_fee"]), float(row["funding_paid"] or 0), int(row.get("calculation_version", 1)))
 
                 async with pool.acquire() as conn:
                     await conn.execute(
-                        "UPDATE sim_positions SET status='liquidated', close_price=$2, close_fee=$3, realized_pnl=$4, closed_at=NOW(), close_reason='liquidation' WHERE id=$1",
+                        "UPDATE sim_positions SET status='liquidated', close_price=$2, close_fee=$3, realized_pnl=$4, closed_at=NOW(), close_reason='liquidation' WHERE id=$1 AND status='open'",
                         row["id"], liq_price, close_fee, realized_pnl,
                     )
                 log.warning("Sim #%d LIQUIDATED: %s %s pnl=%.4f", row["id"], direction, symbol, realized_pnl)
@@ -104,7 +104,7 @@ async def check_sim_positions():
                 if abs(current_funding - funding_cost) > 0.0001:
                     async with pool.acquire() as conn:
                         await conn.execute(
-                            "UPDATE sim_positions SET funding_paid=$2 WHERE id=$1",
+                            "UPDATE sim_positions SET funding_paid=$2 WHERE id=$1 AND status='open'",
                             row["id"], funding_cost,
                         )
 

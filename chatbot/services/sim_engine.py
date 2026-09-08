@@ -6,6 +6,7 @@ Trade Simulation Engine — имитация фьючерсной торговл
 from __future__ import annotations
 
 import asyncio
+from services.sim_math import validate_order, settlement, liquidation_price as policy_liquidation_price
 import json
 import logging
 import os
@@ -24,7 +25,7 @@ FUNDING_RATE = 0.0001     # 0.01% каждые 8ч (упрощённо)
 FUNDING_INTERVAL_HOURS = 8
 EXECUTION_DELAY_MS = (50, 350)  # имитация задержки исполнения 50-350ms
 LIQUIDATION_MARGIN = 0.005
-MIN_LEVERAGE = 100  # ТЗ 7.2: только плечо выше 100x
+MIN_LEVERAGE = 1  # Validated centrally by services.sim_math
 ALLOWED_SYMBOLS = {'btcusdt'}  # ТЗ 7.2: только BTC/USDT    # ликвидация при падении до 0.5% от маржи
 
 
@@ -51,6 +52,7 @@ class SimPosition:
     closed_at: Optional[str] = None
     close_reason: Optional[str] = None  # manual | ai | stop_loss | take_profit | liquidation
     ai_managed: bool = False  #True если "торгуй" — AI сама закрывает
+    calculation_version: int = 1
 
 
 SIM_TABLES_SQL = """
@@ -78,6 +80,7 @@ CREATE TABLE IF NOT EXISTS sim_positions (
     ai_managed BOOLEAN DEFAULT FALSE
 );
 
+ALTER TABLE sim_positions ADD COLUMN IF NOT EXISTS calculation_version INT NOT NULL DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_sim_positions_user_status ON sim_positions (user_id, status);
 CREATE INDEX IF NOT EXISTS idx_sim_positions_status ON sim_positions (status) WHERE status = 'open';
 """
@@ -123,16 +126,12 @@ async def open_position(
         return {"error": f"Тип ордера должен limit/market, получено: {order_type}"}
     if margin_mode not in ("cross", "isolated"):
         return {"error": f"Режим маржи должен cross/isolated, получено: {margin_mode}"}
-    if leverage < MIN_LEVERAGE:
-        return {"error": f"Плечо должно быть не менее {MIN_LEVERAGE}x (ТЗ: только high-leverage >100x). Получено: {leverage}x"}
-    if leverage > 200:
-        return {"error": f"Плечо должно 1-200x, получено: {leverage}"}
-    if margin <= 0:
-        return {"error": "Маржа должна быть положительной"}
+    try:
+        validate_order(direction, leverage, margin, entry_price)
+    except (ValueError, TypeError) as exc:
+        return {"error": str(exc)}
     if symbol.lower() not in ALLOWED_SYMBOLS:
-        return {"error": f"Только BTC/USDT поддерживается (ТЗ 7.2). Получено: {symbol}"}
-    if entry_price <= 0:
-        return {"error": "Цена входа должна быть положительной"}
+        return {"error": "Only BTC/USDT is supported by this simulator"}
 
     # Имитация задержки исполнения
     delay_ms = random.uniform(*EXECUTION_DELAY_MS)
@@ -152,9 +151,9 @@ async def open_position(
             """
             INSERT INTO sim_positions
                 (user_id, symbol, direction, order_type, margin_mode, leverage,
-                 margin, entry_price, size, notional, entry_fee, status, ai_managed, opened_at)
+                 margin, entry_price, size, notional, entry_fee, status, ai_managed, opened_at, calculation_version)
             VALUES
-                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', $12, NOW())
+                ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'open', $12, NOW(), 2)
             RETURNING id, opened_at
             """,
             user_id, symbol, direction, order_type, margin_mode, leverage,
@@ -181,6 +180,7 @@ async def open_position(
         "ai_managed": ai_managed,
         "opened_at": opened_at,
         "execution_delay_ms": round(delay_ms, 1),
+        "calculation_version": 2,
     }
 
     log.info(
@@ -194,10 +194,13 @@ async def close_position(position_id: int, current_price: float, reason: str = "
     """
     Закрыть позицию по текущей цене.
     """
+    import math
+    if not math.isfinite(current_price) or current_price <= 0:
+        return {"error": "Invalid closing price"}
     pool = await _get_pool()
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
         pos = await conn.fetchrow(
-            "SELECT * FROM sim_positions WHERE id = $1 AND status = 'open'",
+            "SELECT * FROM sim_positions WHERE id = $1 AND status = 'open' FOR UPDATE",
             position_id,
         )
         if not pos:
@@ -215,7 +218,7 @@ async def close_position(position_id: int, current_price: float, reason: str = "
         funding_paid = float(pos["funding_paid"] or 0)
 
         # Комиссия за закрытие (taker — рыночное закрытие)
-        close_fee = notional * TAKER_FEE_RATE
+        close_fee = current_price * size * TAKER_FEE_RATE
 
         # PnL расчёт
         if direction == "long":
@@ -224,7 +227,7 @@ async def close_position(position_id: int, current_price: float, reason: str = "
             raw_pnl = (entry_price - current_price) * size
 
         # Чистый PnL: raw - комиссии - funding
-        realized_pnl = raw_pnl - float(pos["entry_fee"]) - close_fee - funding_paid
+        realized_pnl, close_fee = settlement(direction, entry_price, current_price, size, float(pos["entry_fee"]), funding_paid, int(pos.get("calculation_version", 1)))
 
         # ROI %
         roi_pct = (realized_pnl / margin) * 100 if margin > 0 else 0
@@ -234,7 +237,7 @@ async def close_position(position_id: int, current_price: float, reason: str = "
             UPDATE sim_positions
             SET status = 'closed', close_price = $2, close_fee = $3,
                 realized_pnl = $4, closed_at = NOW(), close_reason = $5
-            WHERE id = $1
+            WHERE id = $1 AND status = 'open'
             """,
             position_id, current_price, close_fee, realized_pnl, reason,
         )
@@ -313,10 +316,10 @@ def calculate_unrealized_pnl(position: dict, current_price: float) -> dict:
 
     if direction == "long":
         raw_pnl = (current_price - entry_price) * size
-        liquidation_price = entry_price * (1 - 1 / leverage + LIQUIDATION_MARGIN)
+        liquidation_price = policy_liquidation_price(entry_price, leverage, direction, int(position.get("calculation_version", 1)))
     else:
         raw_pnl = (entry_price - current_price) * size
-        liquidation_price = entry_price * (1 + 1 / leverage - LIQUIDATION_MARGIN)
+        liquidation_price = policy_liquidation_price(entry_price, leverage, direction, int(position.get("calculation_version", 1)))
 
     # Если цена дошла до уровня ликвидации
     is_liquidated = (
@@ -402,7 +405,7 @@ async def apply_funding(current_prices: dict[str, float]) -> int:
 
         async with pool.acquire() as conn:
             await conn.execute(
-                "UPDATE sim_positions SET funding_paid = $2 WHERE id = $1",
+                "UPDATE sim_positions SET funding_paid = $2 WHERE id = $1 AND status = 'open'",
                 pos["id"], funding_cost,
             )
         count += 1

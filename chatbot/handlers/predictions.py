@@ -11,7 +11,7 @@ from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from integrations.webui_client import create_prediction_request, get_webui_public_base_url
+from integrations.webui_client import create_prediction_request, get_forecast_status, get_webui_public_base_url
 from storage.postgres_client import get_latest_prediction_request, get_prediction_request_detail, get_recent_prediction_requests
 
 log = logging.getLogger(__name__)
@@ -20,10 +20,15 @@ router = Router()
 HORIZON_ROWS = ((1, 2), (4, 8))
 ROLE_ALIASES = {"Analyst": "A", "Strategist": "S", "Oracle": "O", "Worker": "W"}
 STATUS_EMOJI = {
-    "completed": "🟢",
+    "pending": "⏳",
+    "queued": "⏳",
+    "running": "🔄",
     "active": "🟡",
+    "partial": "🟠",
+    "completed": "🟢",
     "tracking": "🟡",
     "failed": "🔴",
+    "expired": "💀",
 }
 
 
@@ -120,6 +125,10 @@ def format_prediction_menu_text(items: list[dict[str, Any]]) -> str:
 
 
 def format_prediction_detail(detail: dict[str, Any]) -> str:
+    exec_state = detail.get("execution_state") or detail.get("status", "pending")
+    if exec_state in ("pending", "queued"):
+        return (f"⏳ <b>Прогноз #{detail['id']} · {html.escape(detail['symbol'].upper())}</b>\n\n"
+                f"Состояние: <b>{exec_state}</b>. Нажмите «Статус», чтобы проверить результат.")
     lines = [
         f"🔮 <b>{detail['symbol'].upper()} · {detail['horizon_hours']}h</b>",
         (
@@ -297,9 +306,10 @@ async def cb_prediction_run(call: CallbackQuery):
     await answer_callback_early(call)
     await call.message.edit_text(f"⏳ <i>Строю прогноз {symbol.upper()} на {horizon_hours}h...</i>")
 
-    requested_by = call.from_user.username or f"telegram:{call.from_user.id}"
+    requested_by = f"telegram:{call.from_user.id}"
     try:
-        detail = await create_prediction_request(symbol=symbol, horizon_hours=horizon_hours, requested_by=requested_by)
+        detail = await create_prediction_request(symbol=symbol, horizon_hours=horizon_hours, requested_by=requested_by,
+            idempotency_key=f"tg-{call.id}")
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:300]
         await call.message.edit_text(

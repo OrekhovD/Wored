@@ -21,6 +21,17 @@ from app import (
 )
 
 
+@pytest.fixture(autouse=True)
+def isolated_webui_config(monkeypatch):
+    monkeypatch.setenv("WEBUI_AUTH_ENABLED", "true")
+    monkeypatch.setenv("WEBUI_ADMIN_PASSWORD", "qa-password")
+    monkeypatch.setenv("WEBUI_SESSION_SECRET", "qa-session-secret-32-characters-long")
+    monkeypatch.setenv("WEBUI_INTERNAL_TOKEN", "qa-internal")
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:1/0")
+    monkeypatch.setattr("app.HTX_REST_URL", "http://127.0.0.1:1")
+
+
 def test_normalize_klines_reverses_into_oldest_first():
     raw = [
         {"id": 3, "open": 12, "high": 15, "low": 11, "close": 14, "vol": 1200},
@@ -55,7 +66,7 @@ def test_prediction_horizon_validator_accepts_supported_values():
 
 def test_prediction_horizon_validator_rejects_unsupported_values():
     with pytest.raises(HTTPException):
-        normalize_prediction_horizon(5)
+        normalize_prediction_horizon(49)
 
 
 def test_to_db_timestamp_strips_timezone_info():
@@ -139,10 +150,10 @@ def test_build_prediction_comparison_payload_groups_rows_and_marks_best_model():
 
 
 def test_index_renders_control_room_when_auth_disabled(monkeypatch):
-    monkeypatch.delenv("WEBUI_AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("WEBUI_AUTH_ENABLED", "false")
     monkeypatch.delenv("WEBUI_ADMIN_PASSWORD", raising=False)
 
-    with TestClient(app) as client:
+    with TestClient(app, client=("127.0.0.1", 50000)) as client:
         response = client.get("/")
 
     assert response.status_code == 200
@@ -150,10 +161,10 @@ def test_index_renders_control_room_when_auth_disabled(monkeypatch):
 
 
 def test_predictions_page_renders_when_auth_disabled(monkeypatch):
-    monkeypatch.delenv("WEBUI_AUTH_ENABLED", raising=False)
+    monkeypatch.setenv("WEBUI_AUTH_ENABLED", "false")
     monkeypatch.delenv("WEBUI_ADMIN_PASSWORD", raising=False)
 
-    with TestClient(app) as client:
+    with TestClient(app, client=("127.0.0.1", 50000)) as client:
         response = client.get("/predictions")
 
     assert response.status_code == 200
@@ -175,7 +186,7 @@ def test_login_page_renders_when_auth_enabled(monkeypatch):
     monkeypatch.setenv("WEBUI_AUTH_ENABLED", "true")
     monkeypatch.setenv("WEBUI_ADMIN_PASSWORD", "secret-pass")
 
-    with TestClient(app) as client:
+    with TestClient(app, client=("127.0.0.1", 50000)) as client:
         response = client.get("/login")
 
     assert response.status_code == 200
@@ -183,7 +194,7 @@ def test_login_page_renders_when_auth_enabled(monkeypatch):
 
 
 def test_internal_prediction_api_rejects_invalid_token():
-    with TestClient(app) as client:
+    with TestClient(app, client=("127.0.0.1", 50000)) as client:
         response = client.post(
             "/api/internal/predictions",
             json={"symbol": "ethusdt", "horizon_hours": 4, "requested_by": "bot"},
@@ -194,11 +205,11 @@ def test_internal_prediction_api_rejects_invalid_token():
 
 
 def test_internal_prediction_api_accepts_valid_token(monkeypatch):
-    async def fake_run_prediction_request(request, background_tasks, symbol, horizon_hours, requested_by, source):
+    async def fake_run_prediction_request(request, background_tasks, symbol, horizon_steps, requested_by, source, base_timeframe="60min", depth=3):
         return {
             "id": 321,
             "symbol": symbol,
-            "horizon_hours": horizon_hours,
+            "horizon_hours": horizon_steps,
             "requested_by": requested_by,
             "source": source,
             "status": "active",
@@ -206,13 +217,13 @@ def test_internal_prediction_api_accepts_valid_token(monkeypatch):
 
     monkeypatch.setattr("app.run_prediction_request", fake_run_prediction_request)
 
-    with TestClient(app) as client:
+    with TestClient(app, client=("127.0.0.1", 50000)) as client:
         response = client.post(
             "/api/internal/predictions",
             json={"symbol": "ethusdt", "horizon_hours": 4, "requested_by": "bot-runner", "source": "telegram"},
             headers={"X-Internal-Token": get_internal_api_token()},
         )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert response.json()["id"] == 321
     assert response.json()["source"] == "telegram"

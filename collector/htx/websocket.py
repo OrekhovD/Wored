@@ -1,3 +1,5 @@
+import time
+import math
 import asyncio
 import websockets
 import json
@@ -35,11 +37,15 @@ async def handle_message(message, redis):
             else:
                 change = 0
                 
+            if not math.isfinite(close) or close <= 0:
+                return None
             ticker_data = {
                 "symbol": symbol,
                 "price": close,
                 "volume": volume,
-                "change_pct": change
+                "change_pct": change,
+                "timestamp": data.get("ts") or time.time(),
+                "received_at": time.time()
             }
             # Save to redis
             await redis.set(f"ticker:{symbol}", json.dumps(ticker_data), ex=300)

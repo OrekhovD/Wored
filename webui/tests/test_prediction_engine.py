@@ -27,10 +27,10 @@ def test_parse_prediction_payload_accepts_complete_json():
     }
     """
 
-    summary, points = parse_prediction_payload(raw_text, horizon_hours=3, base_price=100.0)
+    summary, points = parse_prediction_payload(raw_text, horizon_steps=3, base_price=100.0)
 
     assert "Range-bound" in summary
-    assert [point.hour for point in points] == [1, 2, 3]
+    assert [point.step_index for point in points] == [1, 2, 3]
     assert points[1].predicted_price == 102.0
 
 
@@ -44,7 +44,7 @@ def test_parse_prediction_payload_backfills_change_pct_from_price():
     }
     """
 
-    _, points = parse_prediction_payload(raw_text, horizon_hours=2, base_price=100.0)
+    _, points = parse_prediction_payload(raw_text, horizon_steps=2, base_price=100.0)
 
     assert points[0].predicted_change_pct == -1.0
     assert points[1].predicted_change_pct == -1.5
@@ -60,7 +60,7 @@ def test_parse_prediction_payload_rejects_missing_hours():
     """
 
     with pytest.raises(ValueError):
-        parse_prediction_payload(raw_text, horizon_hours=2, base_price=100.0)
+        parse_prediction_payload(raw_text, horizon_steps=2, base_price=100.0)
 
 
 def test_parse_prediction_payload_strips_think_blocks_before_json():
@@ -74,128 +74,46 @@ def test_parse_prediction_payload_strips_think_blocks_before_json():
     }
     """
 
-    summary, points = parse_prediction_payload(raw_text, horizon_hours=1, base_price=100.0)
+    summary, points = parse_prediction_payload(raw_text, horizon_steps=1, base_price=100.0)
 
     assert summary == "Neutral drift."
     assert points[0].predicted_price == 100.4
 
 
-def test_worker_runtime_candidates_include_qwen_chain_and_glm_fallback():
-    with patch.dict(
-        os.environ,
-        {
-            "WORKER_QWEN_MODEL": "qwen3.6-flash",
-            "WORKER_QWEN_FALLBACKS": "qwen3.5-flash,qwen-flash",
-            "WORKER_GLM_FALLBACK_MODEL": "glm-4-flash",
-            "WORKER_GEMINI_FALLBACK_MODEL": "gemini-3-flash-preview",
-        },
-        clear=False,
-    ):
+@pytest.mark.parametrize("role", ["worker", "analyst", "premium"])
+def test_runtime_candidates_honor_configured_ollama_chain(role):
+    prefix = "OLLAMA_" + role.upper()
+    with patch.dict(os.environ, {prefix+"_MODEL": "test-primary", prefix+"_FALLBACK_MODEL": "test-fallback"}, clear=True):
+        candidates = _build_runtime_candidates(MODEL_CONFIGS[role])
+    assert [item.model_id for item in candidates] == ["test-primary", "test-fallback"]
+    assert all(item.api_key_env == "OLLAMA_API_KEY" for item in candidates)
+
+
+def test_nvidia_fallback_requires_its_own_credential():
+    config = {"OLLAMA_WORKER_MODEL": "primary", "NVIDIA_WORKER_MODEL": "fallback"}
+    with patch.dict(os.environ, config, clear=True):
+        assert len(_build_runtime_candidates(MODEL_CONFIGS["worker"])) == 1
+    with patch.dict(os.environ, {**config, "NVIDIA_DEEPSEEK_V4_FLASH_API_KEY": "test-key"}, clear=True):
         candidates = _build_runtime_candidates(MODEL_CONFIGS["worker"])
-
-    assert [candidate.model_id for candidate in candidates] == [
-        "qwen3.6-flash",
-        "qwen3.5-flash",
-        "qwen-flash",
-        "glm-4-flash",
-        "gemini-3-flash-preview",
-    ]
+    assert candidates[-1].provider == "nvidia"
+    assert candidates[-1].model_id == "fallback"
 
 
-def test_analyst_runtime_candidates_include_reasoning_chain_and_glm_fallback():
-    with patch.dict(
-        os.environ,
-        {
-            "ANALYST_QWEN_MODEL": "qwen3.6-35b-a3b",
-            "ANALYST_QWEN_FALLBACKS": "qwen3.6-27b",
-            "ANALYST_GLM_FALLBACK_MODEL": "glm-5.1",
-        },
-        clear=False,
-    ):
-        candidates = _build_runtime_candidates(MODEL_CONFIGS["analyst"])
-
-    assert [candidate.model_id for candidate in candidates] == [
-        "qwen3.6-35b-a3b",
-        "qwen3.6-27b",
-        "glm-5.1",
-    ]
+@pytest.mark.parametrize("key,available", [("", False), ("test-key", True)])
+def test_model_availability_requires_active_provider_key(key, available):
+    with patch.dict(os.environ, {"OLLAMA_API_KEY": key, "GLM_API_KEY": "legacy-key"}, clear=True):
+        items = list_prediction_models()
+    assert all(item["available"] is available for item in items)
 
 
-def test_premium_runtime_candidates_include_qwen_reasoning_chain_and_glm_fallback():
-    with patch.dict(
-        os.environ,
-        {
-            "PREMIUM_QWEN_MODEL": "qwen3.6-27b",
-            "PREMIUM_QWEN_FALLBACKS": "qwen3.6-35b-a3b",
-            "PREMIUM_GLM_FALLBACK_MODEL": "glm-5.1",
-        },
-        clear=False,
-    ):
-        candidates = _build_runtime_candidates(MODEL_CONFIGS["premium"])
-
-    assert [candidate.model_id for candidate in candidates] == [
-        "qwen3.6-27b",
-        "qwen3.6-35b-a3b",
-        "glm-5.1",
-    ]
-
-
-def test_worker_runtime_candidates_include_dashscope_and_gemini_fallbacks():
-    with patch.dict(
-        os.environ,
-        {
-            "DASHSCOPE_API_KEY": "dashscope-key",
-            "GLM_API_KEY": "",
-            "GOOGLE_API_KEY": "google-key",
-            "WORKER_QWEN_MODEL": "qwen3.6-flash",
-            "WORKER_QWEN_FALLBACKS": "qwen3.5-flash,qwen-flash",
-            "WORKER_GLM_FALLBACK_MODEL": "glm-4-flash",
-            "WORKER_GEMINI_FALLBACK_MODEL": "gemini-3-flash-preview",
-        },
-        clear=False,
-    ):
-        candidates = _build_runtime_candidates(MODEL_CONFIGS["worker"])
-
-    assert candidates[0].model_id == "qwen3.6-flash"
-    assert candidates[-1].model_id == "gemini-3-flash-preview"
-
-
-def test_list_prediction_models_marks_analyst_available_with_glm_fallback_only():
-    with patch.dict(
-        os.environ,
-        {
-            "DASHSCOPE_API_KEY": "",
-            "GLM_API_KEY": "glm-key",
-            "ANALYST_QWEN_MODEL": "qwen3.6-35b-a3b",
-            "ANALYST_QWEN_FALLBACKS": "qwen3.6-27b",
-            "ANALYST_GLM_FALLBACK_MODEL": "glm-5.1",
-        },
-        clear=False,
-    ):
-        analyst = next(item for item in list_prediction_models() if item["key"] == "analyst")
-
-    assert analyst["available"] is True
-    assert "qwen3.6-35b-a3b" in analyst["model_id"]
-    assert "glm-5.1" in analyst["model_id"]
-
-
-def test_list_prediction_models_marks_premium_available_with_glm_fallback_only():
-    with patch.dict(
-        os.environ,
-        {
-            "DASHSCOPE_API_KEY": "",
-            "GLM_API_KEY": "glm-key",
-            "PREMIUM_QWEN_MODEL": "qwen3.6-27b",
-            "PREMIUM_QWEN_FALLBACKS": "qwen3.6-35b-a3b",
-            "PREMIUM_GLM_FALLBACK_MODEL": "glm-5.1",
-        },
-        clear=False,
-    ):
-        premium = next(item for item in list_prediction_models() if item["key"] == "premium")
-
-    assert premium["available"] is True
-    assert "qwen3.6-27b" in premium["model_id"]
-    assert "glm-5.1" in premium["model_id"]
+@pytest.mark.parametrize("points", [
+    [{"step": 1, "price": 101}, {"step": 1, "price": 102}],
+    [{"step": 1, "price": 101}, {"step": 3, "price": 102}],
+])
+def test_prediction_steps_cannot_be_duplicated_or_out_of_range(points):
+    import json
+    with pytest.raises(ValueError):
+        parse_prediction_payload(json.dumps({"points": points}), horizon_steps=2, base_price=100)
 
 
 def test_prediction_model_list_hides_worker_slot():

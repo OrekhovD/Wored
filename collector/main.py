@@ -7,8 +7,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from htx.websocket import ws_listen
 from indicators.calculator import calculate_indicators
+from indicators.snapshot import publish_market_contexts
 from journal.writer import write_entry
-from predictions.evaluator import evaluate_due_forecasts, refresh_historical_forecast_scores, regenerate_hourly_correction
+from predictions.evaluator import evaluate_due_forecasts
 from scheduler.alert_checker import check_alerts
 from scheduler.sim_monitor import check_sim_positions
 from scheduler.pipeline_jobs import register_pipeline_jobs
@@ -50,11 +51,10 @@ async def main():
     log.info("Starting Collector with WebSocket...")
     pool = await get_pool()
     get_redis()
-    await refresh_historical_forecast_scores()
 
     # Ensure webui forecast tables exist on collector side
     try:
-        from webui.app import PREDICTION_TABLES_SQL
+        from forecast_schema import PREDICTION_TABLES_SQL
         async with pool.acquire() as conn:
             await conn.execute(PREDICTION_TABLES_SQL)
         log.info("Forecast tables ensured from collector.")
@@ -75,9 +75,7 @@ async def main():
     scheduler.add_job(record_ai_journal, "interval", minutes=15, id="record_ai_journal")
     scheduler.add_job(check_alerts, "interval", minutes=5, id="check_alerts")
     scheduler.add_job(evaluate_due_forecasts, "interval", minutes=5, id="evaluate_forecasts")
-    scheduler.add_job(refresh_historical_forecast_scores, "interval", hours=1, id="refresh_historical_scores")
     scheduler.add_job(check_sim_positions, "interval", minutes=2, id="check_sim_positions")
-    scheduler.add_job(regenerate_hourly_correction, "interval", hours=1, id="hourly_correction")
 
     # Daily Pipeline v2 jobs (ТЗ раздел 11)
     register_pipeline_jobs(scheduler)
@@ -85,6 +83,8 @@ async def main():
     from storage.postgres_client import cleanup_old_tickers
 
     scheduler.add_job(cleanup_old_tickers, "interval", hours=6, id="cleanup_tickers", kwargs={"hours": 24})
+    scheduler.add_job(publish_market_contexts, "interval", seconds=30, id="market_contexts", max_instances=1, coalesce=True)
+    await publish_market_contexts()
     scheduler.start()
 
     async def shutdown():

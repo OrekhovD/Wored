@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -57,58 +58,10 @@ def _uuid() -> str:
 # ─── Market Context Snapshot (ТЗ 5.2) ──────────────────────────────────
 
 async def build_market_context(symbol: str = "btcusdt") -> dict:
-    """
-    ТЗ 5.2 — собирает Market Context Snapshot из collector-компонентов.
-    НЕ генерируется LLM — только collector/htx + indicators.
-    """
     from storage.redis_client import get_redis
-
-    redis = get_redis()
-    snapshot = {
-        "snapshot_id": _uuid(),
-        "symbol": symbol.upper(),
-        "timestamp": _now_utc().isoformat(),
-        "price": 0.0,
-        "mark_price": 0.0,
-        "funding_context": {"rate": 0.0, "next_funding_at": ""},
-        "timeframes": {
-            "1m": {"trend": "flat", "rsi": 0.0, "macd_hist": 0.0, "atr": 0.0},
-            "5m": {"trend": "flat", "rsi": 0.0, "macd_hist": 0.0, "atr": 0.0},
-            "15m": {"trend": "flat", "rsi": 0.0, "macd_hist": 0.0, "atr": 0.0},
-            "1h": {"trend": "flat", "rsi": 0.0, "macd_hist": 0.0, "atr": 0.0},
-        },
-        "volatility_regime": "normal",
-        "liquidity_regime": "normal",
-        "risk_flags": ["none"],
-    }
-
-    # Price from Redis hot cache
-    try:
-        ticker_raw = await redis.get(f"ticker:{symbol}")
-        if ticker_raw:
-            data = json.loads(ticker_raw)
-            snapshot["price"] = float(data.get("price", 0))
-            snapshot["mark_price"] = float(data.get("price", 0))
-    except Exception as exc:
-        log.warning("Market context: no Redis ticker for %s: %s", symbol, exc)
-
-    # Indicators from collector (imported defensively — collector package may not be in path)
-    try:
-        import importlib
-        calc_mod = importlib.import_module("indicators.calculator")
-        calculate_indicators = getattr(calc_mod, "calculate_indicators")
-        for tf in ("1m", "5m", "15m", "1h"):
-            inds = await calculate_indicators(symbol, tf)
-            if inds:
-                snapshot["timeframes"][tf] = {
-                    "trend": inds.get("trend", "flat"),
-                    "rsi": float(inds.get("rsi", 0)),
-                    "macd_hist": float(inds.get("macd_hist", 0)),
-                    "atr": float(inds.get("atr", 0)),
-                }
-    except Exception:
-        pass  # indicators may not be available for all timeframes
-
+    from services.market_data import read_market_context
+    snapshot = await read_market_context(get_redis(), symbol)
+    snapshot["snapshot_id"] = _uuid()
     return snapshot
 
 
@@ -493,7 +446,7 @@ PLAN_GENERATION_PROMPT = """Ты — Crypto Trader Agent (Analyst), экспер
       "invalidation_price": 0.0,
       "stop_loss": 0.0,
       "take_profit": [0.0, 0.0],
-      "recommended_leverage": 125,
+      "recommended_leverage": 100,
       "budget_share_pct": 15.0,
       "margin_mode": "isolated",
       "reason_code": "trend_pullback_entry|breakout_entry|range_entry"
@@ -502,7 +455,7 @@ PLAN_GENERATION_PROMPT = """Ты — Crypto Trader Agent (Analyst), экспер
 }}
 
 ПРАВИЛА:
-- leverage ТОЛЬКО из [100, 125, 150, 200] — это high-leverage бот, низкие плечи запрещены
+- leverage ТОЛЬКО из [10, 25, 50, 100] — единая допустимая политика симуляции
 - budget_share_pct: 5-10 для defensive, 10-20 для balanced, 20-30 для aggressive
 - Не более 3 entry в плане
 - stop_loss должен быть дальше invalidation_price
@@ -548,6 +501,8 @@ async def generate_initial_plan(session_id: str) -> dict:
     # Build market context
     symbol = session["symbol"].lower()
     market_ctx = await build_market_context(symbol)
+    if market_ctx["quality"] != "ready":
+        return {"error": "market_data_unavailable", "risk_flags": market_ctx["risk_flags"]}
 
     risk_mode = session["risk_mode"]
     budget = float(session["initial_budget_usdt"])
@@ -666,7 +621,7 @@ async def generate_initial_plan(session_id: str) -> dict:
                 float(entry.get("invalidation_price", 0)),
                 float(entry.get("stop_loss", 0)),
                 json.dumps(entry.get("take_profit", [])),
-                int(entry.get("recommended_leverage", 125)),
+                int(entry.get("recommended_leverage", 100)),
                 float(entry.get("budget_share_pct", 15)),
                 entry.get("margin_mode", "isolated"),
                 entry.get("confirmation_rule", "any"),
@@ -756,6 +711,8 @@ async def hourly_revision(session_id: str) -> dict:
 
     # Build fresh market context
     market_ctx = await build_market_context(session["symbol"].lower())
+    if market_ctx["quality"] != "ready":
+        return {"error": "market_data_unavailable", "risk_flags": market_ctx["risk_flags"]}
 
     prompt = REVISION_PROMPT.format(
         base_version=base_version,
@@ -897,7 +854,7 @@ async def hourly_revision(session_id: str) -> dict:
                 float(new_entry.get("invalidation_price", 0)),
                 float(new_entry.get("stop_loss", 0)),
                 json.dumps(new_entry.get("take_profit", [])),
-                int(new_entry.get("recommended_leverage", 125)),
+                int(new_entry.get("recommended_leverage", 100)),
                 float(new_entry.get("budget_share_pct", 15)),
                 new_entry.get("margin_mode", "isolated"),
                 new_entry.get("confirmation_rule", "any"),
@@ -955,8 +912,13 @@ async def execute_entry(
     entry_from = float(entry.get("entry_zone_from", 0))
     entry_to = float(entry.get("entry_zone_to", 0))
     conf_rule = entry.get("confirmation_rule", "any")
-    leverage = int(entry.get("recommended_leverage", 125))
+    leverage = entry.get("recommended_leverage", 100)
     budget_share = float(entry.get("budget_share_pct", 15))
+
+    if not validate_leverage(leverage) or side not in {"long", "short"}:
+        return {"executed": False, "reason": "invalid_order_policy"}
+    if not all(math.isfinite(v) and v > 0 for v in (entry_from, entry_to, budget_usdt, budget_share)) or budget_share > 100:
+        return {"executed": False, "reason": "invalid_order_values"}
 
     # Check trigger
     triggered = check_entry_trigger(candle, entry_from, entry_to, conf_rule, indicators)
@@ -977,6 +939,11 @@ async def execute_entry(
     raw_entry = float(candle.get("close", entry_from))
     entry_price = apply_slippage(raw_entry, side, is_entry=True)
 
+    from services.sim_math import validate_order
+    try:
+        validate_order(side, leverage, margin_used, entry_price)
+    except (ValueError, TypeError):
+        return {"executed": False, "reason": "invalid_order_values"}
     fees = calc_fees(notional)
     position_qty = notional / entry_price
 
@@ -1047,7 +1014,15 @@ async def execute_entry(
     if not pool:
         return {"error": "No DB pool"}
 
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction():
+        state = await conn.fetchval("SELECT status FROM trading_sessions WHERE id=$1 FOR UPDATE", session_id)
+        if state != "armed":
+            return {"executed": False, "reason": "session_not_armed"}
+        if await conn.fetchval("SELECT 1 FROM executed_trades WHERE session_id=$1 AND status='open' LIMIT 1", session_id):
+            return {"executed": False, "reason": "position_already_open"}
+        planned = await conn.fetchval("SELECT status FROM planned_entries WHERE id=$1 AND session_id=$2 FOR UPDATE", entry.get("id"), session_id)
+        if planned != "planned":
+            return {"executed": False, "reason": "entry_already_consumed"}
         await conn.execute(
             """
             INSERT INTO executed_trades
@@ -1055,9 +1030,9 @@ async def execute_entry(
                  opened_at, entry_price, position_qty, position_notional_usdt,
                  margin_used_usdt, open_fee_usdt, status,
                  trade_horizon, trade_direction, target_net_profit_usdt,
-                 expected_total_fees_usdt, expected_slippage_usdt, expected_net_profit_usdt)
+                 expected_total_fees_usdt, expected_slippage_usdt, expected_net_profit_usdt, calculation_version)
             VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, $8, $9, $10, $11, 'open',
-                    $12, $13, $14, $15, $16, $17)
+                    $12, $13, $14, $15, $16, $17, 2)
             """,
             trade_id, session_id, entry.get("id"),
             side, entry.get("margin_mode", "isolated"), leverage,
@@ -1115,91 +1090,40 @@ async def execute_entry(
     }
 
 
-async def execute_exit(
-    session_id: str,
-    trade_id: str,
-    exit_price: float,
-    close_reason: str = "take_profit",
-    mark_price: float | None = None,
-) -> dict:
-    """
-    ТЗ 5.5 — закрыть позицию.
-    """
+async def execute_exit(session_id: str, trade_id: str, exit_price: float,
+                       close_reason: str = "take_profit", mark_price: float | None = None) -> dict:
     from storage.postgres_client import get_pool
-
+    from services.sim_math import settlement
+    if not math.isfinite(exit_price) or exit_price <= 0:
+        return {"error": "Invalid exit price"}
     pool = await get_pool()
-    if not pool:
+    if pool is None:
         return {"error": "No DB pool"}
-
-    async with pool.acquire() as conn:
-        trade = await conn.fetchrow(
-            "SELECT * FROM executed_trades WHERE id=$1 AND status='open'",
-            trade_id,
-        )
-        if not trade:
+    async with pool.acquire() as conn, conn.transaction():
+        # Same lock order as entry: session, then trade/entry row.
+        current_state = await conn.fetchval("SELECT status FROM trading_sessions WHERE id=$1 FOR UPDATE", session_id)
+        trade = await conn.fetchrow("SELECT * FROM executed_trades WHERE id=$1 AND session_id=$2 AND status='open' FOR UPDATE", trade_id, session_id)
+        if trade is None:
             return {"error": "Trade not found or already closed"}
-
         side = trade["side"]
-        entry_price = float(trade["entry_price"])
-        position_qty = float(trade["position_qty"])
-        notional = float(trade["position_notional_usdt"])
-        open_fee = float(trade["open_fee_usdt"])
-
-        # Exit price with slippage
-    slip_exit = apply_slippage(exit_price, side, is_entry=False)
-
-    close_fee = notional * TAKER_FEE_RATE
-    total_fee = open_fee + close_fee
-    realised = calc_realised_pnl(side, entry_price, slip_exit, position_qty, total_fee)
-
-    pool = await get_pool()
-    if not pool:
-        return {"error": "No DB pool"}
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE executed_trades
-            SET status='closed', closed_at=NOW(), exit_price=$2,
-                mark_exit_price=$3, close_fee_usdt=$4, realised_pnl_usdt=$5, close_reason=$6
-            WHERE id=$1
-            """,
-            trade_id, slip_exit, mark_price or slip_exit, close_fee, realised, close_reason,
-        )
-
-        # Log event
+        slip_exit = apply_slippage(exit_price, side, is_entry=False)
+        realised, close_fee = settlement(side, float(trade["entry_price"]), slip_exit,
+            float(trade["position_qty"]), float(trade["open_fee_usdt"]),
+            calculation_version=int(trade.get("calculation_version", 1)))
         state_after = "cooldown" if close_reason == "stop_loss" else "armed"
-        await conn.execute(
-            """
-            INSERT INTO execution_events
-                (id, session_id, trade_id, event_type, state_before, state_after, event_payload)
-            VALUES ($1, $2, $3, 'position_closed', 'in_position', $4, $5)
-            """,
-            _uuid(), session_id, trade_id, state_after,
-            json.dumps({
-                "exit_price": slip_exit,
-                "close_fee": close_fee,
-                "realised_pnl": realised,
-                "close_reason": close_reason,
-            }),
-        )
-
-        # Update session status
-        await conn.execute(
-            "UPDATE trading_sessions SET status=$2, updated_at=NOW() WHERE id=$1",
-            session_id, state_after,
-        )
-
-    log.info("Trade closed: session=%s trade=%s pnl=%.4f reason=%s",
-             session_id, trade_id, realised, close_reason)
-
-    return {
-        "trade_id": trade_id,
-        "exit_price": slip_exit,
-        "realised_pnl": realised,
-        "close_fee": close_fee,
-        "close_reason": close_reason,
-        "state_after": state_after,
-    }
+        if close_reason in {"liquidation", "drawdown", "close_all"}:
+            state_after = "stopped"
+        if current_state in {"paused", "stopped", "completed"}:
+            state_after = current_state
+        await conn.execute("UPDATE executed_trades SET status='closed',closed_at=NOW(),exit_price=$2,"
+            "mark_exit_price=$3,close_fee_usdt=$4,realised_pnl_usdt=$5,close_reason=$6 "
+            "WHERE id=$1 AND status='open'", trade_id,slip_exit,mark_price or slip_exit,close_fee,realised,close_reason)
+        await conn.execute("INSERT INTO execution_events(id,session_id,trade_id,event_type,state_before,state_after,event_payload) "
+            "VALUES($1,$2,$3,'position_closed',$4,$5,$6)", _uuid(),session_id,trade_id,current_state,state_after,
+            json.dumps({"exit_price":slip_exit,"close_fee":close_fee,"realised_pnl":realised,"close_reason":close_reason}))
+        await conn.execute("UPDATE trading_sessions SET status=$2,updated_at=NOW() WHERE id=$1",session_id,state_after)
+    return {"trade_id":trade_id,"exit_price":slip_exit,"realised_pnl":realised,
+            "close_fee":close_fee,"close_reason":close_reason,"state_after":state_after}
 
 
 # ─── Execution Watch Loop (ТЗ 11) ──────────────────────────────────────
@@ -1233,6 +1157,9 @@ async def execution_watch_loop(session_id: str) -> dict:
         return {"skipped": True, "reason": "no_market_data"}
 
     ticker = json.loads(ticker_raw)
+    from services.market_data import fresh_ticker
+    if not fresh_ticker(ticker):
+        return {"skipped": True, "reason": "stale_market_data"}
     current_price = float(ticker["price"])
 
     # Build pseudo-candle from ticker
@@ -1265,15 +1192,8 @@ async def execution_watch_loop(session_id: str) -> dict:
     except Exception:
         pass  # use ticker-based candle
 
-    # Get indicators for confirmation
-    indicators = None
-    try:
-        import importlib
-        calc_mod = importlib.import_module("indicators.calculator")
-        calculate_indicators = getattr(calc_mod, "calculate_indicators")
-        indicators = await calculate_indicators(symbol, "1m")
-    except Exception:
-        pass
+    market_ctx = await build_market_context(symbol)
+    indicators = market_ctx["timeframes"].get("1m") if market_ctx["quality"] == "ready" else None
 
     actions = []
 
@@ -1311,7 +1231,7 @@ async def execution_watch_loop(session_id: str) -> dict:
                     take_profits = [float(x) for x in tp_raw if x]
 
         # Check liquidation
-        liq_price = calc_liquidation_price(entry_price, leverage, side)
+        liq_price = calc_liquidation_price(entry_price, leverage, side, int(trade.get("calculation_version", 1)))
         if is_liquidated(current_price, liq_price, side):
             result = await execute_exit(session_id, str(trade["id"]), liq_price, "liquidation")
             actions.append({"action": "liquidation", "trade_id": str(trade["id"]), "result": result})
@@ -1344,7 +1264,7 @@ async def execution_watch_loop(session_id: str) -> dict:
 
     # 2. Check entries (only if no open position — ТЗ 7.4)
     has_open = any(a.get("action") != "liquidation" for a in actions)
-    if not open_trades and not has_open:
+    if not open_trades and not has_open and market_ctx["quality"] == "ready":
         for pe in planned_entries:
             entry_dict = dict(pe)
             entry_dict["id"] = str(pe["id"])
@@ -1393,6 +1313,7 @@ async def apply_revision_command(
     ТЗ 5.3 — apply execution control command from Mini App.
     Записывает audit trail в session_revisions, выполняет FSM transition.
     """
+    from storage.postgres_client import get_pool
     if command not in VALID_REVISION_COMMANDS:
         return {"error": "invalid_command", "command": command}
 
@@ -1517,6 +1438,7 @@ async def build_active_snapshot(session_id: str) -> dict:
     ТЗ 5.2 — unified snapshot for Mini App.
     Возвращает стандартизированный response с session, plan, metrics, trades, events, revision.
     """
+    from storage.postgres_client import get_pool
     pool = await get_pool()
     if not pool:
         return _empty_snapshot()
