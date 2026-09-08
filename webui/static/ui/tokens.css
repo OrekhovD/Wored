@@ -1,0 +1,101 @@
+/* WORED UI Design Tokens — UI-01
+   Applied incrementally; existing styles.css selectors preserved.
+   Source: design-tokens.css from HERMES-WORED-UIUX delivery.
+   Scope: :root custom properties, scoped to shell/page selectors.
+*/
+:root {
+  /* Colors */
+  --ui-bg: #0a0a0a;
+  --ui-surface: #141414;
+  --ui-surface-raised: #1c1c1c;
+  --ui-border: #404040;
+  --ui-text: #e5e5e5;
+  --ui-muted: #a3a3a3;
+  --ui-accent: #f97316;
+  --ui-success: #22c55e;
+  --ui-danger: #ef4444;
+  --ui-info: #3b82f6;
+  --ui-danger-text: #fca5a5;
+  --ui-info-text: #93c5fd;
+  --ui-on-color: #0a0a0a;
+
+  /* Spacing */
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-6: 24px;
+
+  /* Radius */
+  --ui-radius: 12px;
+
+  /* Control sizing */
+  --ui-control-min: 44px;
+
+  /* Layout */
+  --ui-content-max: 1440px;
+
+  /* Typography */
+  --ui-font: 'Segoe UI', system-ui, sans-serif;
+  --ui-mono: 'Cascadia Code', Consolas, monospace;
+
+  /* Font sizes */
+  --ui-text-sm: 12px;
+  --ui-text-base: 14px;
+  --ui-text-lg: 16px;
+  --ui-text-xl: 20px;
+  --ui-text-2xl: 24px;
+  --ui-text-price: 32px;
+
+  /* Line heights */
+  --ui-lh: 1.5;
+
+  /* Focus */
+  --ui-focus-ring: 2px solid var(--ui-accent);
+  --ui-focus-offset: 2px;
+
+  /* Transitions — respects prefers-reduced-motion */
+  --ui-transition-fast: 150ms ease;
+  --ui-transition-normal: 250ms ease;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --ui-text-2xl: 20px;
+    --ui-text-price: 28px;
+    --ui-space-4: 16px;
+    --ui-space-6: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ui-transition-fast: 0ms;
+    --ui-transition-normal: 0ms;
+  }
+}
+
+/* Utility classes from tokens */
+.ui-text-sm   { font-size: var(--ui-text-sm); }
+.ui-text-base  { font-size: var(--ui-text-base); }
+.ui-text-lg    { font-size: var(--ui-text-lg); }
+.ui-text-xl    { font-size: var(--ui-text-xl); }
+.ui-text-2xl   { font-size: var(--ui-text-2xl); }
+.ui-text-price { font-size: var(--ui-text-price); font-variant-numeric: tabular-nums; }
+.ui-text-mono  { font-family: var(--ui-mono); }
+.ui-text-muted  { color: var(--ui-muted); }
+.ui-text-accent { color: var(--ui-accent); }
+.ui-text-success { color: var(--ui-success); }
+.ui-text-danger  { color: var(--ui-danger); }
+.ui-text-info    { color: var(--ui-info); }
+
+/* Status colors with text fallback (not color-only) */
+.ui-status-queued  { color: var(--ui-muted); }
+.ui-status-running { color: var(--ui-info); }
+.ui-status-partial { color: var(--ui-accent); }
+.ui-status-completed { color: var(--ui-success); }
+.ui-status-failed  { color: var(--ui-danger); }
+.ui-status-expired { color: var(--ui-accent); }
+
+/* Unavailable / no data dash */
+.ui-na { font-family: var(--ui-mono); letter-spacing: -0.5px; color: var(--ui-muted); }

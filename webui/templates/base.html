@@ -5,6 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ page_title or "WORED Web UI" }}</title>
+  <link rel="stylesheet" href="/static/ui/tokens.css">
   <link rel="stylesheet" href="/static/styles.css?v=4">
   <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -119,5 +120,6 @@
     toast._timer = setTimeout(() => { toast.className = "toast"; }, 3000);
   };
   </script>
+  <script type="module" src="/static/ui/core.js"></script>
 </body>
 </html>
