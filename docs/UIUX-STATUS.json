@@ -1,0 +1,52 @@
+{
+  "format_version": 1,
+  "task": "WORED UI/UX S2 (R10/R11)",
+  "base_commit": "b9102587761665f1cae86ecf6f2d04de1b087cd5",
+  "base_commit_note": "P5 final acceptance; includes migration 20260908_04",
+  "staging_repo": "D:\\WORED_UIUX_20260909",
+  "staging_branch": "hermes/uiux-20260909",
+  "production_repo": "D:\\WORED",
+  "production_db": "trading",
+  "delivery_path": "D:\\WORED\\TASOCHKI\\HERMES-WORED-UIUX",
+  "baseline_snapshot": "reference/baseline.json (head 11d279c, source_files SHA-256)",
+  "s1_status": {
+    "P0": "PASSED",
+    "P1": "PASSED",
+    "P2": "PASSED",
+    "P3": "PASSED",
+    "P4": "PASSED",
+    "P5": "PASSED",
+    "R01": "PASSED",
+    "R02": "PASSED",
+    "R03": "PASSED",
+    "R04": "PASSED",
+    "R05": "PARTIAL",
+    "R06": "PASSED",
+    "R07": "PASSED",
+    "R08": "PASSED",
+    "R09": "PASSED",
+    "R10": "NOT STARTED (now UI-00..UI-12)",
+    "R11": "NOT STARTED (now UI-00..UI-12)",
+    "R12": "PASSED"
+  },
+  "backend_gaps": [
+    "R05 DB-backed order/revision tests deferred",
+    "LLM_PAID_ENABLED=false; metered gate untested",
+    "Live Telegram WebView verification pending owner"
+  ],
+  "tasks": {
+    "UI-00": {"status": "in_progress", "base_commit": "b9102587761665f1cae86ecf6f2d04de1b087cd5", "implementation_commit": null},
+    "UI-01": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-02": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-03": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-04": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-05": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-06": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-07": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-08": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-09": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-10": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-11": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-12": {"status": "not_started", "base_commit": null, "implementation_commit": null}
+  }
+}
