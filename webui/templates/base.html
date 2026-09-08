@@ -30,6 +30,44 @@
 
   <div id="globalToast" class="toast"></div>
 
+  {# Ticket dialog — UI-07: shared Long/Short dialog #}
+  <div class="ticket-dialog" id="ticketDialog" hidden>
+    <div class="ticket-dialog-content" role="dialog" aria-modal="true" aria-labelledby="ticketDialogTitle">
+      <div class="ticket-dialog-header">
+        <h2 id="ticketDialogTitle" tabindex="-1">Учебная позиция <span data-ticket-dir class="ticket-dir">Long</span></h2>
+        <span data-ticket-sim class="ticket-sim-badge">Симуляция</span>
+      </div>
+      <div class="ticket-field-row">
+        <div class="ticket-field">
+          <label for="ticketMargin">Margin (USDT)</label>
+          <input type="number" id="ticketMargin" data-ticket-margin value="10" min="1" step="0.1">
+          <span data-ticket-mar-display>10,00 USDT</span>
+        </div>
+        <div class="ticket-field">
+          <label for="ticketLeverage">Плечо</label>
+          <input type="number" id="ticketLeverage" data-ticket-leverage value="10" min="1" max="200" step="1">
+          <span data-ticket-lev-display>10x</span>
+        </div>
+      </div>
+      <div class="ticket-preview-section">
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Символ</span><span data-ticket-symbol class="ticket-preview-value">BTCUSDT</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Цена входа</span><span data-preview-entry class="ticket-preview-value">—</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Объём</span><span data-preview-notional class="ticket-preview-value">—</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Размер</span><span data-preview-size class="ticket-preview-value">—</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Комиссия входа</span><span data-preview-fee class="ticket-preview-value">—</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">Ликвидация</span><span data-preview-liq class="ticket-preview-value">—</span></div>
+        <div class="ticket-preview-row"><span class="ticket-preview-label">До ликвидации</span><span data-preview-liq-dist class="ticket-preview-value">—</span></div>
+        <div data-preview-scenarios></div>
+      </div>
+      <div class="ticket-error" data-ticket-error role="alert"></div>
+      <input type="hidden" data-csrf value="{{ csrf_token }}">
+      <div class="ticket-actions">
+        <button type="button" class="ticket-close-btn" onclick="window.WORED?.closeDialog?.()">Закрыть</button>
+        <button type="button" class="wored-btn" data-ticket-confirm disabled>Открыть Long</button>
+      </div>
+    </div>
+  </div>
+
   <script>
   (function() {
     /* Global health + data status polling — UI-03: setTimeout-after-completion, pause on hidden */
