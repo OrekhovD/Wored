@@ -3047,3 +3047,75 @@ a:focus-visible {
   padding-top: var(--ui-space-3);
   border-top: 1px solid var(--ui-border);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   UI-09: Supporting pages, mobile table→card, quality metrics
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Mobile table → card transform */
+@media (max-width: 767px) {
+  table.wored-responsive-table thead { display: none; }
+  table.wored-responsive-table,
+  table.wored-responsive-table tbody,
+  table.wored-responsive-table tr,
+  table.wored-responsive-table td {
+    display: block;
+    width: 100%;
+  }
+  table.wored-responsive-table tr {
+    margin-bottom: var(--ui-space-2);
+    padding: var(--ui-space-2);
+    background: var(--ui-surface-raised);
+    border-radius: var(--ui-radius);
+    border: 1px solid var(--ui-border);
+  }
+  table.wored-responsive-table td {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--ui-space-1) 0;
+    border: none;
+  }
+  table.wored-responsive-table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: var(--ui-muted);
+    font-size: var(--ui-text-sm);
+    margin-right: var(--ui-space-2);
+  }
+}
+
+/* Quality metrics display */
+.wored-quality-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--ui-space-3);
+  margin-bottom: var(--ui-space-4);
+}
+
+.wored-quality-item {
+  padding: var(--ui-space-3);
+  background: var(--ui-surface-raised);
+  border-radius: var(--ui-radius);
+  border: 1px solid var(--ui-border);
+}
+
+.wored-quality-label {
+  font-size: var(--ui-text-sm);
+  color: var(--ui-muted);
+  margin-bottom: var(--ui-space-1);
+}
+
+.wored-quality-value {
+  font-size: var(--ui-text-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.wored-quality-insufficient {
+  font-size: var(--ui-text-base);
+  color: var(--ui-accent);
+  padding: var(--ui-space-3);
+  background: rgba(249,115,22,0.06);
+  border-radius: var(--ui-radius);
+  border: 1px solid rgba(249,115,22,0.15);
+}
