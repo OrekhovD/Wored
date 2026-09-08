@@ -2629,3 +2629,67 @@ a:focus-visible {
 [aria-busy="true"] {
   cursor: progress;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   UI-05: Forecast chart & points table
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.wored-chart-container {
+  position: relative;
+  width: 100%;
+  min-height: 200px;
+}
+
+.wored-chart-error {
+  padding: var(--ui-space-4);
+  text-align: center;
+  color: var(--ui-danger);
+  font-size: var(--ui-text-base);
+}
+
+.wored-forecast-points-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ui-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.wored-forecast-points-table th,
+.wored-forecast-points-table td {
+  padding: var(--ui-space-1) var(--ui-space-2);
+  text-align: right;
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.wored-forecast-points-table th {
+  color: var(--ui-muted);
+  font-weight: 600;
+  text-align: right;
+  position: sticky;
+  top: 0;
+  background: var(--ui-surface);
+}
+
+.wored-forecast-points-table th:first-child,
+.wored-forecast-points-table td:first-child {
+  text-align: left;
+}
+
+.wored-forecast-points-scroll {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+}
+
+.wored-forecast-role-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: var(--ui-text-sm);
+  font-weight: 600;
+}
+
+.wored-forecast-role-bull { background: rgba(34,197,94,0.12); color: var(--ui-success); }
+.wored-forecast-role-bear { background: rgba(239,68,68,0.12); color: var(--ui-danger); }
+.wored-forecast-role-arbiter { background: rgba(59,130,246,0.12); color: var(--ui-info); }
