@@ -2969,3 +2969,81 @@ a:focus-visible {
     padding-bottom: calc(var(--ui-space-4) + env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   UI-08: Daily session
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.session-readiness {
+  padding: var(--ui-space-3) var(--ui-space-4);
+  border-radius: var(--ui-radius);
+  margin-bottom: var(--ui-space-4);
+}
+
+.session-readiness-no_entries { background: rgba(163,163,163,0.06); border: 1px solid var(--ui-border); }
+.session-readiness-no_indicators { background: rgba(163,163,163,0.06); border: 1px solid var(--ui-border); }
+.session-readiness-armed_ready { background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.15); }
+.session-readiness-paused { background: rgba(249,115,22,0.06); border: 1px solid rgba(249,115,22,0.15); }
+.session-readiness-in_position { background: rgba(59,130,246,0.06); border: 1px solid rgba(59,130,246,0.15); }
+.session-readiness-stopped { background: var(--ui-surface-raised); border: 1px solid var(--ui-border); }
+.session-readiness-unknown { background: rgba(239,68,68,0.04); border: 1px solid var(--ui-border); }
+
+.session-readiness-title {
+  font-size: var(--ui-text-lg);
+  font-weight: 700;
+  margin-bottom: var(--ui-space-1);
+}
+
+.session-readiness-text {
+  font-size: var(--ui-text-base);
+  color: var(--ui-muted);
+  line-height: var(--ui-lh);
+}
+
+.session-readiness-next {
+  font-size: var(--ui-text-sm);
+  color: var(--ui-muted);
+  margin-top: var(--ui-space-1);
+}
+
+.session-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-4);
+}
+
+.session-info-item {
+  padding: var(--ui-space-2) var(--ui-space-3);
+  background: var(--ui-surface-raised);
+  border-radius: var(--ui-radius);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-info-label {
+  font-size: var(--ui-text-sm);
+  color: var(--ui-muted);
+}
+
+.session-info-value {
+  font-size: var(--ui-text-base);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-controls {
+  display: flex;
+  gap: var(--ui-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--ui-space-4);
+}
+
+.session-close-all {
+  display: flex;
+  align-items: center;
+  gap: var(--ui-space-3);
+  padding-top: var(--ui-space-3);
+  border-top: 1px solid var(--ui-border);
+}
