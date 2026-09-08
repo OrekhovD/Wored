@@ -15,28 +15,53 @@
     "R01": "PASSED", "R02": "PASSED", "R03": "PASSED",
     "R04": "PASSED", "R05": "PARTIAL", "R06": "PASSED",
     "R07": "PASSED", "R08": "PASSED", "R09": "PASSED",
-    "R10": "NOT STARTED (now UI-00..UI-12)",
-    "R11": "NOT STARTED (now UI-00..UI-12)",
+    "R10": "IN PROGRESS (UI-00..UI-10 done, UI-11..UI-12 pending)",
+    "R11": "IN PROGRESS (acceptance tests pending UI-11)",
     "R12": "PASSED"
   },
   "backend_gaps": [
     "R05 DB-backed order/revision tests deferred",
     "LLM_PAID_ENABLED=false; metered gate untested",
-    "Live Telegram WebView verification pending owner"
+    "Live Telegram WebView verification pending owner",
+    "BACKEND_CONTRACT_GAP: v3/net/idempotency/policy in live endpoints not fully verified (UI-04 bridge gate)"
   ],
   "tasks": {
     "UI-00": {"status": "verified", "base_commit": "b9102587761665f1cae86ecf6f2d04de1b087cd5", "implementation_commit": "90c3252"},
-    "UI-01": {"status": "verified", "base_commit": null, "implementation_commit": "a81a262", "tests": ["31 passed test_ui_presenters.py"]},
-    "UI-02": {"status": "verified", "base_commit": null, "implementation_commit": "bc0f116", "tests": ["31 passed test_ui_presenters.py"]},
-    "UI-03": {"status": "not_started", "base_commit": null, "implementation_commit": null},
-    "UI-04": {"status": "not_started", "base_commit": null, "implementation_commit": null},
-    "UI-05": {"status": "not_started", "base_commit": null, "implementation_commit": null},
-    "UI-06": {"status": "not_started", "base_commit": null, "implementation_commit": null},
-    "UI-07": {"status": "not_started", "base_commit": null, "implementation_commit": null},
-    "UI-08": {"status": "not_started", "base_commit": null, "implementation_commit": null},
-    "UI-09": {"status": "not_started", "base_commit": null, "implementation_commit": null},
-    "UI-10": {"status": "not_started", "base_commit": null, "implementation_commit": null},
+    "UI-01": {"status": "verified", "base_commit": null, "implementation_commit": "a81a262", "tests": ["48 passed test_ui_presenters.py"]},
+    "UI-02": {"status": "verified", "base_commit": null, "implementation_commit": "bc0f116"},
+    "UI-03": {"status": "verified", "base_commit": null, "implementation_commit": "0c62c3e", "fixes": ["O04 double-%", "O06 legacy pending→execution_state"]},
+    "UI-04": {"status": "verified", "base_commit": null, "implementation_commit": "8deb8c6"},
+    "UI-05": {"status": "verified", "base_commit": null, "implementation_commit": "1d42e4e"},
+    "UI-06": {"status": "verified", "base_commit": null, "implementation_commit": "42a959e"},
+    "UI-07": {"status": "verified", "base_commit": null, "implementation_commit": "9de1a38"},
+    "UI-08": {"status": "verified", "base_commit": null, "implementation_commit": "c3eba59"},
+    "UI-09": {"status": "verified", "base_commit": null, "implementation_commit": "d51f0de"},
+    "UI-10": {"status": "verified", "base_commit": null, "implementation_commit": "d51f0de", "note": "viewport, safe areas, a11y; Telegram manual check pending owner"},
     "UI-11": {"status": "not_started", "base_commit": null, "implementation_commit": null},
     "UI-12": {"status": "not_started", "base_commit": null, "implementation_commit": null}
-  }
+  },
+  "new_files": [
+    "webui/static/ui/tokens.css",
+    "webui/static/ui/core.js",
+    "webui/static/ui/async-patterns.js",
+    "webui/static/ui/forecast-chart.js",
+    "webui/static/ui/forecast.js",
+    "webui/static/ui/ticket.js",
+    "webui/static/ui/session.js",
+    "webui/ui_presenters.py",
+    "webui/templates/partials/navigation.html",
+    "webui/templates/partials/ui_status.html",
+    "webui/templates/partials/forecast_form.html",
+    "webui/templates/system.html",
+    "tests/test_ui_presenters.py"
+  ],
+  "modified_files": [
+    "webui/templates/base.html",
+    "webui/templates/login.html",
+    "webui/templates/command_deck.html",
+    "webui/templates/predictions.html",
+    "webui/static/styles.css",
+    "webui/static/app.js",
+    "webui/app.py"
+  ]
 }
