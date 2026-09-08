@@ -137,6 +137,37 @@ def state_label(execution_state: Optional[str] = None, legacy_status: Optional[s
     return {'label': 'Состояние уточняется', 'css_class': 'ui-status-queued'}
 
 
+# Terminal states — job is done (success, failure, or expired)
+TERMINAL_STATES = frozenset({'completed', 'failed', 'expired'})
+
+# States that indicate the job is still in progress
+ACTIVE_STATES = frozenset({'queued', 'running', 'partial'})
+
+
+def is_terminal(execution_state: Optional[str], legacy_status: Optional[str] = None) -> bool:
+    """Check if a job has reached terminal state."""
+    es = execution_state
+    if es and es in TERMINAL_STATES:
+        return True
+    # Legacy: 'active' with real result is terminal, 'failed' is terminal
+    if not es and legacy_status:
+        return legacy_status in ('failed',)
+    return False
+
+
+def is_valid_forecast(valid_until: Optional[str], now_iso: Optional[str] = None) -> bool:
+    """Check if a forecast is still valid by its valid_until timestamp."""
+    if not valid_until:
+        return False  # 'Срок действия не указан'
+    try:
+        from datetime import datetime, timezone
+        v = datetime.fromisoformat(valid_until.replace('Z', '+00:00'))
+        n = datetime.fromisoformat((now_iso or '').replace('Z', '+00:00')) if now_iso else datetime.now(timezone.utc)
+        return v > n
+    except (ValueError, AttributeError):
+        return False
+
+
 # ── Forecast presenter ──────────────────────────────────────────────────────────
 
 def present_forecast_summary(forecast: Dict[str, Any]) -> Dict[str, Any]:

@@ -64,8 +64,9 @@
 <script>
 (function() {
   async function loadSystemHealth() {
+    if (document.hidden) return;
     try {
-      const r = await fetch('/api/health');
+      const r = await fetch('/api/health', {credentials: 'same-origin'});
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const h = await r.json();
 
@@ -87,23 +88,28 @@
     } catch (err) {
       document.getElementById('systemHealthAge').textContent = 'Нет связи';
     }
+    setTimeout(loadSystemHealth, 30000);
   }
 
   async function loadReadiness() {
+    if (document.hidden) return;
     try {
-      const r = await fetch('/readyz');
+      const r = await fetch('/readyz', {credentials: 'same-origin'});
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
       document.getElementById('systemReadyRaw').textContent = JSON.stringify(d, null, 2);
     } catch (err) {
       document.getElementById('systemReadyRaw').textContent = 'Ошибка: ' + err.message;
     }
+    setTimeout(loadReadiness, 30000);
   }
+
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) { loadSystemHealth(); loadReadiness(); }
+  });
 
   loadSystemHealth();
   loadReadiness();
-  setInterval(loadSystemHealth, 30000);
-  setInterval(loadReadiness, 30000);
 })();
 </script>
 {% endblock %}

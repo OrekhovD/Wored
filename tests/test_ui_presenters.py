@@ -4,6 +4,7 @@ import pytest
 from webui.ui_presenters import (
     fmt_usdt, fmt_price, fmt_pct, fmt_fraction_as_pct, fmt_pnl, fmt_qty,
     fmt_time, fmt_time_ago, state_label, present_forecast_summary, present_health,
+    is_terminal, is_valid_forecast,
 )
 
 
@@ -111,6 +112,43 @@ class TestStateLabel:
     def test_unknown(self):
         r = state_label('something_else')
         assert r['label'] == 'Состояние уточняется'
+
+
+class TestIsTerminal:
+    def test_completed(self):
+        assert is_terminal('completed') is True
+
+    def test_failed(self):
+        assert is_terminal('failed') is True
+
+    def test_expired(self):
+        assert is_terminal('expired') is True
+
+    def test_queued(self):
+        assert is_terminal('queued') is False
+
+    def test_running(self):
+        assert is_terminal('running') is False
+
+    def test_legacy_failed(self):
+        assert is_terminal(None, legacy_status='failed') is True
+
+    def test_none(self):
+        assert is_terminal(None) is False
+
+
+class TestIsValidForecast:
+    def test_no_valid_until(self):
+        assert is_valid_forecast(None) is False
+
+    def test_future(self):
+        assert is_valid_forecast('2026-12-31T23:59:59Z', now_iso='2026-09-09T12:00:00Z') is True
+
+    def test_past(self):
+        assert is_valid_forecast('2026-01-01T00:00:00Z', now_iso='2026-09-09T12:00:00Z') is False
+
+    def test_invalid_string(self):
+        assert is_valid_forecast('not-a-date') is False
 
 
 class TestPresentForecastSummary:

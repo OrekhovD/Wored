@@ -452,16 +452,59 @@ function mountInteractions() {
 }
 
 function startPolling() {
-  state.overviewTimer = window.setInterval(() => {
-    refreshOverview().catch(console.error);
-  }, 15000);
+  // UI-03: setTimeout-after-completion, pause on hidden, backoff on error
+  let overviewErrCount = 0;
+  let detailErrCount = 0;
+  let pollGen = 0;
 
-  state.detailTimer = window.setInterval(() => {
-    if (!state.autoRefresh) {
+  async function overviewTick() {
+    if (document.hidden) return;
+    const myGen = pollGen;
+    try {
+      await refreshOverview();
+      overviewErrCount = 0;
+    } catch (e) {
+      overviewErrCount++;
+      console.error('overview poll error', e);
+    }
+    if (myGen !== pollGen) return;
+    const delay = overviewErrCount > 0
+      ? [3000,6000,12000,30000][Math.min(overviewErrCount-1,3)]
+      : 15000;
+    state.overviewTimer = setTimeout(overviewTick, delay);
+  }
+
+  async function detailTick() {
+    if (document.hidden || !state.autoRefresh) {
+      // resume when visible or re-enabled
       return;
     }
-    refreshAllDetails().catch(console.error);
-  }, 30000);
+    const myGen = pollGen;
+    try {
+      await refreshAllDetails();
+      detailErrCount = 0;
+    } catch (e) {
+      detailErrCount++;
+      console.error('detail poll error', e);
+    }
+    if (myGen !== pollGen) return;
+    const delay = detailErrCount > 0
+      ? [3000,6000,12000,30000][Math.min(detailErrCount-1,3)]
+      : 30000;
+    state.detailTimer = setTimeout(detailTick, delay);
+  }
+
+  // Resume on visibility change
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      pollGen++;
+      overviewTick();
+      if (state.autoRefresh) detailTick();
+    }
+  });
+
+  overviewTick();
+  detailTick();
 }
 
 async function bootstrap() {
