@@ -75,8 +75,9 @@ def _validate_final_text(text: str | None, finish_reason: str | None,
             and allowed_tools
             and any(tc.get("function", {}).get("name") in allowed_tools for tc in tool_calls)
         )
-        if not has_valid_tools:
-            raise InvalidResponseError("Empty final text without valid tool calls")
+        if has_valid_tools:
+            return FinishReason.TOOL_CALLS
+        raise InvalidResponseError("Empty final text without valid tool calls")
 
     # NaN in text → invalid
     if text and "nan" in text.lower():

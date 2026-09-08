@@ -19,6 +19,7 @@ from ai.contracts import (
     RequestState,
     UsageSource,
 )
+from ai.budget_policy import BudgetPolicy
 
 log = logging.getLogger(__name__)
 
@@ -30,9 +31,14 @@ class UsageLedger:
     In tests / without DB, it falls back to in-memory tracking.
     """
 
-    def __init__(self, dsn: str | None = None):
-        self._dsn = dsn or os.getenv("WORED_TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
+    def __init__(self, dsn: str | None = None, *, in_memory: bool = False,
+                 budget_policy: BudgetPolicy | None = None):
+        if in_memory:
+            self._dsn = None
+        else:
+            self._dsn = dsn or os.getenv("WORED_TEST_DATABASE_URL") or os.getenv("DATABASE_URL")
         self._pool = None
+        self._budget_policy = budget_policy
         # In-memory fallback for testing without DB
         self._mem_requests: dict[str, dict] = {}
         self._mem_attempts: dict[str, dict] = {}
@@ -193,8 +199,7 @@ class UsageLedger:
                            reserved_tokens, reserved_requests,
                            reserved_cost, cost_class, bucket_keys, now) -> dict | None:
         """Reserve via PostgreSQL with row-level locking."""
-        from ai.budget_policy import BudgetPolicy
-        policy = BudgetPolicy()
+        policy = self._budget_policy or BudgetPolicy()
 
         try:
             async with pool.acquire() as conn:
@@ -289,8 +294,7 @@ class UsageLedger:
                             reserved_tokens, reserved_requests,
                             reserved_cost, cost_class, bucket_keys, now) -> dict | None:
         """Reserve via in-memory buckets (for testing without DB)."""
-        from ai.budget_policy import BudgetPolicy
-        policy = BudgetPolicy()
+        policy = self._budget_policy or BudgetPolicy()
 
         for bk in bucket_keys:
             key = f"{bk['scope_key']}:{bk['period_kind']}:{bk['period_start'].isoformat()}"
@@ -410,7 +414,8 @@ class UsageLedger:
                 att["output_tokens"] = output_tokens
                 att["settled_at"] = datetime.now(timezone.utc).isoformat()
 
-    async def settle_unknown(self, attempt_id: str, error_code: str = "unknown_charge") -> None:
+    async def settle_unknown(self, attempt_id: str, error_code: str = "unknown_charge",
+                              usage_source: str = "unknown") -> None:
         """Settle an attempt as unknown_charge: charge the full reserved amount."""
         pool = await self._get_pool()
         if pool:
@@ -444,8 +449,7 @@ class UsageLedger:
     async def _settle_buckets(self, conn, attempt_id: str, requests: int,
                                tokens: int, cost: float) -> None:
         """Move reserved → used for all buckets of this attempt's reservations."""
-        from ai.budget_policy import BudgetPolicy
-        policy = BudgetPolicy()
+        policy = self._budget_policy or BudgetPolicy()
 
         reservations = await conn.fetch(
             "SELECT scope_key, period_kind, period_start, requests, tokens, cost "
@@ -492,8 +496,14 @@ class UsageLedger:
 
     async def check_gate(self, provider: str, model: str) -> bool:
         """Check if a validation gate is valid for this model."""
+        key = f"{provider}/{model}"
+        # Check in-memory first (for testing)
+        if key in self._mem_gates:
+            return self._mem_gates[key].get("passed", False)
         pool = await self._get_pool()
-        if pool:
+        if not pool:
+            return False  # No gate data → gate false
+        try:
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
                     """SELECT passed, expires_at FROM llm_validation_gates
@@ -505,11 +515,8 @@ class UsageLedger:
                     return False
                 from datetime import datetime as dt, timezone as tz
                 return row["expires_at"].replace(tzinfo=tz.utc) > dt.now(tz.utc)
-        else:
-            gate = self._mem_gates.get(f"{provider}/{model}")
-            if not gate:
-                return False  # No gate data → gate false
-            return gate.get("passed", False)
+        except Exception:
+            return False
 
     # ── Reaper ────────────────────────────────────────────────────────────
 

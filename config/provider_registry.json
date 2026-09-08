@@ -8,19 +8,10 @@
       "endpoint_type": "native",
       "enabled": true,
       "cost_class": "free",
-      "capabilities": {
-        "tools": false,
-        "thinking": true,
-        "json_schema": true,
-        "vision": false
-      },
+      "capabilities": {"tools": false, "thinking": true, "json_schema": true, "vision": false},
       "context_tokens": 131072,
       "max_output_tokens": 8192,
-      "pricing": {
-        "currency": "USD",
-        "input_per_million": 0,
-        "output_per_million": 0
-      },
+      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
       "validation_gate_id": null
     },
     {
@@ -29,19 +20,10 @@
       "endpoint_type": "native",
       "enabled": true,
       "cost_class": "free",
-      "capabilities": {
-        "tools": false,
-        "thinking": true,
-        "json_schema": true,
-        "vision": false
-      },
+      "capabilities": {"tools": false, "thinking": true, "json_schema": true, "vision": false},
       "context_tokens": 131072,
       "max_output_tokens": 8192,
-      "pricing": {
-        "currency": "USD",
-        "input_per_million": 0,
-        "output_per_million": 0
-      },
+      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
       "validation_gate_id": null
     },
     {
@@ -50,19 +32,10 @@
       "endpoint_type": "openai",
       "enabled": true,
       "cost_class": "free",
-      "capabilities": {
-        "tools": false,
-        "thinking": true,
-        "json_schema": true,
-        "vision": false
-      },
+      "capabilities": {"tools": false, "thinking": true, "json_schema": true, "vision": false},
       "context_tokens": 131072,
       "max_output_tokens": 8192,
-      "pricing": {
-        "currency": "USD",
-        "input_per_million": 0,
-        "output_per_million": 0
-      },
+      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
       "validation_gate_id": null
     },
     {
@@ -71,19 +44,10 @@
       "endpoint_type": "openai",
       "enabled": true,
       "cost_class": "free",
-      "capabilities": {
-        "tools": false,
-        "thinking": true,
-        "json_schema": false,
-        "vision": false
-      },
+      "capabilities": {"tools": false, "thinking": true, "json_schema": false, "vision": false},
       "context_tokens": 131072,
       "max_output_tokens": 4096,
-      "pricing": {
-        "currency": "USD",
-        "input_per_million": 0,
-        "output_per_million": 0
-      },
+      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
       "validation_gate_id": null
     },
     {
@@ -92,19 +56,10 @@
       "endpoint_type": "openai",
       "enabled": true,
       "cost_class": "free",
-      "capabilities": {
-        "tools": false,
-        "thinking": false,
-        "json_schema": true,
-        "vision": false
-      },
+      "capabilities": {"tools": false, "thinking": false, "json_schema": true, "vision": false},
       "context_tokens": 24576,
       "max_output_tokens": 4096,
-      "pricing": {
-        "currency": "USD",
-        "input_per_million": 0,
-        "output_per_million": 0
-      },
+      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
       "validation_gate_id": null
     },
     {
@@ -113,19 +68,10 @@
       "endpoint_type": "native",
       "enabled": true,
       "cost_class": "included",
-      "capabilities": {
-        "tools": false,
-        "thinking": true,
-        "json_schema": true,
-        "vision": false
-      },
+      "capabilities": {"tools": false, "thinking": true, "json_schema": true, "vision": false},
       "context_tokens": 131072,
       "max_output_tokens": 8192,
-      "pricing": {
-        "currency": "USD",
-        "input_per_million": 0,
-        "output_per_million": 0
-      },
+      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
       "validation_gate_id": null
     },
     {
@@ -134,19 +80,46 @@
       "endpoint_type": "native",
       "enabled": true,
       "cost_class": "included",
-      "capabilities": {
-        "tools": false,
-        "thinking": true,
-        "json_schema": true,
-        "vision": false
-      },
+      "capabilities": {"tools": false, "thinking": true, "json_schema": true, "vision": false},
       "context_tokens": 131072,
       "max_output_tokens": 8192,
-      "pricing": {
-        "currency": "USD",
-        "input_per_million": 0,
-        "output_per_million": 0
-      },
+      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
+      "validation_gate_id": null
+    },
+    {
+      "provider": "tokenrouter",
+      "model_id": "moonshotai/kimi-k3-free",
+      "endpoint_type": "openai",
+      "enabled": true,
+      "cost_class": "free",
+      "capabilities": {"tools": false, "thinking": false, "json_schema": false, "vision": false},
+      "context_tokens": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
+      "validation_gate_id": null
+    },
+    {
+      "provider": "nvidia",
+      "model_id": "mistralai/mistral-nemotron",
+      "endpoint_type": "openai",
+      "enabled": false,
+      "cost_class": "free",
+      "capabilities": {"tools": false, "thinking": false, "json_schema": true, "vision": false},
+      "context_tokens": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
+      "validation_gate_id": null
+    },
+    {
+      "provider": "nvidia",
+      "model_id": "minimaxai/minimax-m3",
+      "endpoint_type": "openai",
+      "enabled": false,
+      "cost_class": "free",
+      "capabilities": {"tools": false, "thinking": false, "json_schema": true, "vision": false},
+      "context_tokens": 24576,
+      "max_output_tokens": 4096,
+      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
       "validation_gate_id": null
     }
   ]
