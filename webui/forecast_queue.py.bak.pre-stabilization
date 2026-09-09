@@ -1,0 +1,92 @@
+"""Durable, bounded forecast worker; results and acknowledgement share a transaction."""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from contextlib import suppress
+
+log = logging.getLogger(__name__)
+
+SCHEMA = """
+ALTER TABLE forecast_requests ADD COLUMN IF NOT EXISTS as_of TIMESTAMP;
+CREATE TABLE IF NOT EXISTS forecast_jobs (
+    request_id INTEGER PRIMARY KEY REFERENCES forecast_requests(id) ON DELETE CASCADE,
+    payload JSONB NOT NULL,
+    idempotency_key TEXT,
+    state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','completed','failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error_code TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deadline_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '20 minutes',
+    finished_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS forecast_jobs_pending ON forecast_jobs (created_at) WHERE state='pending';
+ALTER TABLE forecast_jobs ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS forecast_jobs_idempotency ON forecast_jobs(idempotency_key);
+"""
+
+
+async def enqueue(connection, request_id: int, payload: dict, idempotency_key: str | None = None) -> None:
+    await connection.execute(
+        "INSERT INTO forecast_jobs (request_id,payload,idempotency_key) VALUES ($1,$2,$3)",
+        request_id, json.dumps(payload, allow_nan=False), idempotency_key,
+    )
+
+
+async def process_one(pool, runner, timeout: float = 300.0) -> bool:
+    # A crash releases the row lock and rolls back every result write. SKIP LOCKED
+    # allows multiple processes without claiming the same job concurrently.
+    async with pool.acquire() as connection:
+        async with connection.transaction():
+            row = await connection.fetchrow(
+                "SELECT *, deadline_at <= NOW() AS expired FROM forecast_jobs "
+                "WHERE state='pending' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1"
+            )
+            if row is None:
+                return False
+            request_id = row["request_id"]
+            error_code = "deadline_exceeded" if row["expired"] else None
+            if not error_code:
+                payload = row["payload"]
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                try:
+                    # Savepoint rolls back partially written model runs on errors.
+                    async with connection.transaction():
+                        await asyncio.wait_for(runner(request_id, payload, connection), timeout)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    error_code = type(exc).__name__
+                    log.warning("Forecast %s failed: %s", request_id, error_code)
+            await connection.execute(
+                "UPDATE forecast_jobs SET state=$2, attempts=attempts+1, error_code=$3, "
+                "finished_at=NOW() WHERE request_id=$1",
+                request_id, "failed" if error_code else "completed", error_code,
+            )
+            if error_code:
+                await connection.execute(
+                    "UPDATE forecast_requests SET status='failed',updated_at=NOW() WHERE id=$1",
+                    request_id,
+                )
+    return True
+
+
+async def work_forecasts(pool, runner) -> None:
+    while True:
+        try:
+            if await process_one(pool, runner):
+                continue
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning("Forecast queue unavailable: %s", type(exc).__name__)
+        await asyncio.sleep(2)
+
+
+async def stop_worker(task) -> None:
+    if task is not None:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
