@@ -4,15 +4,17 @@
 #}
 <nav class="wored-nav" aria-label="Основная навигация">
   <div class="wored-nav-brand">
-    <a class="wored-brand" href="/command-deck">WORED</a>
+    <a class="wored-brand" href="/trading-day">WORED</a>
   </div>
 
   <div class="wored-nav-groups">
-    {# ── Обзор ── #}
-    <div class="wored-nav-group{% if current_path in ('/command-deck', '/', '/alerts') %} is-active{% endif %}">
-      <a class="wored-nav-link{% if current_path == '/command-deck' %} is-current{% endif %}"
-         href="/command-deck" aria-current="{% if current_path == '/command-deck' %}page{% else %}false{% endif %}">Панель</a>
+    {# ── Сегодня ── #}
+    <div class="wored-nav-group{% if current_path in ('/trading-day', '/command-deck', '/', '/alerts') %} is-active{% endif %}">
+      <a class="wored-nav-link{% if current_path == '/trading-day' %} is-current{% endif %}"
+         href="/trading-day" aria-current="{% if current_path == '/trading-day' %}page{% else %}false{% endif %}">Сегодня</a>
       <div class="wored-nav-secondary">
+        <a class="wored-nav-sublink{% if current_path == '/command-deck' %} is-current{% endif %}"
+           href="/command-deck" aria-current="{% if current_path == '/command-deck' %}page{% else %}false{% endif %}">Панель</a>
         <a class="wored-nav-sublink{% if current_path == '/' %} is-current{% endif %}"
            href="/" aria-current="{% if current_path == '/' %}page{% else %}false{% endif %}">Рынок</a>
         <a class="wored-nav-sublink{% if current_path == '/alerts' %} is-current{% endif %}"

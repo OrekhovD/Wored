@@ -3119,3 +3119,78 @@ a:focus-visible {
   border-radius: var(--ui-radius);
   border: 1px solid rgba(249,115,22,0.15);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TD-02: Trading Day UI
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.trading-day-page { max-width: var(--ui-content-max); margin: 0 auto; padding: var(--ui-space-4); }
+
+.td-section { display: flex; flex-direction: column; gap: var(--ui-space-4); }
+.td-hero { display: flex; flex-direction: column; gap: var(--ui-space-4); align-items: center; padding: var(--ui-space-6) 0; }
+.td-accounts-row { display: flex; gap: var(--ui-space-3); width: 100%; flex-wrap: wrap; }
+.td-account-card {
+  flex: 1; min-width: 200px; padding: var(--ui-space-4); border-radius: var(--ui-radius);
+  border: 1px solid var(--ui-border); display: flex; flex-direction: column; gap: var(--ui-space-1);
+}
+.td-account-card.td-manual { background: rgba(34,197,94,0.04); border-color: rgba(34,197,94,0.15); }
+.td-account-card.td-auto { background: rgba(59,130,246,0.04); border-color: rgba(59,130,246,0.15); }
+.td-account-label { font-size: var(--ui-text-sm); color: var(--ui-muted); font-weight: 600; }
+.td-account-equity { font-size: var(--ui-text-2xl); font-weight: 700; font-variant-numeric: tabular-nums; }
+.td-account-sub { font-size: var(--ui-text-sm); color: var(--ui-muted); }
+.td-start-info { width: 100%; display: flex; flex-direction: column; gap: var(--ui-space-2); }
+.td-info-row { display: flex; justify-content: space-between; padding: var(--ui-space-2) var(--ui-space-3); background: var(--ui-surface-raised); border-radius: var(--ui-radius); }
+.td-info-label { color: var(--ui-muted); }
+.td-info-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.td-readiness { text-align: center; padding: var(--ui-space-2); }
+.td-start-btn { font-size: var(--ui-text-lg); padding: var(--ui-space-3) var(--ui-space-6); }
+.td-settings-btn { margin-top: var(--ui-space-2); }
+
+.td-settings { padding: var(--ui-space-4); background: var(--ui-surface-raised); border-radius: var(--ui-radius); border: 1px solid var(--ui-border); }
+.td-settings h3 { margin-bottom: var(--ui-space-3); }
+.td-settings-row { display: flex; gap: var(--ui-space-3); flex-wrap: wrap; margin-bottom: var(--ui-space-3); }
+.td-field { display: flex; flex-direction: column; gap: var(--ui-space-1); flex: 1; min-width: 140px; }
+.td-field span { font-size: var(--ui-text-sm); color: var(--ui-muted); }
+.td-field input, .td-field select { min-height: var(--ui-control-min); padding: var(--ui-space-2); border: 1px solid var(--ui-border); border-radius: var(--ui-radius); background: var(--ui-surface); color: var(--ui-text); font-size: var(--ui-text-base); }
+
+.td-active-header { display: flex; align-items: center; gap: var(--ui-space-3); flex-wrap: wrap; padding: var(--ui-space-2) 0; }
+.td-day-date { font-size: var(--ui-text-xl); font-weight: 700; }
+.td-day-timer { font-variant-numeric: tabular-nums; color: var(--ui-muted); }
+.td-day-freshness { font-size: var(--ui-text-sm); }
+.td-sim-badge { display: inline-block; padding: 2px 8px; background: var(--ui-surface-raised); border: 1px solid var(--ui-border); border-radius: 4px; font-size: var(--ui-text-sm); color: var(--ui-muted); }
+
+.td-active-card { gap: var(--ui-space-2); }
+.td-card-header { display: flex; justify-content: space-between; align-items: center; }
+.td-card-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: var(--ui-space-1); }
+.td-metric { display: flex; flex-direction: column; }
+.td-metric span:first-child { font-size: var(--ui-text-sm); color: var(--ui-muted); }
+.td-metric-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.td-auto-controls { display: flex; gap: var(--ui-space-2); flex-wrap: wrap; }
+
+.td-chart-area { min-height: 280px; }
+.td-ticket-area { padding: var(--ui-space-3); background: var(--ui-surface-raised); border-radius: var(--ui-radius); border: 1px solid var(--ui-border); }
+.td-ticket-form { display: flex; gap: var(--ui-space-2); flex-wrap: wrap; }
+.td-ticket-dir-row { display: flex; gap: var(--ui-space-2); }
+.td-dir-btn { min-width: 80px; }
+.td-dir-btn.is-active { opacity: 0.8; border: 2px solid var(--ui-accent); }
+.td-preview-section { padding: var(--ui-space-3); background: var(--ui-surface); border-radius: var(--ui-radius); margin: var(--ui-space-2) 0; }
+
+.td-positions-area, .td-events-area { margin-top: var(--ui-space-3); }
+.td-position-item { display: flex; align-items: center; gap: var(--ui-space-2); padding: var(--ui-space-2); border-bottom: 1px solid var(--ui-border); }
+.td-event-item { display: flex; gap: var(--ui-space-2); padding: var(--ui-space-1) 0; font-size: var(--ui-text-sm); }
+.td-event-time { color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+
+.td-report-cards { display: flex; gap: var(--ui-space-3); flex-wrap: wrap; }
+.td-report-card { flex: 1; min-width: 200px; padding: var(--ui-space-4); border-radius: var(--ui-radius); border: 1px solid var(--ui-border); }
+.td-report-card.td-manual { background: rgba(34,197,94,0.04); }
+.td-report-card.td-auto { background: rgba(59,130,246,0.04); }
+
+@media (max-width: 767px) {
+  .td-accounts-row { flex-direction: column; }
+  .td-account-card { min-width: 100%; }
+  .td-settings-row { flex-direction: column; }
+  .td-field { min-width: 100%; }
+  .td-ticket-form { flex-direction: column; }
+  .td-chart-area { min-height: 200px; }
+}

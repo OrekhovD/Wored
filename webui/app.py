@@ -59,6 +59,7 @@ from services.sim_math import preview as simulate_preview, validate_order, settl
 
 from prediction_timeframes import period_to_minutes, STEP_MINUTES_MAP
 from ui_presenters import present_deck_ui, present_preview_ui
+from paper_api import router as paper_router
 
 
 log = logging.getLogger("webui")
@@ -1853,6 +1854,16 @@ app.add_middleware(
     max_age=60 * 60 * 12,
 )
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+app.include_router(paper_router)
+
+
+@app.get("/trading-day", response_class=HTMLResponse)
+async def trading_day_page(request: Request):
+    """Trading Day main page — Сегодня (TD-02)."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(request, "trading_day.html", page_title="Сегодня")
 
 
 @app.get("/healthz")

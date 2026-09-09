@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block head_extra %}
+<title>{{ page_title or "Сегодня — WORED" }}</title>
+{% endblock %}
+
+{% block content %}
+<div class="page trading-day-page" id="tradingDayPage">
+  {# ── Pre-start: two balances, end time, limits, start button ── #}
+  <div id="tdPreStart" class="td-section">
+    <div class="td-hero">
+      <div class="td-accounts-row">
+        <div class="td-account-card td-manual" id="tdManualCard">
+          <span class="td-account-label">Ручной счёт</span>
+          <span class="td-account-equity" id="tdManualEquity">—</span>
+          <span class="td-account-sub" id="tdManualSub">Симуляция · USDT</span>
+        </div>
+        <div class="td-account-card td-auto" id="tdAutoCard">
+          <span class="td-account-label">Автомат</span>
+          <span class="td-account-equity" id="tdAutoEquity">—</span>
+          <span class="td-account-sub" id="tdAutoSub">Симуляция · USDT</span>
+        </div>
+      </div>
+      <div class="td-start-info">
+        <div class="td-info-row">
+          <span class="td-info-label">Окончание дня</span>
+          <span class="td-info-value" id="tdEndTime">21:00 Asia/Bangkok</span>
+        </div>
+        <div class="td-info-row">
+          <span class="td-info-label">Лимит убытка</span>
+          <span class="td-info-value" id="tdLossLimit">— USDT</span>
+        </div>
+        <div class="td-info-row">
+          <span class="td-info-label">Max плечо</span>
+          <span class="td-info-value" id="tdMaxLeverage">—x</span>
+        </div>
+        <div class="td-readiness" id="tdReadiness">
+          <span class="td-readiness-status">Проверка готовности…</span>
+        </div>
+      </div>
+      <button class="wored-btn td-start-btn" id="tdStartBtn" disabled>Начать день</button>
+      <button class="wored-ghost-btn td-settings-btn" id="tdSettingsBtn">Настройки</button>
+    </div>
+  </div>
+
+  {# ── Settings (collapsible) ── #}
+  <div id="tdSettings" class="td-settings" hidden>
+    <h3>Настройки дня</h3>
+    <div class="td-settings-row">
+      <label class="td-field">
+        <span>Окончание (локальное)</span>
+        <input type="time" id="tdSetEndTime" value="21:00">
+      </label>
+      <label class="td-field">
+        <span>Часовой пояс</span>
+        <input type="text" id="tdSetTimezone" value="Asia/Bangkok" readonly>
+      </label>
+      <label class="td-field">
+        <span>Начальный капитал (USDT)</span>
+        <input type="number" id="tdSetCapital" value="1000" min="1" step="0.01">
+      </label>
+    </div>
+    <div class="td-settings-row">
+      <label class="td-field">
+        <span>Лимит убытка за день (USDT)</span>
+        <input type="number" id="tdSetLossLimit" value="50" min="1" step="0.01">
+      </label>
+      <label class="td-field">
+        <span>Риск на заявку (USDT)</span>
+        <input type="number" id="tdSetRiskPerOrder" value="10" min="1" step="0.01">
+      </label>
+      <label class="td-field">
+        <span>Max плечо</span>
+        <input type="number" id="tdSetMaxLeverage" value="10" min="1" max="200">
+      </label>
+    </div>
+    <button class="wored-btn" id="tdSaveSettingsBtn">Сохранить</button>
+  </div>
+
+  {# ── Active day: timer, two cards, chart, ticket, controls ── #}
+  <div id="tdActive" class="td-section" hidden>
+    <div class="td-active-header">
+      <span class="td-day-date" id="tdDayDate">—</span>
+      <span class="td-day-timer" id="tdDayTimer">—</span>
+      <span class="td-day-freshness" id="tdDayFreshness">—</span>
+      <span class="td-sim-badge">Симуляция</span>
+    </div>
+
+    <div class="td-accounts-row">
+      <div class="td-account-card td-manual td-active-card" id="tdManualActiveCard">
+        <div class="td-card-header">
+          <span class="td-account-label">Ручной счёт</span>
+          <span class="td-account-origin">Manual</span>
+        </div>
+        <div class="td-card-metrics">
+          <div class="td-metric"><span>Equity</span><span class="td-metric-value" id="tdManualEq">—</span></div>
+          <div class="td-metric"><span>Available</span><span class="td-metric-value" id="tdManualAvail">—</span></div>
+          <div class="td-metric"><span>Realized</span><span class="td-metric-value" id="tdManualRealized">—</span></div>
+          <div class="td-metric"><span>Unrealized</span><span class="td-metric-value" id="tdManualUnrealized">—</span></div>
+          <div class="td-metric"><span>Costs</span><span class="td-metric-value" id="tdManualCosts">—</span></div>
+          <div class="td-metric"><span>Loss budget</span><span class="td-metric-value" id="tdManualLossBudget">—</span></div>
+          <div class="td-metric"><span>Positions</span><span class="td-metric-value" id="tdManualPosCount">0</span></div>
+        </div>
+      </div>
+      <div class="td-account-card td-auto td-active-card" id="tdAutoActiveCard">
+        <div class="td-card-header">
+          <span class="td-account-label">Автомат</span>
+          <span class="td-account-origin" id="tdAutoStatus">—</span>
+        </div>
+        <div class="td-card-metrics">
+          <div class="td-metric"><span>Equity</span><span class="td-metric-value" id="tdAutoEq">—</span></div>
+          <div class="td-metric"><span>Available</span><span class="td-metric-value" id="tdAutoAvail">—</span></div>
+          <div class="td-metric"><span>Realized</span><span class="td-metric-value" id="tdAutoRealized">—</span></div>
+          <div class="td-metric"><span>Unrealized</span><span class="td-metric-value" id="tdAutoUnrealized">—</span></div>
+          <div class="td-metric"><span>Costs</span><span class="td-metric-value" id="tdAutoCosts">—</span></div>
+          <div class="td-metric"><span>Loss budget</span><span class="td-metric-value" id="tdAutoLossBudget">—</span></div>
+          <div class="td-metric"><span>Positions</span><span class="td-metric-value" id="tdAutoPosCount">0</span></div>
+        </div>
+      </div>
+    </div>
+
+    {# ── Auto controls ── #}
+    <div class="td-auto-controls" id="tdAutoControls">
+      <button class="wored-btn" id="tdAutoPauseBtn">Приостановить новые входы</button>
+      <button class="wored-ghost-btn" id="tdAutoResumeBtn" hidden>Продолжить автомат</button>
+      <button class="wored-btn wored-btn-danger" id="tdAutoCloseBtn">Закрыть позиции автомата</button>
+      <button class="wored-btn wored-btn-danger" id="tdFinishDayBtn">Завершить день</button>
+    </div>
+
+    {# ── Chart area ── #}
+    <div class="td-chart-area">
+      <div class="wored-chart-container" id="tdChartContainer"></div>
+    </div>
+
+    {# ── Manual ticket (desktop right, mobile bottom sheet) ── #}
+    <div class="td-ticket-area" id="tdTicketArea">
+      <h3>Ручная заявка <span class="td-sim-badge">Симуляция · Ручной счёт</span></h3>
+      <div class="td-ticket-form">
+        <label class="td-field"><span>Инструмент</span>
+          <select id="tdTicketSymbol"><option value="btcusdt">BTCUSDT</option></select>
+        </label>
+        <div class="td-ticket-dir-row">
+          <button class="wored-btn td-dir-btn" id="tdLongBtn" data-dir="long">Long</button>
+          <button class="wored-btn td-dir-btn" id="tdShortBtn" data-dir="short">Short</button>
+        </div>
+        <label class="td-field"><span>Тип</span>
+          <select id="tdTicketType"><option value="market">Market</option><option value="limit">Limit</option></select>
+        </label>
+        <label class="td-field td-limit-price" id="tdLimitPriceField" hidden><span>Цена Limit</span>
+          <input type="number" id="tdTicketPrice" step="0.01">
+        </label>
+        <label class="td-field"><span>Риск (USDT)</span>
+          <input type="number" id="tdTicketRisk" value="10" min="1" step="0.01">
+        </label>
+        <label class="td-field"><span>Стоп (обязателен)</span>
+          <input type="number" id="tdTicketStop" step="0.01" required>
+        </label>
+        <label class="td-field"><span>Цель (опционально)</span>
+          <input type="number" id="tdTicketTP" step="0.01">
+        </label>
+      </div>
+      <div class="td-preview-section" id="tdPreviewSection" hidden>
+        <div class="ticket-preview-row"><span>Количество</span><span id="tdPreviewQty">—</span></div>
+        <div class="ticket-preview-row"><span>Объём</span><span id="tdPreviewNotional">—</span></div>
+        <div class="ticket-preview-row"><span>Комиссия входа</span><span id="tdPreviewEntryFee">—</span></div>
+        <div class="ticket-preview-row"><span>Оценка выхода</span><span id="tdPreviewExitFee">—</span></div>
+        <div class="ticket-preview-row"><span>Break-even</span><span id="tdPreviewBE">—</span></div>
+        <div class="ticket-preview-row"><span>Net at TP</span><span id="tdPreviewNetTP">—</span></div>
+        <div class="ticket-preview-row"><span>Net at SL</span><span id="tdPreviewNetSL">—</span></div>
+        <div class="ticket-preview-row"><span>Ликвидация</span><span id="tdPreviewLiq">—</span></div>
+        <div class="ticket-preview-row"><span>Цена на</span><span id="tdPreviewAsOf">—</span></div>
+      </div>
+      <div class="wored-action-reason" id="tdTicketReason" aria-live="polite"></div>
+      <button class="wored-btn" id="tdPreviewBtn">Проверить</button>
+      <button class="wored-btn" id="tdSubmitBtn" disabled>Отправить заявку · Ручной счёт</button>
+    </div>
+
+    {# ── Positions and events ── #}
+    <div class="td-positions-area">
+      <h3>Позиции и заявки</h3>
+      <div id="tdPositionsList" class="td-positions-list">
+        <div class="wored-empty-state">Нет открытых позиций</div>
+      </div>
+    </div>
+
+    <div class="td-events-area">
+      <h3>События</h3>
+      <div id="tdEventsList" class="td-events-list"></div>
+    </div>
+  </div>
+
+  {# ── Evening report ── #}
+  <div id="tdReport" class="td-section" hidden>
+    <h2>Вечерний отчёт</h2>
+    <div class="td-report-summary" id="tdReportSummary"></div>
+    <div class="td-report-table" id="tdReportTable"></div>
+    <button class="wored-ghost-btn" id="tdExportJsonBtn">Скачать JSON</button>
+    <button class="wored-ghost-btn" id="tdExportHtmlBtn">Скачать HTML</button>
+    <button class="wored-btn" id="tdNextDayBtn">Настроить следующий день</button>
+  </div>
+</div>
+
+<script type="module" src="/static/ui/trading-day.js"></script>
+{% endblock %}
