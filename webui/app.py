@@ -65,7 +65,9 @@ log = logging.getLogger("webui")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 BASE_DIR = Path(__file__).resolve().parent
-TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"), autoescape=True)
+TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+# A46: Enable Jinja autoescape for XSS protection
+TEMPLATES.env.autoescape = True
 
 HTX_REST_URL = os.getenv("HTX_REST_URL", "https://api.huobi.pro")
 DEFAULT_WATCHLIST = "btcusdt,ethusdt"
