@@ -51,7 +51,8 @@ async function flLoad() {
     
     const container = document.getElementById('flPositions');
     if (!data.items.length) {
-      container.innerHTML = '<div class="event-item"><span>Нет позиций</span></div>';
+      // A42: Empty state — distinct from error
+      container.innerHTML = '<div class="wored-empty-state"><p>Нет позиций под выбранный фильтр.</p></div>';
     } else {
       container.innerHTML = data.items.map(p => {
         const pnl = p.realized_pnl !== null ? p.realized_pnl.toFixed(4) : '—';
@@ -75,7 +76,8 @@ async function flLoad() {
       <div class="pill"><span class="pill-label">Total</span><span class="pill-value">${data.total}</span></div>
     `;
   } catch (e) {
-    document.getElementById('flPositions').innerHTML = '<div class="event-item">Error loading positions</div>';
+    // A42: Error state — distinct from empty
+    document.getElementById('flPositions').innerHTML = '<div class="wored-block-error" style="display:block">Нет связи. Проверьте подключение.</div>';
   }
 }
 

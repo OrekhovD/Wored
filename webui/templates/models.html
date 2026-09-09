@@ -1,47 +1,55 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="cockpit">
-  <div class="cockpit-main">
-    <div class="cockpit-symbol">MODEL MANAGEMENT</div>
-    <div class="cockpit-price" id="mmStatus">—</div>
-    <div class="cockpit-delta" id="mmSummary">Загрузка...</div>
+<div class="page model-management-page">
+  <div class="page-header">
+    <h1 class="page-title">Управление моделями</h1>
   </div>
-</div>
 
-<main class="dashboard">
-  <section class="panel panel-chart">
+  <section class="card" aria-label="Статус моделей">
     <div class="panel-header">
       <div>
-        <div class="panel-kicker">Probe</div>
+        <div class="panel-kicker">Диагностика</div>
         <h2>Статус моделей</h2>
       </div>
       <div class="toolbar">
-        <button class="ghost-button is-active" onclick="mmProbe()">Обновить</button>
+        <button class="wored-btn" id="mmProbeBtn">Проверить модели</button>
       </div>
     </div>
-    <div id="mmModels" class="event-list">Загрузка...</div>
+    <div id="mmModels" class="event-list">
+      <div class="wored-empty-state">Нажмите «Проверить модели» для запуска диагностики. Probe не запускается автоматически.</div>
+    </div>
   </section>
-  <aside class="side-column">
-    <section class="panel">
-      <div class="panel-kicker">Summary</div>
-      <h2>Сводка</h2>
-      <div id="mmSummaryGrid" class="pill-grid"></div>
-    </section>
-  </aside>
-</main>
+
+  <section class="card" aria-label="Сводка">
+    <div class="panel-kicker">Сводка</div>
+    <h2>Конфигурация</h2>
+    <div id="mmSummaryGrid" class="pill-grid">
+      <div class="pill"><span class="pill-label">Всего</span><span class="pill-value" id="mmTotal">—</span></div>
+      <div class="pill"><span class="pill-label">Доступны</span><span class="pill-value is-ok" id="mmOk">—</span></div>
+      <div class="pill"><span class="pill-label">Недоступны</span><span class="pill-value is-warn" id="mmFail">—</span></div>
+      <div class="pill"><span class="pill-label">Без ключа</span><span class="pill-value" id="mmNoKey">—</span></div>
+    </div>
+    <p class="wored-action-reason">«Настроена» не означает «Доступна». Проверьте probe для подтверждения.</p>
+  </section>
+</div>
 
 <script>
+// A41/A43: Probe does NOT auto-trigger on page load
 async function mmProbe() {
-  document.getElementById('mmModels').innerHTML = 'Пробую...';
+  const btn = document.getElementById('mmProbeBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Проверка…'; }
+  document.getElementById('mmModels').innerHTML = '<div class="wored-loading-state">Проверяем модели…</div>';
+
   try {
-    const r = await fetch('/api/models/probe');
+    const r = await fetch('/api/models/probe', {credentials: 'same-origin'});
     if (!r.ok) {
-      document.getElementById('mmModels').innerHTML = '<div class="event-item">Auth required or error</div>';
+      if (r.status === 401) { location.href = '/login?next=' + encodeURIComponent(location.pathname); return; }
+      document.getElementById('mmModels').innerHTML = '<div class="wored-empty-state">Ошибка: ' + r.status + '</div>';
       return;
     }
     const data = await r.json();
     const models = data.models || [];
-    
+
     let okCount = 0, failCount = 0, noKeyCount = 0;
     document.getElementById('mmModels').innerHTML = models.map(m => {
       const isOk = m.status === 'ok';
@@ -49,26 +57,32 @@ async function mmProbe() {
       if (isOk) okCount++;
       else if (isNoKey) noKeyCount++;
       else failCount++;
-      
-      const icon = isOk ? '✅' : isNoKey ? '🔑' : '❌';
-      const latency = m.latency_ms ? `${m.latency_ms}ms` : '';
-      return `<div class="event-item">
-        <span class="event-symbol">${icon} ${m.name}</span>
-        <span class="event-detail">${m.provider} | ${m.model_id} | ${m.status} ${latency}</span>
-      </div>`;
+
+      // A41: Show configured vs available separately
+      const configuredLabel = 'Настроена: ' + (m.provider || '—') + '/' + (m.model_id || '—');
+      const availableLabel = isOk ? 'Доступна' : isNoKey ? 'Нет ключа' : 'Недоступна';
+      const availableClass = isOk ? 'ui-text-success' : isNoKey ? 'ui-text-muted' : 'ui-text-danger';
+      const latency = m.latency_ms ? ' · ' + m.latency_ms + 'мс' : '';
+
+      return '<div class="event-item">'
+        + '<span class="event-symbol model-id">' + m.name + '</span>'
+        + '<span class="event-detail">' + configuredLabel + '</span>'
+        + '<span class="event-detail ' + availableClass + '">' + availableLabel + latency + '</span>'
+        + '</div>';
     }).join('');
-    
-    document.getElementById('mmStatus').textContent = okCount + '/' + models.length;
-    document.getElementById('mmSummary').textContent = `OK: ${okCount} | Fail: ${failCount} | No key: ${noKeyCount}`;
-    document.getElementById('mmSummaryGrid').innerHTML = `
-      <div class="pill"><span class="pill-label">OK</span><span class="pill-value is-ok">${okCount}</span></div>
-      <div class="pill"><span class="pill-label">Failed</span><span class="pill-value is-warn">${failCount}</span></div>
-      <div class="pill"><span class="pill-label">No Key</span><span class="pill-value">${noKeyCount}</span></div>
-    `;
+
+    document.getElementById('mmTotal').textContent = models.length;
+    document.getElementById('mmOk').textContent = okCount;
+    document.getElementById('mmFail').textContent = failCount;
+    document.getElementById('mmNoKey').textContent = noKeyCount;
   } catch (e) {
-    document.getElementById('mmModels').innerHTML = '<div class="event-item">Error: ' + e.message + '</div>';
+    document.getElementById('mmModels').innerHTML = '<div class="wored-empty-state">Нет связи. Проверьте подключение.</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Проверить модели'; }
   }
 }
-mmProbe();
+
+// A43: Wire up button — NO auto-trigger
+document.getElementById('mmProbeBtn').addEventListener('click', mmProbe);
 </script>
 {% endblock %}

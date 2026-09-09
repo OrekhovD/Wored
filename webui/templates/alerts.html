@@ -107,10 +107,13 @@
     </table>
   </div>
   {% else %}
-  <div class="empty-state">
-    <div class="empty-state-icon">📡</div>
-    <div class="empty-state-title">Нет алертов</div>
-    <div class="empty-state-copy">Под выбранный фильтр alert history пока пуст. Алерты появятся при spike/drop событиях от collector.</div>
+  {# A42: Empty state — distinct from error. Has reason and relevant action. #}
+  <div class="wored-empty-state">
+    <p>Нет оповещений под выбранный фильтр.</p>
+    <p>Алерты появятся при spike/drop событиях от collector.</p>
+    {% if selected_symbol %}
+    <p><a href="/alerts">Сбросить фильтр «{{ selected_symbol }}»</a></p>
+    {% endif %}
   </div>
   {% endif %}
 </section>

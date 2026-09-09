@@ -173,10 +173,29 @@ function pollPendingForecast(requestId, deadlineAt) {
         resultEl.innerHTML = '<div class="ui-text-success">Прогноз #' + requestId + ' готов. <a href="/predictions/' + requestId + '">Открыть</a></div>';
       } else if (es === 'failed') {
         WORED.clearPendingForecast();
-        resultEl.innerHTML = '<div class="ui-text-danger">Прогноз #' + requestId + ' завершился ошибкой: ' + (data.failure_code || 'нет результата') + '</div>';
+        resultEl.innerHTML = '<div class="ui-text-danger">Прогноз #' + requestId + ' завершился ошибкой: ' + (data.failure_code || 'нет результата') + '</div>'
+          + '<div class="wored-empty-state"><button class="wored-btn" id="forecastRetryBtn">Создать новый расчёт</button></div>';
+        // A25: Retry creates a SEPARATE new request with a new key
+        const retryBtn = document.getElementById('forecastRetryBtn');
+        if (retryBtn) retryBtn.addEventListener('click', () => {
+          // Clear old pending and reset form for new submission
+          WORED.clearPendingForecast();
+          resultEl.innerHTML = '';
+          // Focus the submit button for new request
+          const submitBtn = document.getElementById('forecastSubmit');
+          if (submitBtn) submitBtn.focus();
+        });
       } else if (es === 'expired') {
         WORED.clearPendingForecast();
-        resultEl.innerHTML = '<div class="ui-text-accent">Прогноз #' + requestId + ' истёк</div>';
+        resultEl.innerHTML = '<div class="ui-text-accent">Прогноз #' + requestId + ' истёк</div>'
+          + '<div class="wored-empty-state"><button class="wored-btn" id="forecastRetryBtn">Создать новый расчёт</button></div>';
+        const retryBtn = document.getElementById('forecastRetryBtn');
+        if (retryBtn) retryBtn.addEventListener('click', () => {
+          WORED.clearPendingForecast();
+          resultEl.innerHTML = '';
+          const submitBtn = document.getElementById('forecastSubmit');
+          if (submitBtn) submitBtn.focus();
+        });
       }
     },
     deadlineAt: deadlineMs,

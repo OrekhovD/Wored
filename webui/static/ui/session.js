@@ -47,11 +47,32 @@ const READINESS = {
 
 function renderReadiness(container, data) {
   if (!container) return;
-  const state = data.readiness_state || data.state || 'unknown';
+  let state = data.readiness_state || data.state || 'unknown';
+
+  // A37: Distinguish conditional no_trade from active ban
+  // If there are valid entries AND notradecondition text, it's conditional — not active ban
+  const hasEntries = (data.entries || []).length > 0;
+  const hasNoTradeCondition = !!data.notradecondition;
+  if (state === 'no_trade' && hasEntries && hasNoTradeCondition) {
+    state = 'conditional_no_trade';
+  }
+  // If armed with entries but notradecondition is just a description, don't treat as ban
+  if (state === 'armed_ready' && hasNoTradeCondition && hasEntries) {
+    // Keep armed_ready but add conditional note
+    data._conditional_note = 'Условный запрет: ' + data.notradecondition;
+  }
+
   const config = READINESS[state] || READINESS.unknown;
   let html = '<div class="session-readiness session-readiness-' + state + '">';
   html += '<h3 class="session-readiness-title">' + config.title + '</h3>';
   html += '<p class="session-readiness-text">' + config.text(data) + '</p>';
+  // A37: Show conditional no_trade note if present
+  if (data._conditional_note) {
+    html += '<p class="session-readiness-next">Условие: ' + data._conditional_note + '</p>';
+  }
+  if (data.notradecondition && state !== 'conditional_no_trade' && state !== 'armed_ready') {
+    html += '<p class="session-readiness-next">Условный запрет: ' + data.notradecondition + '</p>';
+  }
   if (data.next_check) {
     html += '<p class="session-readiness-next">Следующая проверка: ' + WORED.fmtTime(data.next_check, { title: false }) + '</p>';
   }

@@ -94,10 +94,10 @@
       </div>
     </section>
     {% else %}
-    <div class="empty-state">
-      <div class="empty-state-icon">📓</div>
-      <div class="empty-state-title">Нет записей</div>
-      <div class="empty-state-copy">AI journal пока пуст. Снимки создаются автоматически по расписанию или вручную через admin action.</div>
+    {# A42: Empty state — distinct from error #}
+    <div class="wored-empty-state">
+      <p>Нет записей в журнале.</p>
+      <p>Снимки создаются автоматически по расписанию или через <a href="/system">администрирование</a>.</p>
     </div>
     {% endif %}
   </section>
