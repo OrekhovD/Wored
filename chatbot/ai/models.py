@@ -220,8 +220,8 @@ MODELS = {
         endpoint=OLLAMA_CLOUD_ENDPOINT,
         api_key_env="OLLAMA_CLOUD_API_KEY",
         tier="analyst",
-        max_tokens=2048,
-        timeout=60.0,
+        max_tokens=8000,
+        timeout=120.0,
     ),
     "premium_ollama": ModelConfig(
         name="Strategist (Ollama Cloud)",
