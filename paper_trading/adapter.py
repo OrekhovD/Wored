@@ -203,7 +203,7 @@ def register_runner(scheduler: Any) -> bool:
         # Register 2s poll cycle
         interval = int(os.getenv("PAPER_ENGINE_INTERVAL_SECONDS", "2"))
         scheduler.add_job(
-            runner.run_cycle,
+            runner.run,
             "interval",
             seconds=interval,
             id="paper_trading_runner",
@@ -214,8 +214,30 @@ def register_runner(scheduler: Any) -> bool:
 
         # Register heartbeat
         hb_interval = int(os.getenv("PAPER_HEARTBEAT_INTERVAL_SECONDS", "5"))
+
+        async def _heartbeat():
+            """Heartbeat wrapper — publish runner status to Redis."""
+            import time
+            import json
+            try:
+                from storage.redis_client import get_redis
+                redis = get_redis()
+                if redis:
+                    data = {
+                        "instance_id": runner.instance_id,
+                        "run_id": runner.run_id,
+                        "completed_at": time.time(),
+                        "last_success": getattr(runner, "_last_poll", 0),
+                        "last_error": getattr(runner, "_last_error", None),
+                        "strategy_version": "baseline_v1",
+                        "entries_blocked": getattr(runner, "_entries_blocked", True),
+                    }
+                    await redis.set(runner.heartbeat_key, json.dumps(data))
+            except Exception:
+                pass
+
         scheduler.add_job(
-            runner.heartbeat,
+            _heartbeat,
             "interval",
             seconds=hb_interval,
             id="paper_trading_heartbeat",
