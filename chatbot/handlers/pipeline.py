@@ -419,19 +419,61 @@ def classify_pipeline_intent(message: str) -> dict | None:
 # ── Safe handlers (ТЗ §7.4 — normalized errors, §8 — templates) ──
 
 async def _handle_start_safe(user_id: int, intent: dict) -> tuple[str, InlineKeyboardMarkup | None]:
-    """ТЗ §8.5 — старт сессии, безопасный ответ. §5 — trade profile support."""
+    """ТЗ §8.5 — старт сессии, безопасный ответ. §5 — trade profile support.
+
+    T06: delegates to paper_trading.adapter when available, falls back to legacy.
+    """
+    budget = intent.get("budget", 100.0)
+    risk = intent.get("risk_mode", "balanced")
+    trade_profile = intent.get("trade_profile")
+
+    # ── Try paper_trading domain service (T06) ──
+    try:
+        from paper_trading.adapter import start_day as pt_start_day, owner_id_from_telegram, get_current_state
+
+        owner_id = owner_id_from_telegram(user_id)
+        existing = await get_current_state(owner_id)
+        if existing.get("day"):
+            # Idempotent — return current session
+            text, _ = await _build_status_response(user_id)
+            return text, _session_nav_kb()
+
+        result = await pt_start_day(
+            owner_id=owner_id,
+            mode="baseline_auto",
+        )
+
+        if result.get("ok"):
+            day_id = result.get("day_id", "")[:8]
+            profile_str = (
+                f"Направление: {trade_profile.get('trade_direction', 'auto') if trade_profile else 'auto'}\n"
+                f"Горизонт: {trade_profile.get('trade_horizon', 'fast') if trade_profile else 'fast'}\n"
+            ) if trade_profile else ""
+            return (
+                f"🚀 <b>Торговый день запущен</b>\n"
+                f"ID: <code>{day_id}</code>\n"
+                f"Режим: baseline_auto\n"
+                f"Риск: {risk}\n"
+                f"Бюджет: {budget:.0f} USDT\n"
+                f"{profile_str}"
+                f"Инструмент: BTCUSDT\n"
+                f"Стратегия: baseline v1 (EMA/ATR)\n"
+                f"Авто: наблюдает рынок, ждёт сигнал",
+                _session_nav_kb()
+            )
+        # If paper_trading failed, fall through to legacy
+        log.info("paper_trading start_day returned %s, falling back to legacy", result.get("error"))
+    except Exception as exc:
+        log.info("paper_trading adapter unavailable, using legacy: %s", exc)
+
+    # ── Legacy session manager (fallback) ──
     try:
         from services.session_manager import create_session, generate_initial_plan, get_active_session
 
         existing = await get_active_session(user_id)
         if existing:
-            # Idempotent — return current session
             text, _ = await _build_status_response(user_id)
             return text, _session_nav_kb()
-
-        budget = intent.get("budget", 100.0)
-        risk = intent.get("risk_mode", "balanced")
-        trade_profile = intent.get("trade_profile")
 
         result = await create_session(
             user_id=user_id, budget_usdt=budget, duration_hours=8,
@@ -460,7 +502,6 @@ async def _handle_start_safe(user_id: int, intent: dict) -> tuple[str, InlineKey
                 _session_nav_kb()
             )
 
-        # ТЗ §8.5 + §5 — шаблон подтверждения с trade profile
         profile_lines = ""
         if trade_profile:
             tp = trade_profile
@@ -588,7 +629,7 @@ async def _build_status_response(user_id: int) -> tuple[str, InlineKeyboardMarku
         elif risk_status == "warning":
             lines.append("⚠️ <b>Риск: warning</b>")
         # 2. Статус сессии
-        lines.append("🎯 <b>Активная сессия</b>")
+        lines.append("🎯 <b>Сессия симуляции</b>")
         lines.append(f"ID: <code>{str(session['id'])[:8]}</code>")
         lines.append(f"Статус: {session['status'].upper()}")
         # Countdown до окончания
@@ -609,6 +650,13 @@ async def _build_status_response(user_id: int) -> tuple[str, InlineKeyboardMarku
         lines.append(f"Режим риска: {session['risk_mode']}")
         lines.append(f"Бюджет: {float(session['initial_budget_usdt']):.0f} USDT")
         lines.append(f"Открыто позиций: {open_count}")
+        from services.execution_status import read, render
+        from storage.redis_client import get_redis
+        try:
+            execution = await read(get_redis(), str(session["id"]))
+        except Exception:
+            execution = None
+        lines.append(render(execution))
         # 3. Агрегированный PnL и риск (ТЗ §8.1 — separate Unrealized/Realized)
         if metrics:
             budget = float(session['initial_budget_usdt'])
@@ -620,12 +668,8 @@ async def _build_status_response(user_id: int) -> tuple[str, InlineKeyboardMarku
         if last_rev:
             lines.append(f"Последняя команда: {last_rev['execution_command']}")
 
-        # ТЗ §7.3 — если > 12 строк, digest + Mini App кнопка
+        # Keep execution evidence and P&L visible; do not replace them with a six-line digest.
         text = "\n".join(lines)
-        if len(lines) > 12:
-            # Digest: только приоритетные поля
-            digest_lines = lines[:6] + ["\n📱 <i>Подробнее — в Mini App</i>"]
-            text = "\n".join(digest_lines)
         return text, _session_nav_kb()
     except Exception as exc:
         log.error("Pipeline status error: %s", exc)
@@ -914,47 +958,22 @@ async def _handle_plan(user_id: int) -> str:
         return ERR_NO_SESSION
 
     from storage.postgres_client import get_pool
+    from services.plan_store import decode
+    from services.plan_presenter import render_plan
     pool = await get_pool()
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction(isolation="repeatable_read", readonly=True):
+        current = await conn.fetchrow("SELECT * FROM trading_sessions WHERE id=$1", str(session["id"]))
+        session = dict(current)
         plan = await conn.fetchrow(
-            "SELECT * FROM session_plans WHERE session_id = $1 ORDER BY version DESC LIMIT 1",
-            str(session["id"]),
-        )
+            "SELECT * FROM session_plans WHERE session_id=$1 AND version=$2",
+            str(session["id"]), session["active_plan_version"])
+        if not plan:
+            return ("⛔ Активная версия плана отсутствует. Новые входы заблокированы. "
+                    "История сохранена; начните новую сессию после завершения текущей.")
         entries = await conn.fetch(
-            "SELECT * FROM planned_entries WHERE session_id = $1 AND plan_version = $2 ORDER BY created_at",
-            str(session["id"]), session["active_plan_version"],
-        )
-
-    if not plan:
-        return "📭 План не найден"
-
-    plan_data = plan["plan_json"]
-    if isinstance(plan_data, str):
-        plan_data = json.loads(plan_data)
-
-    lines = [
-        f"📋 <b>Активный план v{plan['version']}</b>",
-        f"Regime: {plan_data.get('market_regime', '?')}",
-        f"Thesis: {plan_data.get('thesis', '?')}",
-        f"Model: {plan_data.get('model_used', '?')}",
-        "",
-    ]
-
-    for i, e in enumerate(entries):
-        side_emoji = "🟢" if e["side"] == "long" else "🔴"
-        lines.append(f"{side_emoji} Entry #{i+1} ({e['side'].upper()})")
-        lines.append(f"  Zone: {float(e['entry_zone_from']):.2f} - {float(e['entry_zone_to']):.2f}")
-        lines.append(f"  SL: {float(e['stop_loss']):.2f} | TP: {e['take_profit_json']}")
-        lines.append(f"  Lev: {e['recommended_leverage']}x | Share: {float(e['budget_share_pct']):.1f}%")
-        lines.append(f"  Status: {e['status']}")
-        lines.append("")
-
-    # ТЗ §7.3 — если длинный, offer Mini App
-    if len(lines) > 12:
-        url = _miniapp_url()
-        lines.append(f'📱 <a href="{url}">Открыть Mini App</a> для полного плана')
-
-    return "\n".join(lines)
+            "SELECT * FROM planned_entries WHERE session_id=$1 AND plan_version=$2 ORDER BY created_at",
+            str(session["id"]), plan["version"])
+    return render_plan(session, decode(plan["plan_json"]), [dict(e) for e in entries])
 
 
 async def _handle_revision(user_id: int) -> str:

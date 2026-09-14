@@ -58,6 +58,8 @@ services:
       - ./chatbot:/app
       - ./paper_trading:/opt/paper_trading:ro
       - ./config:/config:ro
+    environment:
+      - PYTHONPATH=/app:/opt
     command: python main.py
     restart: unless-stopped
 
@@ -75,6 +77,8 @@ services:
       - ./chatbot:/app
       - ./paper_trading:/opt/paper_trading:ro
       - ./config:/config:ro
+    environment:
+      - PYTHONPATH=/app:/opt
     command: python main.py
     restart: unless-stopped
 
