@@ -67,3 +67,28 @@
 6. Адаптировать Telegram и WebUI
 
 ## T02+ — будут добавлены по мере реализации
+
+## T06 — Адаптеры Telegram и WebUI
+
+### adapter.py
+`paper_trading/adapter.py` — мост между webui/chatbot и доменным сервисом:
+- `get_service()` — singleton PaperTradingService с asyncpg pool
+- `owner_id_from_telegram(user_id)` → `tg:<id>`
+- `owner_id_from_webui(username)` → `webui:<username>`
+- `get_current_state()`, `start_day()`, `submit_manual_order()`, `close_position()`, `pause_auto()`, `resume_auto()`, `finish_day()`, `get_command_status()`
+- `register_runner(scheduler)` — регистрирует PaperTradingRunner в collector scheduler (включается PAPER_ENGINE_ENABLED=true)
+
+### ENV Registry
+14 новых PAPER_* ключей документированы в `docs/ENV-REGISTRY.md`:
+- `PAPER_ENGINE_ENABLED` (default false — runner выключен до cutover)
+- `PAPER_ENGINE_INTERVAL_SECONDS` (2), `PAPER_HEARTBEAT_INTERVAL_SECONDS` (5), `PAPER_HEARTBEAT_STALE_SECONDS` (30)
+- `PAPER_MARKET_MAX_AGE_SECONDS` (5), `PAPER_ORDER_MAX_SPREAD_BPS` (10)
+- `PAPER_SIM_SLIPPAGE_BPS` (2), `PAPER_SIM_LATENCY_MS` (250), `PAPER_SIM_FEE_RATE` (0.0006)
+- `PAPER_MAX_VISIBLE_LIQUIDITY_FRACTION` (0.1)
+- `PAPER_AI_MIN_INTERVAL_SECONDS` (300), `PAPER_AI_PLAN_TTL_SECONDS` (3600)
+- `PAPER_AI_MAX_REQUESTS_PER_DAY` (48), `PAPER_AI_MAX_TOKENS_PER_DAY` (200000)
+
+### Принцип адаптеров
+Старые endpoints (`/api/trading-day/*`, `/api/paper/*`) остаются совместимыми.
+Telegram (`pipeline.py`) и WebUI (`paper_api.py`) вызывают общий `PaperTradingService`
+через `paper_trading.adapter`. Ни один адаптер не рассчитывает fills самостоятельно.

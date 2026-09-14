@@ -50,6 +50,17 @@ Each key has: type, default, required/optional, service consumers, and secrecy l
 | Key | Type | Default | Required | Consumers | Secret |
 |-----|------|---------|----------|-----------|--------|
 | `SIM_ALLOWED_SYMBOLS` | string | `btcusdt` | required | execution_engine | no |
+| `PAPER_MARKET_MODE` | enum (`demo`, `live`) | `live` | required for paper trading | webui | no |
+| `PAPER_MARKET_MAX_AGE_SECONDS` | number, `0 < value <= 60` | `5` | required in `live` mode | webui | no |
+| `HTX_LINEAR_SWAP_BASE_URL` | URL | `https://api.hbdm.com` | required for live paper trading | collector | no |
+| `HTX_PERPETUAL_POLL_SECONDS` | number, `0.5..30` | `2` | required for live paper trading | collector | no |
+| `PAPER_CONTRACTS` | comma-separated contract codes | `BTC-USDT` | required for live paper trading | collector | no |
+
+`PAPER_MARKET_MODE=live` requires Redis keys in the form
+`market:perpetual:htx:BTC-USDT`. A missing, malformed or stale snapshot blocks
+preview, fill and close. The execution path never falls back to the demo price.
+The collector publishes the keys from public HTX USDT-M endpoints without
+using account credentials or order endpoints.
 
 ## Secrets Management
 
@@ -64,3 +75,29 @@ The model registry is mounted from `./config:/config:ro` in all four runtime ser
 For host tests, pass the full path: `LLM_REGISTRY_PATH=D:/WORED_STAGING_20260908/config/provider_registry.json`
 
 Registry entries include: `registry_version`, `verified_at`, `provider`, `model_id`, `endpoint_type`, `enabled`, `cost_class`, `capabilities`, `context_tokens`, `max_output_tokens`, `pricing`, `validation_gate_id`.
+
+## Paper Trading Engine (PAPER_* keys — new in HERMES-ACTIVE-PAPER-TRADING-V1)
+
+These are technical limits, not user-facing risk settings. User risk is stored in DB settings.
+More restrictive user limits always take precedence.
+
+| Key | Type | Default | Required | Consumers | Secret |
+|-----|------|---------|----------|-----------|--------|
+| `PAPER_ENGINE_ENABLED` | bool | `false` | required (cutover) | collector | no |
+| `PAPER_ENGINE_INTERVAL_SECONDS` | int | `2` | optional | collector runner | no |
+| `PAPER_HEARTBEAT_INTERVAL_SECONDS` | int | `5` | optional | collector runner | no |
+| `PAPER_HEARTBEAT_STALE_SECONDS` | int | `30` | optional | webui, chatbot | no |
+| `PAPER_MARKET_MAX_AGE_SECONDS` | int | `5` | optional | collector, webui | no |
+| `PAPER_ORDER_MAX_SPREAD_BPS` | int | `10` | optional | collector, webui | no |
+| `PAPER_SIM_SLIPPAGE_BPS` | int | `2` | optional | collector | no |
+| `PAPER_SIM_LATENCY_MS` | int | `250` | optional | collector | no |
+| `PAPER_SIM_FEE_RATE` | decimal | `0.0006` | optional | collector | no |
+| `PAPER_MAX_VISIBLE_LIQUIDITY_FRACTION` | decimal | `0.1` | optional | collector | no |
+| `PAPER_AI_MIN_INTERVAL_SECONDS` | int | `300` | optional | collector | no |
+| `PAPER_AI_PLAN_TTL_SECONDS` | int | `3600` | optional | collector | no |
+| `PAPER_AI_MAX_REQUESTS_PER_DAY` | int | `48` | optional | collector | no |
+| `PAPER_AI_MAX_TOKENS_PER_DAY` | int | `200000` | optional | collector | no |
+
+Invalid configuration causes explicit readiness failure for the trading subsystem.
+`PAPER_ENGINE_ENABLED=false` keeps the new runner off until cutover; existing
+legacy sessions continue to work unchanged.
