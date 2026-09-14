@@ -1,0 +1,18 @@
+{
+  "description": "Golden partial close: close 0.4 of qty 1 at entry 10000 exit 10100. gross=40, entry_fee_allocated=2.4, exit_fee=2.424, net=35.176, remaining=0.6, unallocated_entry_fee=3.6",
+  "direction": "long",
+  "entry_price": "10000",
+  "exit_price": "10100",
+  "total_quantity": "1",
+  "close_quantity": "0.4",
+  "fee_rate": "0.0006",
+  "expected": {
+    "gross_pnl": "40",
+    "entry_fee_total": "6",
+    "entry_fee_allocated": "2.4",
+    "exit_fee": "2.424",
+    "net_pnl": "35.176",
+    "remaining_quantity": "0.6",
+    "unallocated_entry_fee": "3.6"
+  }
+}

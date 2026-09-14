@@ -1,0 +1,14 @@
+{
+  "description": "Golden short position: entry 10000, exit 9900, qty 1, fee 0.0006. gross=100, entry_fee=6, exit_fee=5.94, net=88.06",
+  "direction": "short",
+  "entry_price": "10000",
+  "exit_price": "9900",
+  "quantity": "1",
+  "fee_rate": "0.0006",
+  "expected": {
+    "gross_pnl": "100",
+    "entry_fee": "6",
+    "exit_fee": "5.94",
+    "net_pnl": "88.06"
+  }
+}

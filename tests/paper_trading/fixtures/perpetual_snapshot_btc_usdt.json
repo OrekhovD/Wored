@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "mode": "live",
+  "venue": "htx",
+  "market_type": "linear-swap",
+  "contract_code": "BTC-USDT",
+  "bid": "100.0",
+  "ask": "100.2",
+  "last": "100.1",
+  "mark": "100.08",
+  "index": "100.05",
+  "funding_rate": "0.0001",
+  "next_funding_at": null,
+  "component_times": {
+    "ticker": null,
+    "index": null,
+    "mark": null,
+    "funding": null
+  },
+  "contract_size": "0.001",
+  "price_tick": "0.1",
+  "quantity_step": "0.001",
+  "source_at": null,
+  "received_at": null,
+  "source": "htx-public-api",
+  "quality": "live",
+  "_note": "component_times.source_at.received_at are null placeholders — the test loader fills them with current UTC timestamps before use."
+}
