@@ -433,7 +433,7 @@ PLAN_GENERATION_PROMPT = """Ты — аналитик симуляционной
  }}]
 }}
 Правила:
-- Не более 3 заявок. no_trade с entries=[] допустим в ЛЮБОМ режиме риска.
+- Не более 3 заявок. no_trade с entries=[] допустим в defensive и balanced. В aggressive — ОБЯЗАТЕЛЬНО минимум 1 entry.
 - LONG: SL < invalidation < zone_from <= zone_to < TP1 < TP2.
 - SHORT: TP2 < TP1 < zone_from <= zone_to < invalidation < SL.
 - Плечо только 10, 25, 50, 100. Горизонт НЕ меняет разрешённое плечо.
