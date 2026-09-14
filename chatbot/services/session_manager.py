@@ -511,7 +511,7 @@ async def generate_initial_plan(session_id: str) -> dict:
                 client.chat.completions.create(
                     model=cfg.model_id,
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=8000,
+                    max_tokens=4000,
                     temperature=0.3,
                 ),
                 timeout=cfg.timeout,
@@ -679,7 +679,7 @@ async def hourly_revision(session_id: str) -> dict:
                 client.chat.completions.create(
                     model=cfg.model_id,
                     messages=[{"role": "user", "content": prompt}],
-                    max_tokens=8000,
+                    max_tokens=4000,
                     temperature=0.2,
                 ),
                 timeout=cfg.timeout,
