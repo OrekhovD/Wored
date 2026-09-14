@@ -394,6 +394,21 @@ class Position:
     funding_cashflow: Decimal = field(default_factory=lambda: ZERO)
     schema_version: int = SCHEMA_VERSION
 
+    @property
+    def quantity(self) -> Decimal:
+        """Alias for qty — used by execution module."""
+        return self.qty
+
+    @property
+    def direction(self) -> str:
+        """Alias for side — returns 'long' or 'short' string."""
+        return self.side.value if isinstance(self.side, PositionSide) else str(self.side)
+
+    @property
+    def avg_entry(self) -> Decimal:
+        """Alias for avg_entry_price."""
+        return self.avg_entry_price
+
 
 # ---------------------------------------------------------------------------
 # Journal
