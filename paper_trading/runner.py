@@ -171,10 +171,26 @@ class PaperTradingRunner:
         # Lease fencing token — monotonically increasing
         self._fence_token: int = 0
         self._next_fence_token: int = 1
+        self._init_state()
 
-        # State
-        self._positions: Dict[UUID, Position] = {}        # position_id → Position
-        self._open_orders: Dict[UUID, Order] = {}          # order_id → Order
+    @classmethod
+    def from_env(cls, **kwargs):
+        """Create runner from environment variables."""
+        import os
+        strategy = BaselineV1Strategy()
+        poll = float(os.getenv("PAPER_ENGINE_INTERVAL_SECONDS", "2"))
+        hb = float(os.getenv("PAPER_HEARTBEAT_INTERVAL_SECONDS", "5"))
+        return cls(
+            strategy=strategy,
+            poll_interval=poll,
+            heartbeat_interval=hb,
+            **kwargs,
+        )
+
+    # ── State (initialized after from_env creates the instance) ──
+    def _init_state(self):
+        self._positions: Dict[UUID, Position] = {}
+        self._open_orders: Dict[UUID, Order] = {}
         self._pending_commands: List[Command] = []
         self._last_signal: Optional[StrategySignal] = None
         self._last_1m_bar_ts: Optional[str] = None
@@ -185,8 +201,6 @@ class PaperTradingRunner:
         self._last_poll: float = 0.0
         self._last_error: Optional[str] = None
         self._last_decision: Optional[Decision] = None
-
-        # Control
         self._stop_event = asyncio.Event()
 
     # ── Fence token ──
