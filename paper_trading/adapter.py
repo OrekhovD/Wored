@@ -203,7 +203,7 @@ def register_runner(scheduler: Any) -> bool:
         # Register 2s poll cycle
         interval = int(os.getenv("PAPER_ENGINE_INTERVAL_SECONDS", "2"))
         scheduler.add_job(
-            runner.run,
+            runner.run_cycle,
             "interval",
             seconds=interval,
             id="paper_trading_runner",

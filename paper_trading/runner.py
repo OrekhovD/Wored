@@ -302,6 +302,22 @@ class PaperTradingRunner:
 
     # ── Main loop ──
 
+    async def run_cycle(self) -> None:
+        """Single poll cycle — called by APScheduler every 2s."""
+        now = time.time()
+        self._last_poll = now
+        try:
+            # 1. SL/TP check (always, even if entries blocked)
+            await self._check_sl_tp(now)
+            # 2. Process pending commands (close, cancel, etc.)
+            await self._process_commands(now)
+            # 3. Evaluate signals on new 1m close (only if not blocked)
+            if not self._entries_blocked and self._recovered:
+                await self._evaluate_signals(now)
+        except Exception as exc:
+            self._last_error = str(exc)
+            log.warning("Runner cycle error: %s", exc)
+
     async def run(self) -> None:
         """Main poll loop.  Runs until :meth:`stop` is called.
 
@@ -316,19 +332,8 @@ class PaperTradingRunner:
         try:
             while not self._stop_event.is_set():
                 now = time.time()
-                self._last_poll = now
-
-                # 1. SL/TP check (always, even if entries blocked)
-                await self._check_sl_tp(now)
-
-                # 2. Process pending commands (close, cancel, etc.)
-                await self._process_commands(now)
-
-                # 3. Evaluate signals on new 1m close (only if not blocked)
-                if not self._entries_blocked and self._recovered:
-                    await self._evaluate_signals(now)
-
-                # 4. Heartbeat
+                await self.run_cycle()
+                # Heartbeat
                 if (now - last_heartbeat) >= self.heartbeat_interval:
                     await self._send_heartbeat(now)
                     last_heartbeat = now
