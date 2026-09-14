@@ -6,6 +6,7 @@ import os
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from htx.websocket import ws_listen
+from htx.perpetual_market import publish_perpetual_markets
 from indicators.calculator import calculate_indicators
 from indicators.snapshot import publish_market_contexts
 from journal.writer import write_entry
@@ -69,7 +70,10 @@ async def main():
     except Exception as exc:
         log.warning("Pipeline tables init (collector): %s", exc)
 
-    asyncio.create_task(ws_listen())
+    background_tasks = [
+        asyncio.create_task(ws_listen(), name="htx-spot-websocket"),
+        asyncio.create_task(publish_perpetual_markets(), name="htx-perpetual-market"),
+    ]
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(record_ai_journal, "interval", minutes=15, id="record_ai_journal")
@@ -80,6 +84,16 @@ async def main():
     # Daily Pipeline v2 jobs (ТЗ раздел 11)
     register_pipeline_jobs(scheduler)
 
+    # Paper Trading Engine (HERMES-ACTIVE-PAPER-TRADING-V1)
+    try:
+        from paper_trading.adapter import register_runner as register_paper_runner
+        if register_paper_runner(scheduler):
+            log.info("Paper trading runner registered")
+        else:
+            log.info("Paper trading runner not registered (disabled or error)")
+    except Exception as exc:
+        log.warning("Paper trading runner registration failed: %s", exc)
+
     from storage.postgres_client import cleanup_old_tickers
 
     scheduler.add_job(cleanup_old_tickers, "interval", hours=6, id="cleanup_tickers", kwargs={"hours": 24})
@@ -89,6 +103,9 @@ async def main():
 
     async def shutdown():
         scheduler.shutdown(wait=False)
+        for task in background_tasks:
+            task.cancel()
+        await asyncio.gather(*background_tasks, return_exceptions=True)
         if pool:
             await pool.close()
         log.info("Graceful shutdown complete.")

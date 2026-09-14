@@ -11,7 +11,7 @@ services:
       - '127.0.0.1:5432:5432'
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -37,8 +37,10 @@ services:
       - ./collector:/app
       - ./chatbot:/chatbot:ro
       - ./webui:/webui:ro
+      - ./config:/config:ro
+      - ./paper_trading:/paper_trading:ro
     environment:
-      - PYTHONPATH=/app:/chatbot:/webui
+      - PYTHONPATH=/app:/chatbot:/webui:/paper_trading
     command: python main.py
     restart: unless-stopped
 
@@ -54,6 +56,8 @@ services:
       - .env
     volumes:
       - ./chatbot:/app
+      - ./paper_trading:/paper_trading:ro
+      - ./config:/config:ro
     command: python main.py
     restart: unless-stopped
 
@@ -69,6 +73,8 @@ services:
       - .env.wored
     volumes:
       - ./chatbot:/app
+      - ./paper_trading:/paper_trading:ro
+      - ./config:/config:ro
     command: python main.py
     restart: unless-stopped
 
@@ -87,8 +93,10 @@ services:
     volumes:
       - ./webui:/app
       - ./chatbot:/chatbot:ro
+      - ./paper_trading:/paper_trading:ro
+      - ./config:/config:ro
     environment:
-      - PYTHONPATH=/app:/chatbot
+      - PYTHONPATH=/app:/chatbot:/paper_trading
     command: uvicorn app:app --host 0.0.0.0 --port 8000
     ports:
       - '127.0.0.1:${WEBUI_PORT:-8080}:8000'
