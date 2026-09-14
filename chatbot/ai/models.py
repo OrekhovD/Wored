@@ -221,7 +221,7 @@ MODELS = {
         api_key_env="OLLAMA_CLOUD_API_KEY",
         tier="analyst",
         max_tokens=8000,
-        timeout=120.0,
+        timeout=180.0,
     ),
     "premium_ollama": ModelConfig(
         name="Strategist (Ollama Cloud)",
@@ -408,7 +408,7 @@ MODELS = {
 
 
 WORKER_MODEL_CHAIN = ["worker_ollama", "omniroute_execution"]
-ANALYST_MODEL_CHAIN = ["analyst_ollama", "omniroute_reasoning", "analyst", "analyst_qwen27b", "analyst_qwen_extra", "analyst_deepseek", "analyst_deepseek_or", "analyst_glm", "analyst_minimax_m3", "analyst_minimax_m27", "analyst_kimi", "analyst_glm_nim", "analyst_mistral_medium", "analyst_mistral_small", "analyst_qwen35_nim", "analyst_qwen_next", "analyst_mistral_nemotron"]
+ANALYST_MODEL_CHAIN = ["analyst_ollama", "omniroute_reasoning", "analyst_deepseek_or"]
 PREMIUM_MODEL_CHAIN = ["premium_ollama", "omniroute_reasoning", "premium", "premium_qwen35b", "analyst_deepseek_or", "premium_glm", "premium_nemotron_ultra", "premium_nemotron_super", "premium_nemotron_49b", "premium_nemotron_49b_v15", "premium_mistral_large", "premium_dracarys"]
 
 
