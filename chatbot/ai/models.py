@@ -216,12 +216,12 @@ MODELS = {
     ),
     "analyst_ollama": ModelConfig(
         name="Analyst (Ollama Cloud)",
-        model_id=os.getenv("OLLAMA_CHATBOT_ANALYST_MODEL", "minimax-m3"),
+        model_id=os.getenv("OLLAMA_CHATBOT_ANALYST_MODEL", "deepseek-v4-flash"),
         endpoint=OLLAMA_CLOUD_ENDPOINT,
         api_key_env="OLLAMA_CLOUD_API_KEY",
         tier="analyst",
         max_tokens=8000,
-        timeout=180.0,
+        timeout=120.0,
     ),
     "premium_ollama": ModelConfig(
         name="Strategist (Ollama Cloud)",
