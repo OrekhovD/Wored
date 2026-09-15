@@ -1,0 +1,457 @@
+[
+  {
+    "timestamp": "2026-09-15T07:15:47.977953+00:00",
+    "checks": {
+      "healthz": {
+        "alive": true
+      },
+      "readyz": {
+        "generated_at": "2026-09-15T07:15:49.775641+00:00",
+        "redis": true,
+        "postgres": true,
+        "collector_feed": true,
+        "last_journal_at": "2026-09-14T17:31:39.345824+00:00",
+        "last_journal_age_minutes": 824.2,
+        "forecast_worker": true,
+        "ready": true
+      },
+      "heartbeat": {
+        "instance_id": "d8b06ddb-a05",
+        "age_seconds": 1.9,
+        "last_error": null,
+        "entries_blocked": true,
+        "strategy_version": "baseline_v1"
+      },
+      "feed": {
+        "bid": "77218.5",
+        "ask": "77218.6",
+        "last": "77212.7",
+        "funding_rate": "0.000100000000000000",
+        "received_at": "2026-09-15T07:15:48.73041"
+      },
+      "paper_trading": {
+        "day_state": "idle",
+        "day_id": "68338058-914",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "positions": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "positions": 0
+          }
+        ],
+        "next_action": "start"
+      },
+      "engine_enabled": "true",
+      "containers": {
+        "htx_trading_bot_webui": "Up 8 minutes (healthy)",
+        "htx_trading_bot_chatbot": "Up 15 minutes",
+        "htx_trading_bot_collector": "Up 14 hours",
+        "htx_trading_bot_chatbot_wored": "Up 21 hours",
+        "htx_trading_bot_postgres": "Up 22 hours (healthy)",
+        "htx_trading_bot_redis": "Up 22 hours",
+        "htx_trading_bot_tunnel": "Up 22 hours"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-09-15T07:24:03.737192+00:00",
+    "checks": {
+      "heartbeat_age": 1.9,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "77253.5",
+      "feed_ask": "77253.6",
+      "feed_last": "77249.7",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up 16 minutes (healthy)",
+      "chatbot": "Up 23 minutes",
+      "collector": "Up 14 hours",
+      "chatbot_wored": "Up 21 hours",
+      "postgres": "Up 22 hours (healthy)",
+      "redis": "Up 22 hours",
+      "tunnel": "Up 23 hours"
+    }
+  },
+  {
+    "timestamp": "2026-09-15T07:30:04.577127+00:00",
+    "checks": {
+      "heartbeat_age": 2.8,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "77253.5",
+      "feed_ask": "77253.6",
+      "feed_last": "77253.6",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up 22 minutes (healthy)",
+      "chatbot": "Up 29 minutes",
+      "collector": "Up 14 hours",
+      "chatbot_wored": "Up 21 hours",
+      "postgres": "Up 22 hours (healthy)",
+      "redis": "Up 22 hours",
+      "tunnel": "Up 23 hours"
+    }
+  },
+  {
+    "timestamp": "2026-09-15T07:36:05.071979+00:00",
+    "checks": {
+      "heartbeat_age": 3.3,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "77101.2",
+      "feed_ask": "77101.3",
+      "feed_last": "77101.2",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up 28 minutes (healthy)",
+      "chatbot": "Up 35 minutes",
+      "collector": "Up 14 hours",
+      "chatbot_wored": "Up 21 hours",
+      "postgres": "Up 22 hours (healthy)",
+      "redis": "Up 22 hours",
+      "tunnel": "Up 23 hours"
+    }
+  },
+  {
+    "timestamp": "2026-09-15T07:42:05.234654+00:00",
+    "checks": {
+      "heartbeat_age": 8.4,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "77000",
+      "feed_ask": "77000.1",
+      "feed_last": "77000",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up 34 minutes (healthy)",
+      "chatbot": "Up 41 minutes",
+      "collector": "Up 14 hours",
+      "chatbot_wored": "Up 21 hours",
+      "postgres": "Up 22 hours (healthy)",
+      "redis": "Up 22 hours",
+      "tunnel": "Up 23 hours"
+    }
+  },
+  {
+    "timestamp": "2026-09-15T07:48:05.569304+00:00",
+    "checks": {
+      "heartbeat_age": 3.7,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "77002.7",
+      "feed_ask": "77002.8",
+      "feed_last": "77002.8",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up 40 minutes (healthy)",
+      "chatbot": "Up 47 minutes",
+      "collector": "Up 14 hours",
+      "chatbot_wored": "Up 22 hours",
+      "postgres": "Up 23 hours (healthy)",
+      "redis": "Up 23 hours",
+      "tunnel": "Up 23 hours"
+    }
+  },
+  {
+    "timestamp": "2026-09-15T07:54:06.129421+00:00",
+    "checks": {
+      "heartbeat_age": 4.3,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "76875.1",
+      "feed_ask": "76875.2",
+      "feed_last": "76875.2",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up 46 minutes (unhealthy)",
+      "chatbot": "Up 53 minutes",
+      "collector": "Up 14 hours",
+      "chatbot_wored": "Up 22 hours",
+      "postgres": "Up 23 hours (healthy)",
+      "redis": "Up 23 hours",
+      "tunnel": "Up 23 hours"
+    }
+  },
+  {
+    "timestamp": "2026-09-15T08:00:06.524526+00:00",
+    "checks": {
+      "heartbeat_age": 4.7,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "76906.7",
+      "feed_ask": "76906.8",
+      "feed_last": "76899.9",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up 52 minutes (healthy)",
+      "chatbot": "Up 59 minutes",
+      "collector": "Up 14 hours",
+      "chatbot_wored": "Up 22 hours",
+      "postgres": "Up 23 hours (healthy)",
+      "redis": "Up 23 hours",
+      "tunnel": "Up 23 hours"
+    }
+  },
+  {
+    "timestamp": "2026-09-15T08:06:07.190741+00:00",
+    "checks": {
+      "heartbeat_age": 5.5,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "76811.4",
+      "feed_ask": "76811.5",
+      "feed_last": "76811.5",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up 58 minutes (unhealthy)",
+      "chatbot": "Up About an hour",
+      "collector": "Up 14 hours",
+      "chatbot_wored": "Up 22 hours",
+      "postgres": "Up 23 hours (healthy)",
+      "redis": "Up 23 hours",
+      "tunnel": "Up 23 hours"
+    }
+  },
+  {
+    "timestamp": "2026-09-15T08:12:07.410728+00:00",
+    "checks": {
+      "heartbeat_age": 5.7,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "76691.9",
+      "feed_ask": "76692",
+      "feed_last": "76703.9",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up About an hour (healthy)",
+      "chatbot": "Up About an hour",
+      "collector": "Up 14 hours",
+      "chatbot_wored": "Up 22 hours",
+      "postgres": "Up 23 hours (healthy)",
+      "redis": "Up 23 hours",
+      "tunnel": "Up 23 hours"
+    }
+  },
+  {
+    "timestamp": "2026-09-15T08:18:07.798359+00:00",
+    "checks": {
+      "heartbeat_age": 0.6,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "76705.1",
+      "feed_ask": "76705.2",
+      "feed_last": "76705.1",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up About an hour (unhealthy)",
+      "chatbot": "Up About an hour",
+      "collector": "Up 15 hours",
+      "chatbot_wored": "Up 22 hours",
+      "postgres": "Up 23 hours (healthy)",
+      "redis": "Up 23 hours",
+      "tunnel": "Up 23 hours"
+    }
+  },
+  {
+    "timestamp": "2026-09-15T08:24:08.501978+00:00",
+    "checks": {
+      "heartbeat_age": 1.8,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "76822.2",
+      "feed_ask": "76822.3",
+      "feed_last": "76817.9",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up About an hour (unhealthy)",
+      "chatbot": "Up About an hour",
+      "collector": "Up 15 hours",
+      "chatbot_wored": "Up 22 hours",
+      "postgres": "Up 23 hours (healthy)",
+      "redis": "Up 23 hours",
+      "tunnel": "Up 24 hours"
+    }
+  },
+  {
+    "timestamp": "2026-09-15T08:30:08.480815+00:00",
+    "checks": {
+      "heartbeat_age": 1.6,
+      "heartbeat_error": null,
+      "entries_blocked": true,
+      "feed_bid": "76827.1",
+      "feed_ask": "76827.2",
+      "feed_last": "76827.2",
+      "paper_trading": {
+        "day_state": "DayState.idle",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "webui": "Up About an hour (unhealthy)",
+      "chatbot": "Up About an hour",
+      "collector": "Up 15 hours",
+      "chatbot_wored": "Up 22 hours",
+      "postgres": "Up 23 hours (healthy)",
+      "redis": "Up 23 hours",
+      "tunnel": "Up 24 hours"
+    }
+  }
+]
