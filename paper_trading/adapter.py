@@ -277,10 +277,13 @@ def register_runner(scheduler: Any) -> bool:
             else:
                 log.warning("Paper trading: repository wired but no recovery_store")
 
-        # Schedule wiring + recovery as a one-shot job
+        # Schedule wiring + recovery as a one-shot job (2s in future to avoid missed run)
+        from datetime import datetime as _dt, timedelta as _td
+        _run_at = _dt.now() + _td(seconds=2)
         scheduler.add_job(
             _wire_and_recover,
             "date",
+            run_date=_run_at,
             id="paper_trading_wire_and_recover",
             replace_existing=True,
         )
