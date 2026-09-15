@@ -257,6 +257,30 @@ class PaperRepository:
             )
         return [_row_to_account(r) for r in rows]
 
+    async def get_account_by_kind(
+        self,
+        owner_id: UUID,
+        kind: AccountKind,
+    ) -> Optional[Account]:
+        """Get the account for an owner with the given kind, or None."""
+        kind_val = kind.value if isinstance(kind, AccountKind) else str(kind)
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM paper_v2_accounts WHERE owner_id = $1 AND kind = $2",
+                str(owner_id),
+                kind_val,
+            )
+        return _row_to_account(row) if row else None
+
+    async def get_account_balance(self, account_id: UUID) -> Decimal:
+        """Return the current balance (sum of postings) for an account."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COALESCE(SUM(amount), 0) AS balance FROM paper_v2_postings WHERE account_id = $1",
+                str(account_id),
+            )
+        return Decimal(row["balance"]) if row else Decimal("0")
+
     # ------------------------------------------------------------------
     # Trading day
     # ------------------------------------------------------------------
@@ -708,6 +732,10 @@ class PaperRepository:
             )
         return _row_to_position(row) if row else None
 
+    async def get_position_by_id(self, position_id: UUID) -> Optional[Position]:
+        """Get a position by its ID (alias for get_position)."""
+        return await self.get_position(position_id)
+
     async def get_open_positions(self, account_id: UUID) -> List[Position]:
         """Get all open positions for an account."""
         async with self._pool.acquire() as conn:
@@ -720,6 +748,10 @@ class PaperRepository:
                 str(account_id),
             )
         return [_row_to_position(r) for r in rows]
+
+    async def get_open_positions_by_account(self, account_id: UUID) -> List[Position]:
+        """Get all open positions for an account (alias for get_open_positions)."""
+        return await self.get_open_positions(account_id)
 
     async def update_position(
         self,

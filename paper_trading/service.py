@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from paper_trading.contracts import (
-    Account, Command,
+    Account, AccountKind, Command,
     Position, ReasonCode, StatusDTO, TradingDay,
 )
 from paper_trading.repository import PaperRepository
@@ -52,18 +52,17 @@ class PaperTradingService:
     async def start_day(self, req: StartDayRequest) -> Dict[str, Any]:
         """Start a new trading day for both manual and auto accounts."""
         # Ensure owner exists
-        await self.repo.create_owner(req.owner_id)
+        try:
+            await self.repo.create_owner(req.owner_id, display_name=f"owner-{req.owner_id[:8]}")
+        except Exception:
+            pass  # owner already exists is OK
 
         # Ensure both accounts exist with default capital
         settings = {**DEFAULT_SETTINGS, **(req.settings or {})}
         capital = Decimal(settings["opening_capital"])
 
-        manual = await self.repo.get_or_create_account(
-            req.owner_id, "manual", "USDT", capital
-        )
-        auto = await self.repo.get_or_create_account(
-            req.owner_id, "auto", "USDT", capital
-        )
+        manual = await self._get_or_create_account(req.owner_id, "manual", "USDT", capital)
+        auto = await self._get_or_create_account(req.owner_id, "auto", "USDT", capital)
 
         # Check no unclosed day exists
         existing = await self.repo.get_active_day(req.owner_id)
@@ -117,6 +116,26 @@ class PaperTradingService:
             "end_at": end_utc.isoformat(),
             "commands": [str(cmd_manual), str(cmd_auto)],
         }
+
+    async def _get_or_create_account(self, owner_id: str, kind: str, currency: str, opening_deposit: Decimal):
+        """Get or create an account for an owner."""
+        from uuid import uuid4, UUID
+
+        owner_uuid = UUID(owner_id) if isinstance(owner_id, str) else owner_id
+        kind_enum = AccountKind(kind) if isinstance(kind, str) else kind
+
+        try:
+            account_id = uuid4()
+            return await self.repo.create_account(
+                account_id=account_id,
+                owner_id=owner_uuid,
+                kind=kind_enum,
+                currency=currency,
+                opening_deposit=opening_deposit,
+            )
+        except Exception:
+            # Account already exists — find it
+            return await self.get_account_by_kind(owner_uuid, kind_enum)
 
     async def get_current_state(self, owner_id: str) -> Dict[str, Any]:
         """Get current trading day state with both accounts."""
@@ -299,3 +318,32 @@ class PaperTradingService:
             "result": cmd.result,
             "error": cmd.error,
         }
+
+    # ------------------------------------------------------------------
+    # Delegate methods (thin wrappers over repository)
+    # ------------------------------------------------------------------
+
+    async def get_account_by_kind(self, owner_id, kind) -> Optional[Account]:
+        """Get the account for an owner with the given kind, or None."""
+        from uuid import UUID
+        owner_uuid = UUID(owner_id) if isinstance(owner_id, str) else owner_id
+        kind_enum = AccountKind(kind) if isinstance(kind, str) else kind
+        return await self.repo.get_account_by_kind(owner_uuid, kind_enum)
+
+    async def get_open_positions_by_account(self, account_id) -> List[Position]:
+        """Get all open positions for an account."""
+        from uuid import UUID
+        acct_uuid = UUID(account_id) if isinstance(account_id, str) else account_id
+        return await self.repo.get_open_positions_by_account(acct_uuid)
+
+    async def get_account_balance(self, account_id) -> Decimal:
+        """Return the current balance (sum of postings) for an account."""
+        from uuid import UUID
+        acct_uuid = UUID(account_id) if isinstance(account_id, str) else account_id
+        return await self.repo.get_account_balance(acct_uuid)
+
+    async def get_position_by_id(self, position_id) -> Optional[Position]:
+        """Get a position by its ID, or None."""
+        from uuid import UUID
+        pos_uuid = UUID(position_id) if isinstance(position_id, str) else position_id
+        return await self.repo.get_position_by_id(pos_uuid)
