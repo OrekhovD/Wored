@@ -406,30 +406,35 @@ class PaperTradingRunner:
         poll = float(os.getenv("PAPER_ENGINE_INTERVAL_SECONDS", "2"))
         hb = float(os.getenv("PAPER_HEARTBEAT_INTERVAL_SECONDS", "5"))
 
-        # Try to get PostgreSQL pool and create repository + stores.
-        # We can't await here (from_env is sync), so we pass the pool
-        # factory and wire it later in _wire_dependencies.
+        # Extract factory references (not passed to __init__)
+        pg_pool_factory = None
+        redis_factory = None
         try:
             from storage.postgres_client import get_pool as _get_pg_pool
-
-            kwargs.setdefault("_pg_pool_factory", _get_pg_pool)
+            pg_pool_factory = _get_pg_pool
         except ImportError:
             log.debug("postgres_client not available — no DB dependencies")
 
-        # Try to get Redis client factory
         try:
             from storage.redis_client import get_redis as _get_redis
-
-            kwargs.setdefault("_redis_factory", _get_redis)
+            redis_factory = _get_redis
         except ImportError:
             log.debug("redis_client not available — no market data source")
 
-        return cls(
+        # Remove any factory kwargs that shouldn't go to __init__
+        kwargs.pop("_pg_pool_factory", None)
+        kwargs.pop("_redis_factory", None)
+
+        instance = cls(
             strategy=strategy,
             poll_interval=poll,
             heartbeat_interval=hb,
             **kwargs,
         )
+        # Store factories on instance for _wire_dependencies to use
+        instance._pg_pool_factory = pg_pool_factory  # type: ignore[attr-defined]
+        instance._redis_factory = redis_factory  # type: ignore[attr-defined]
+        return instance
 
     def _wire_dependencies(
         self,

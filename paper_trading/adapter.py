@@ -224,22 +224,47 @@ def register_runner(scheduler: Any) -> bool:
         async def _wire_and_recover():
             """Wire PostgreSQL + Redis dependencies, then recover."""
             try:
-                # Get PostgreSQL pool
-                from storage.postgres_client import get_pool as _get_pool
-                pool = await _get_pool()
-                if pool is not None:
-                    runner._wire_dependencies(pg_pool=pool)
-                    log.info("Paper trading: PostgreSQL dependencies wired")
+                # Get PostgreSQL pool using factory stored on runner
+                if hasattr(runner, '_pg_pool_factory') and runner._pg_pool_factory is not None:
+                    pool = await runner._pg_pool_factory()
+                    if pool is not None:
+                        runner._wire_dependencies(pg_pool=pool)
+                        log.info("Paper trading: PostgreSQL dependencies wired")
+                    else:
+                        log.warning("Paper trading: PostgreSQL pool is None")
+                else:
+                    # Fallback: try direct import
+                    try:
+                        from storage.postgres_client import get_pool as _get_pool
+                        pool = await _get_pool()
+                        if pool is not None:
+                            runner._wire_dependencies(pg_pool=pool)
+                            log.info("Paper trading: PostgreSQL dependencies wired (fallback)")
+                    except Exception as exc:
+                        log.warning("Paper trading: failed to wire PostgreSQL: %s", exc)
             except Exception as exc:
                 log.warning("Paper trading: failed to wire PostgreSQL: %s", exc)
 
             try:
-                # Get Redis client
-                from storage.redis_client import get_redis as _get_redis
-                redis = await _get_redis() if hasattr(_get_redis(), '__await__') else _get_redis()
-                if redis is not None:
-                    runner._wire_dependencies(redis_client=redis)
-                    log.info("Paper trading: Redis market data source wired")
+                if hasattr(runner, '_redis_factory') and runner._redis_factory is not None:
+                    redis = runner._redis_factory()
+                    # redis may be a coroutine if get_redis is async
+                    if hasattr(redis, '__await__'):
+                        redis = await redis
+                    if redis is not None:
+                        runner._wire_dependencies(redis_client=redis)
+                        log.info("Paper trading: Redis market data source wired")
+                else:
+                    try:
+                        from storage.redis_client import get_redis as _get_redis
+                        redis = _get_redis()
+                        if hasattr(redis, '__await__'):
+                            redis = await redis
+                        if redis is not None:
+                            runner._wire_dependencies(redis_client=redis)
+                            log.info("Paper trading: Redis wired (fallback)")
+                    except Exception as exc:
+                        log.warning("Paper trading: failed to wire Redis: %s", exc)
             except Exception as exc:
                 log.warning("Paper trading: failed to wire Redis: %s", exc)
 
@@ -248,10 +273,8 @@ def register_runner(scheduler: Any) -> bool:
                 report = await runner.recover()
                 log.info("Paper trading recovery: %s", report)
             elif runner.repository is None:
-                # No DB — can't recover, entries stay blocked
                 log.warning("Paper trading: no DB pool — entries blocked, runner in degraded mode")
             else:
-                # Has repository but no recovery_store — shouldn't happen after wiring
                 log.warning("Paper trading: repository wired but no recovery_store")
 
         # Schedule wiring + recovery as a one-shot job
