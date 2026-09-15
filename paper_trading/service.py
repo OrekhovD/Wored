@@ -70,7 +70,7 @@ class PaperTradingService:
             return {
                 "ok": False,
                 "error": "day_already_active",
-                "day_id": str(existing.id),
+                "day_id": str(existing.day_id),
             }
 
         # Create new day
@@ -78,40 +78,46 @@ class PaperTradingService:
         # Compute end_utc from end_time_local + timezone
         # For v1, use 8h from start as approximation
         from datetime import timedelta
+        from uuid import uuid4, UUID
         end_utc = now + timedelta(hours=8)
 
         day = await self.repo.create_day(
-            owner_id=req.owner_id,
+            day_id=uuid4(),
+            owner_id=UUID(req.owner_id) if isinstance(req.owner_id, str) else req.owner_id,
             timezone=req.timezone,
             start_utc=now,
             end_utc=end_utc,
-            settings=settings,
+            settings_snapshot=settings,
             strategy_version=req.strategy_version,
         )
 
         # Submit start commands for both accounts
+        from uuid import uuid4 as _u4
+        from paper_trading.contracts import CommandType
         cmd_manual = await self.repo.submit_command(
-            owner_id=req.owner_id,
-            account_id=str(manual.id),
-            day_id=str(day.id),
-            command_type="start_day",
+            command_id=_u4(),
+            owner_id=UUID(req.owner_id) if isinstance(req.owner_id, str) else req.owner_id,
             idempotency_key=f"start-{day.id}-manual",
+            command_type=CommandType("start_day"),
             payload={"account_kind": "manual", "mode": req.mode},
+            account_id=UUID(str(manual.account_id)) if manual else None,
+            day_id=UUID(str(day.day_id)) if day else None,
         )
         cmd_auto = await self.repo.submit_command(
-            owner_id=req.owner_id,
-            account_id=str(auto.id),
-            day_id=str(day.id),
-            command_type="start_day",
+            command_id=_u4(),
+            owner_id=UUID(req.owner_id) if isinstance(req.owner_id, str) else req.owner_id,
             idempotency_key=f"start-{day.id}-auto",
+            command_type=CommandType("start_day"),
             payload={"account_kind": "auto", "mode": req.mode},
+            account_id=UUID(str(auto.account_id)) if auto else None,
+            day_id=UUID(str(day.day_id)) if day else None,
         )
 
         return {
             "ok": True,
-            "day_id": str(day.id),
-            "manual_account_id": str(manual.id),
-            "auto_account_id": str(auto.id),
+            "day_id": str(day.day_id),
+            "manual_account_id": str(manual.account_id),
+            "auto_account_id": str(auto.account_id),
             "start_at": now.isoformat(),
             "end_at": end_utc.isoformat(),
             "commands": [str(cmd_manual), str(cmd_auto)],
@@ -179,7 +185,7 @@ class PaperTradingService:
         return {
             "ok": True,
             "day": {
-                "id": str(day.id),
+                "id": str(day.day_id),
                 "state": day.state,
                 "start_at": day.start_at.isoformat() if day.start_at else None,
                 "end_at": day.end_at.isoformat() if day.end_at else None,
@@ -208,7 +214,7 @@ class PaperTradingService:
         cmd = await self.repo.submit_command(
             owner_id=owner_id,
             account_id=account_id,
-            day_id=str(day.id),
+            day_id=str(day.day_id),
             command_type="place_order",
             idempotency_key=key,
             payload={
@@ -262,8 +268,8 @@ class PaperTradingService:
 
         cmd = await self.repo.submit_command(
             owner_id=owner_id,
-            account_id=str(auto.id),
-            day_id=str(day.id),
+            account_id=str(auto.account_id),
+            day_id=str(day.day_id),
             command_type="pause_auto",
             idempotency_key=f"pause-{day.id}",
             payload={},
@@ -282,8 +288,8 @@ class PaperTradingService:
 
         cmd = await self.repo.submit_command(
             owner_id=owner_id,
-            account_id=str(auto.id),
-            day_id=str(day.id),
+            account_id=str(auto.account_id),
+            day_id=str(day.day_id),
             command_type="resume_auto",
             idempotency_key=f"resume-{day.id}",
             payload={},
@@ -299,7 +305,7 @@ class PaperTradingService:
         cmd = await self.repo.submit_command(
             owner_id=owner_id,
             account_id="",  # both accounts
-            day_id=str(day.id),
+            day_id=str(day.day_id),
             command_type="finish_day",
             idempotency_key=f"finish-{day.id}",
             payload={},
