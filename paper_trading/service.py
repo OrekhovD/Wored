@@ -161,17 +161,17 @@ class PaperTradingService:
         for acct, kind in [(manual, "manual"), (auto, "auto")]:
             if not acct:
                 continue
-            positions = await self.repo.get_open_positions_by_account(str(acct.id))
-            balance = await self.repo.get_account_balance(str(acct.id))
+            positions = await self.repo.get_open_positions_by_account(str(acct.account_id))
+            balance = await self.repo.get_account_balance(str(acct.account_id))
             accounts.append({
-                "id": str(acct.id),
+                "id": str(acct.account_id),
                 "kind": kind,
                 "currency": acct.currency,
                 "cash": str(balance),
                 "open_positions": len(positions),
                 "positions": [
                     {
-                        "id": str(p.id),
+                        "id": str(p.position_id),
                         "side": p.side,
                         "qty": str(p.qty),
                         "avg_entry": str(p.avg_entry),
@@ -319,7 +319,7 @@ class PaperTradingService:
             return {"ok": False, "error": "command_not_found"}
         return {
             "ok": True,
-            "command_id": str(cmd.id),
+            "command_id": str(cmd.command_id),
             "status": cmd.status,
             "result": cmd.result,
             "error": cmd.error,
