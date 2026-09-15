@@ -47,13 +47,15 @@ async def get_service() -> Any:
 
 
 def owner_id_from_telegram(telegram_user_id: int) -> str:
-    """Map Telegram user ID to stable owner_id."""
-    return f"tg:{telegram_user_id}"
+    """Map Telegram user ID to stable owner_id (deterministic UUID5)."""
+    import uuid
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"tg:{telegram_user_id}"))
 
 
 def owner_id_from_webui(session_username: str) -> str:
-    """Map WebUI session username to stable owner_id."""
-    return f"webui:{session_username}"
+    """Map WebUI session username to stable owner_id (deterministic UUID5)."""
+    import uuid
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"webui:{session_username}"))
 
 
 # ─── Status DTO helpers ────────────────────────────────────────────────
