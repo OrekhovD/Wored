@@ -187,8 +187,8 @@ class PaperTradingService:
             "day": {
                 "id": str(day.day_id),
                 "state": day.state,
-                "start_at": day.start_at.isoformat() if day.start_at else None,
-                "end_at": day.end_at.isoformat() if day.end_at else None,
+                "start_at": day.start_utc.isoformat() if day.start_utc else None,
+                "end_at": day.end_utc.isoformat() if day.end_utc else None,
             },
             "accounts": accounts,
             "next_action": "trade" if day.state == "running" else "start",
