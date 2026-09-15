@@ -47,7 +47,7 @@ async def get_service() -> Any:
 
 def owner_id_from_telegram(telegram_user_id: int) -> str:
     """Map Telegram user ID to stable owner_id (deterministic UUID5).
-    
+
     This is the canonical owner_id — both Telegram and WebUI must resolve to the same UUID.
     """
     import uuid
@@ -56,11 +56,11 @@ def owner_id_from_telegram(telegram_user_id: int) -> str:
 
 def owner_id_from_webui(session_username: str, telegram_user_id: int | None = None) -> str:
     """Map WebUI session username to stable owner_id.
-    
+
     If telegram_user_id is provided, uses the same namespace as Telegram (unified identity).
     Otherwise, uses the username directly — but this creates a separate owner and should
     be resolved via identity mapping in the database.
-    
+
     For v1, 'admin' maps to the first registered Telegram owner.
     """
     import uuid
@@ -192,14 +192,19 @@ async def get_command_status(command_id: str) -> dict[str, Any]:
 # ─── Runner integration ────────────────────────────────────────────────
 
 _runner_registered = False
+_runner_instance: Any | None = None
 
 
 def register_runner(scheduler: Any) -> bool:
     """Register the paper trading runner with the collector scheduler.
 
+    Wires real dependencies (market_data from Redis, command_source from
+    PostgreSQL, recovery_store from PostgreSQL, repository for the
+    signal→order→fill→ledger chain) and calls recover() after registration.
+
     Returns True if registered, False if already registered or disabled.
     """
-    global _runner_registered
+    global _runner_registered, _runner_instance
     if _runner_registered:
         return False
 
@@ -212,6 +217,50 @@ def register_runner(scheduler: Any) -> bool:
         from paper_trading.runner import PaperTradingRunner
 
         runner = PaperTradingRunner.from_env()
+        _runner_instance = runner
+
+        # Wire real dependencies (async — use scheduler's event loop)
+        import asyncio
+        async def _wire_and_recover():
+            """Wire PostgreSQL + Redis dependencies, then recover."""
+            try:
+                # Get PostgreSQL pool
+                from storage.postgres_client import get_pool as _get_pool
+                pool = await _get_pool()
+                if pool is not None:
+                    runner._wire_dependencies(pg_pool=pool)
+                    log.info("Paper trading: PostgreSQL dependencies wired")
+            except Exception as exc:
+                log.warning("Paper trading: failed to wire PostgreSQL: %s", exc)
+
+            try:
+                # Get Redis client
+                from storage.redis_client import get_redis as _get_redis
+                redis = await _get_redis() if hasattr(_get_redis(), '__await__') else _get_redis()
+                if redis is not None:
+                    runner._wire_dependencies(redis_client=redis)
+                    log.info("Paper trading: Redis market data source wired")
+            except Exception as exc:
+                log.warning("Paper trading: failed to wire Redis: %s", exc)
+
+            # Run recovery
+            if runner.recovery_store is not None:
+                report = await runner.recover()
+                log.info("Paper trading recovery: %s", report)
+            elif runner.repository is None:
+                # No DB — can't recover, entries stay blocked
+                log.warning("Paper trading: no DB pool — entries blocked, runner in degraded mode")
+            else:
+                # Has repository but no recovery_store — shouldn't happen after wiring
+                log.warning("Paper trading: repository wired but no recovery_store")
+
+        # Schedule wiring + recovery as a one-shot job
+        scheduler.add_job(
+            _wire_and_recover,
+            "date",
+            id="paper_trading_wire_and_recover",
+            replace_existing=True,
+        )
 
         # Register 2s poll cycle
         interval = int(os.getenv("PAPER_ENGINE_INTERVAL_SECONDS", "2"))
@@ -257,6 +306,53 @@ def register_runner(scheduler: Any) -> bool:
             replace_existing=True,
             max_instances=1,
             coalesce=True,
+        )
+
+        # Register recovery job — runs once on startup to wire dependencies
+        # and call recover()
+        async def _startup_recovery():
+            """Wire dependencies and run recovery on startup."""
+            try:
+                # Wire PostgreSQL dependencies
+                pg_pool = None
+                try:
+                    from storage.postgres_client import get_pool as _get_pool
+                    pg_pool = await _get_pool()
+                except ImportError:
+                    log.debug("postgres_client not available for runner wiring")
+
+                # Wire Redis dependencies
+                redis_client = None
+                try:
+                    from storage.redis_client import get_redis as _get_redis
+                    redis_client = _get_redis()
+                except ImportError:
+                    log.debug("redis_client not available for runner wiring")
+
+                # Wire dependencies into runner
+                runner._wire_dependencies(
+                    pg_pool=pg_pool,
+                    redis_client=redis_client,
+                )
+
+                # Call recover() after wiring
+                if runner.recovery_store is not None:
+                    report = await runner.recover()
+                    log.info(
+                        "Paper trading runner recovered: %s",
+                        report.get("recovered", False),
+                    )
+                else:
+                    log.info("Paper trading runner: no recovery store, skipping recovery")
+
+            except Exception:
+                log.exception("Paper trading runner startup recovery failed")
+
+        scheduler.add_job(
+            _startup_recovery,
+            "date",
+            id="paper_trading_startup_recovery",
+            replace_existing=True,
         )
 
         _runner_registered = True
