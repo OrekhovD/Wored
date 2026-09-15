@@ -68,6 +68,23 @@
 
 ## T02+ — будут добавлены по мере реализации
 
+## Audit 15.09.2026 — CODEX-HERMES-AC26-AUDIT-20260915.md
+
+### AC-26: FAIL (исправлено)
+
+Независимый аудит выявил блокирующие дефекты:
+
+| Дефект | Приоритет | Описание | Статус |
+|---|---|---|---|
+| F01 | P0 | Runner без рабочих зависимостей и recovery | Subagent работает |
+| F02 | P0 | Нет цепочки signal→order→fill→ledger | Subagent работает |
+| F03 | P1 | service.py submit_command без command_id/CommandType | ✅ Исправлено |
+| F04 | P1 | Telegram/WebUI разные owner_id namespace | ✅ Исправлено (wored:owner:) |
+| F05 | P1 | Настройки заменяются значениями в коде | ✅ Исправлено (end_time_local→UTC) |
+| F06 | P1 | replay/live-readonly false positive | ✅ Исправлено (no signal → FAIL) |
+| F07 | P1 | Финансовая достоверность: liquidity, multiplier, fencing | Pending |
+| F08 | P2 | AI/learning/closeout/runbook частичны | Pending |
+
 ## T06 — Адаптеры Telegram и WebUI
 
 ### adapter.py

@@ -447,8 +447,9 @@ async def _run_replay() -> Dict[str, Any]:
         result["report"] = report
         result["passed"] = True
     else:
-        result["passed"] = True
-        result["note"] = "No signal generated on replay data (strict conditions not fully met)"
+        result["passed"] = False
+        result["status"] = "BLOCKED"
+        result["note"] = "No signal generated on replay data — strict EMA/ATR conditions not fully met. This is NOT a PASS: replay must produce at least one long and one short signal→fill→close→ledger cycle."
 
     return result
 
@@ -481,7 +482,9 @@ async def _run_live_readonly(duration_seconds: float = 10.0) -> Dict[str, Any]:
         "mode": "live-readonly",
         "duration_seconds": duration_seconds,
         "status": dto,
-        "passed": True,
+        "passed": False,
+        "status_label": "BLOCKED",
+        "note": "live-readonly creates a local runner without DB/market sources. This is NOT a live acceptance PASS. Real live-readonly must observe the production runner via Redis heartbeat and PostgreSQL state, not create a new local instance.",
     }
 
 

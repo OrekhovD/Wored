@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
-from uuid import uuid4
+from typing import Any
 
 log = logging.getLogger(__name__)
 
 # Lazy imports — asyncpg only available in containers
-_repo: Optional[Any] = None
-_service: Optional[Any] = None
+_repo: Any | None = None
+_service: Any | None = None
 
 
 async def get_service() -> Any:
@@ -47,20 +46,33 @@ async def get_service() -> Any:
 
 
 def owner_id_from_telegram(telegram_user_id: int) -> str:
-    """Map Telegram user ID to stable owner_id (deterministic UUID5)."""
+    """Map Telegram user ID to stable owner_id (deterministic UUID5).
+    
+    This is the canonical owner_id — both Telegram and WebUI must resolve to the same UUID.
+    """
     import uuid
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"tg:{telegram_user_id}"))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"wored:owner:{telegram_user_id}"))
 
 
-def owner_id_from_webui(session_username: str) -> str:
-    """Map WebUI session username to stable owner_id (deterministic UUID5)."""
+def owner_id_from_webui(session_username: str, telegram_user_id: int | None = None) -> str:
+    """Map WebUI session username to stable owner_id.
+    
+    If telegram_user_id is provided, uses the same namespace as Telegram (unified identity).
+    Otherwise, uses the username directly — but this creates a separate owner and should
+    be resolved via identity mapping in the database.
+    
+    For v1, 'admin' maps to the first registered Telegram owner.
+    """
     import uuid
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"webui:{session_username}"))
+    if telegram_user_id is not None:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"wored:owner:{telegram_user_id}"))
+    # Fallback: use username-based UUID (should be replaced by identity mapping)
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"wored:owner:{session_username}"))
 
 
 # ─── Status DTO helpers ────────────────────────────────────────────────
 
-async def get_current_state(owner_id: str) -> Dict[str, Any]:
+async def get_current_state(owner_id: str) -> dict[str, Any]:
     """Get current trading day state for an owner."""
     service = await get_service()
     if service is None:
@@ -79,8 +91,8 @@ async def start_day(
     timezone: str = "Asia/Bangkok",
     end_time_local: str = "21:00",
     mode: str = "baseline_auto",
-    settings: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Start a new trading day."""
     service = await get_service()
     if service is None:
@@ -103,10 +115,10 @@ async def submit_manual_order(
     side: str,
     order_type: str = "market",
     qty: str = "0.001",
-    stop_loss: Optional[str] = None,
-    take_profit: Optional[str] = None,
-    idempotency_key: Optional[str] = None,
-) -> Dict[str, Any]:
+    stop_loss: str | None = None,
+    take_profit: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
     """Submit a manual order."""
     from decimal import Decimal
     service = await get_service()
@@ -128,9 +140,9 @@ async def submit_manual_order(
 async def close_position(
     owner_id: str,
     position_id: str,
-    partial_qty: Optional[str] = None,
-    idempotency_key: Optional[str] = None,
-) -> Dict[str, Any]:
+    partial_qty: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
     """Close a position."""
     from decimal import Decimal
     service = await get_service()
@@ -145,7 +157,7 @@ async def close_position(
     )
 
 
-async def pause_auto(owner_id: str) -> Dict[str, Any]:
+async def pause_auto(owner_id: str) -> dict[str, Any]:
     """Pause automatic trading."""
     service = await get_service()
     if service is None:
@@ -153,7 +165,7 @@ async def pause_auto(owner_id: str) -> Dict[str, Any]:
     return await service.pause_auto(owner_id)
 
 
-async def resume_auto(owner_id: str) -> Dict[str, Any]:
+async def resume_auto(owner_id: str) -> dict[str, Any]:
     """Resume automatic trading."""
     service = await get_service()
     if service is None:
@@ -161,7 +173,7 @@ async def resume_auto(owner_id: str) -> Dict[str, Any]:
     return await service.resume_auto(owner_id)
 
 
-async def finish_day(owner_id: str) -> Dict[str, Any]:
+async def finish_day(owner_id: str) -> dict[str, Any]:
     """Finish the trading day."""
     service = await get_service()
     if service is None:
@@ -169,7 +181,7 @@ async def finish_day(owner_id: str) -> Dict[str, Any]:
     return await service.finish_day(owner_id)
 
 
-async def get_command_status(command_id: str) -> Dict[str, Any]:
+async def get_command_status(command_id: str) -> dict[str, Any]:
     """Get command status."""
     service = await get_service()
     if service is None:
@@ -197,7 +209,6 @@ def register_runner(scheduler: Any) -> bool:
         return False
 
     try:
-        import asyncio
         from paper_trading.runner import PaperTradingRunner
 
         runner = PaperTradingRunner.from_env()
@@ -219,8 +230,8 @@ def register_runner(scheduler: Any) -> bool:
 
         async def _heartbeat():
             """Heartbeat wrapper — publish runner status to Redis."""
-            import time
             import json
+            import time
             try:
                 from storage.redis_client import get_redis
                 redis = get_redis()

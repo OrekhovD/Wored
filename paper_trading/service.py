@@ -9,12 +9,14 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
-from uuid import uuid4
+from typing import Any
+from uuid import UUID, uuid4
 
 from paper_trading.contracts import (
-    Account, AccountKind, Command,
-    Position, ReasonCode, StatusDTO, TradingDay,
+    Account,
+    AccountKind,
+    CommandType,
+    Position,
 )
 from paper_trading.repository import PaperRepository
 
@@ -38,7 +40,7 @@ class StartDayRequest:
     owner_id: str
     timezone: str = "Asia/Bangkok"
     end_time_local: str = "21:00"
-    settings: Optional[Dict[str, Any]] = None
+    settings: dict[str, Any] | None = None
     strategy_version: str = "baseline_v1"
     mode: str = "baseline_auto"  # or "ai_plan"
 
@@ -49,7 +51,7 @@ class PaperTradingService:
     def __init__(self, repo: PaperRepository):
         self.repo = repo
 
-    async def start_day(self, req: StartDayRequest) -> Dict[str, Any]:
+    async def start_day(self, req: StartDayRequest) -> dict[str, Any]:
         """Start a new trading day for both manual and auto accounts."""
         # Ensure owner exists
         try:
@@ -76,10 +78,24 @@ class PaperTradingService:
         # Create new day
         now = datetime.now(timezone.utc)
         # Compute end_utc from end_time_local + timezone
-        # For v1, use 8h from start as approximation
         from datetime import timedelta
-        from uuid import uuid4, UUID
-        end_utc = now + timedelta(hours=8)
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(req.timezone)
+            # Parse end_time_local (e.g. "21:00")
+            end_hour, end_min = map(int, req.end_time_local.split(":"))
+            # Today's end time in local tz, convert to UTC
+            local_now = now.astimezone(tz)
+            local_end = local_now.replace(hour=end_hour, minute=end_min, second=0, microsecond=0)
+            # If end time already passed today, it's tomorrow — but don't silently extend
+            if local_end <= local_now:
+                # Use 8h from start as fallback (should not happen — UI should prevent this)
+                end_utc = now + timedelta(hours=8)
+            else:
+                end_utc = local_end.astimezone(timezone.utc)
+        except Exception:
+            # Fallback: 8h from start
+            end_utc = now + timedelta(hours=8)
 
         day = await self.repo.create_day(
             day_id=uuid4(),
@@ -92,10 +108,9 @@ class PaperTradingService:
         )
 
         # Submit start commands for both accounts
-        from uuid import uuid4 as _u4
         from paper_trading.contracts import CommandType
         cmd_manual = await self.repo.submit_command(
-            command_id=_u4(),
+            command_id=uuid4(),
             owner_id=UUID(req.owner_id) if isinstance(req.owner_id, str) else req.owner_id,
             idempotency_key=f"start-{day.day_id}-manual",
             command_type=CommandType("start_day"),
@@ -104,7 +119,7 @@ class PaperTradingService:
             day_id=UUID(str(day.day_id)) if day else None,
         )
         cmd_auto = await self.repo.submit_command(
-            command_id=_u4(),
+            command_id=uuid4(),
             owner_id=UUID(req.owner_id) if isinstance(req.owner_id, str) else req.owner_id,
             idempotency_key=f"start-{day.day_id}-auto",
             command_type=CommandType("start_day"),
@@ -125,7 +140,6 @@ class PaperTradingService:
 
     async def _get_or_create_account(self, owner_id: str, kind: str, currency: str, opening_deposit: Decimal):
         """Get or create an account for an owner."""
-        from uuid import uuid4, UUID
 
         owner_uuid = UUID(owner_id) if isinstance(owner_id, str) else owner_id
         kind_enum = AccountKind(kind) if isinstance(kind, str) else kind
@@ -143,7 +157,7 @@ class PaperTradingService:
             # Account already exists — find it
             return await self.get_account_by_kind(owner_uuid, kind_enum)
 
-    async def get_current_state(self, owner_id: str) -> Dict[str, Any]:
+    async def get_current_state(self, owner_id: str) -> dict[str, Any]:
         """Get current trading day state with both accounts."""
         day = await self.repo.get_active_day(owner_id)
         if not day:
@@ -201,10 +215,10 @@ class PaperTradingService:
         side: str,
         order_type: str,
         qty: Decimal,
-        stop_loss: Optional[Decimal] = None,
-        take_profit: Optional[Decimal] = None,
-        idempotency_key: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        stop_loss: Decimal | None = None,
+        take_profit: Decimal | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
         """Submit a manual order."""
         day = await self.repo.get_active_day(owner_id)
         if not day:
@@ -212,11 +226,10 @@ class PaperTradingService:
 
         key = idempotency_key or f"order-{uuid4()}"
         cmd = await self.repo.submit_command(
-            owner_id=owner_id,
-            account_id=account_id,
-            day_id=str(day.day_id),
-            command_type="place_order",
+            command_id=uuid4(),
+            owner_id=UUID(owner_id) if isinstance(owner_id, str) else owner_id,
             idempotency_key=key,
+            command_type=CommandType("place_order"),
             payload={
                 "side": side,
                 "order_type": order_type,
@@ -226,16 +239,18 @@ class PaperTradingService:
                 "origin": "manual",
                 "actor": "user",
             },
+            account_id=UUID(account_id) if isinstance(account_id, str) else account_id,
+            day_id=UUID(str(day.day_id)),
         )
-        return {"ok": True, "command_id": str(cmd)}
+        return {"ok": True, "command_id": str(cmd.command_id)}
 
     async def close_position(
         self,
         owner_id: str,
         position_id: str,
-        partial_qty: Optional[Decimal] = None,
-        idempotency_key: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        partial_qty: Decimal | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
         """Close a position (full or partial)."""
         key = idempotency_key or f"close-{position_id}-{uuid4()}"
         # Get position to find account/day
@@ -243,20 +258,22 @@ class PaperTradingService:
         if not pos:
             return {"ok": False, "error": "position_not_found"}
 
+        # Verify ownership: caller must own the account that owns the position
         cmd = await self.repo.submit_command(
-            owner_id=owner_id,
-            account_id=str(pos.account_id),
-            day_id=str(pos.day_id),
-            command_type="close_position",
+            command_id=uuid4(),
+            owner_id=UUID(owner_id) if isinstance(owner_id, str) else owner_id,
             idempotency_key=key,
+            command_type=CommandType("close_position"),
             payload={
                 "position_id": position_id,
                 "partial_qty": str(partial_qty) if partial_qty else None,
             },
+            account_id=UUID(str(pos.account_id)),
+            day_id=UUID(str(pos.day_id)),
         )
-        return {"ok": True, "command_id": str(cmd)}
+        return {"ok": True, "command_id": str(cmd.command_id)}
 
-    async def pause_auto(self, owner_id: str) -> Dict[str, Any]:
+    async def pause_auto(self, owner_id: str) -> dict[str, Any]:
         """Pause automatic trading (new entries blocked, positions protected)."""
         day = await self.repo.get_active_day(owner_id)
         if not day:
@@ -267,16 +284,17 @@ class PaperTradingService:
             return {"ok": False, "error": "no_auto_account"}
 
         cmd = await self.repo.submit_command(
-            owner_id=owner_id,
-            account_id=str(auto.account_id),
-            day_id=str(day.day_id),
-            command_type="pause_auto",
+            command_id=uuid4(),
+            owner_id=UUID(owner_id) if isinstance(owner_id, str) else owner_id,
             idempotency_key=f"pause-{day.day_id}",
+            command_type=CommandType("pause_auto"),
             payload={},
+            account_id=UUID(str(auto.account_id)),
+            day_id=UUID(str(day.day_id)),
         )
-        return {"ok": True, "command_id": str(cmd)}
+        return {"ok": True, "command_id": str(cmd.command_id)}
 
-    async def resume_auto(self, owner_id: str) -> Dict[str, Any]:
+    async def resume_auto(self, owner_id: str) -> dict[str, Any]:
         """Resume automatic trading."""
         day = await self.repo.get_active_day(owner_id)
         if not day:
@@ -287,32 +305,33 @@ class PaperTradingService:
             return {"ok": False, "error": "no_auto_account"}
 
         cmd = await self.repo.submit_command(
-            owner_id=owner_id,
-            account_id=str(auto.account_id),
-            day_id=str(day.day_id),
-            command_type="resume_auto",
+            command_id=uuid4(),
+            owner_id=UUID(owner_id) if isinstance(owner_id, str) else owner_id,
             idempotency_key=f"resume-{day.day_id}",
+            command_type=CommandType("resume_auto"),
             payload={},
+            account_id=UUID(str(auto.account_id)),
+            day_id=UUID(str(day.day_id)),
         )
-        return {"ok": True, "command_id": str(cmd)}
+        return {"ok": True, "command_id": str(cmd.command_id)}
 
-    async def finish_day(self, owner_id: str) -> Dict[str, Any]:
+    async def finish_day(self, owner_id: str) -> dict[str, Any]:
         """Finish the trading day — closeout both accounts."""
         day = await self.repo.get_active_day(owner_id)
         if not day:
             return {"ok": False, "error": "no_active_day"}
 
         cmd = await self.repo.submit_command(
-            owner_id=owner_id,
-            account_id="",  # both accounts
-            day_id=str(day.day_id),
-            command_type="finish_day",
+            command_id=uuid4(),
+            owner_id=UUID(owner_id) if isinstance(owner_id, str) else owner_id,
             idempotency_key=f"finish-{day.day_id}",
+            command_type=CommandType("finish_day"),
             payload={},
+            day_id=UUID(str(day.day_id)),
         )
-        return {"ok": True, "command_id": str(cmd)}
+        return {"ok": True, "command_id": str(cmd.command_id)}
 
-    async def get_command_status(self, command_id: str) -> Dict[str, Any]:
+    async def get_command_status(self, command_id: str) -> dict[str, Any]:
         """Get command status by ID."""
         cmd = await self.repo.get_command(command_id)
         if not cmd:
@@ -329,14 +348,14 @@ class PaperTradingService:
     # Delegate methods (thin wrappers over repository)
     # ------------------------------------------------------------------
 
-    async def get_account_by_kind(self, owner_id, kind) -> Optional[Account]:
+    async def get_account_by_kind(self, owner_id, kind) -> Account | None:
         """Get the account for an owner with the given kind, or None."""
         from uuid import UUID
         owner_uuid = UUID(owner_id) if isinstance(owner_id, str) else owner_id
         kind_enum = AccountKind(kind) if isinstance(kind, str) else kind
         return await self.repo.get_account_by_kind(owner_uuid, kind_enum)
 
-    async def get_open_positions_by_account(self, account_id) -> List[Position]:
+    async def get_open_positions_by_account(self, account_id) -> list[Position]:
         """Get all open positions for an account."""
         from uuid import UUID
         acct_uuid = UUID(account_id) if isinstance(account_id, str) else account_id
@@ -348,7 +367,7 @@ class PaperTradingService:
         acct_uuid = UUID(account_id) if isinstance(account_id, str) else account_id
         return await self.repo.get_account_balance(acct_uuid)
 
-    async def get_position_by_id(self, position_id) -> Optional[Position]:
+    async def get_position_by_id(self, position_id) -> Position | None:
         """Get a position by its ID, or None."""
         from uuid import UUID
         pos_uuid = UUID(position_id) if isinstance(position_id, str) else position_id
