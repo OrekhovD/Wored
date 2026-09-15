@@ -907,9 +907,16 @@ def _new_uuid_str() -> str:
     return str(uuid4())
 
 
+def _to_uuid(val: Any) -> UUID:
+    """Convert asyncpg UUID or string to Python UUID."""
+    if isinstance(val, UUID):
+        return val
+    return UUID(str(val))
+
+
 def _row_to_owner(row: asyncpg.Record) -> Owner:
     return Owner(
-        owner_id=UUID(row["owner_id"]),
+        owner_id=_to_uuid(row["owner_id"]),
         display_name=row["display_name"],
         telegram_id=row["telegram_id"],
         webui_identity=row["webui_identity"],
@@ -919,11 +926,11 @@ def _row_to_owner(row: asyncpg.Record) -> Owner:
 
 def _row_to_account(row: asyncpg.Record) -> Account:
     return Account(
-        account_id=UUID(row["account_id"]),
-        owner_id=UUID(row["owner_id"]),
+        account_id=_to_uuid(row["account_id"]),
+        owner_id=_to_uuid(row["owner_id"]),
         kind=AccountKind(row["kind"]),
         currency=row["currency"],
-        opening_deposit=Decimal(row["opening_deposit"]),
+        opening_deposit=Decimal(str(row["opening_deposit"])),
         created_at=row["created_at"],
     )
 
@@ -933,8 +940,8 @@ def _row_to_day(row: asyncpg.Record) -> TradingDay:
     if isinstance(settings, str):
         settings = json.loads(settings)
     return TradingDay(
-        day_id=UUID(row["day_id"]),
-        owner_id=UUID(row["owner_id"]),
+        day_id=_to_uuid(row["day_id"]),
+        owner_id=_to_uuid(row["owner_id"]),
         timezone=row["timezone"],
         start_utc=row["start_utc"],
         end_utc=row["end_utc"],
@@ -950,10 +957,10 @@ def _row_to_command(row: asyncpg.Record) -> Command:
     if isinstance(result, str):
         result = json.loads(result)
     return Command(
-        command_id=UUID(row["command_id"]),
-        owner_id=UUID(row["owner_id"]),
-        account_id=UUID(row["account_id"]) if row["account_id"] else None,
-        day_id=UUID(row["day_id"]) if row["day_id"] else None,
+        command_id=_to_uuid(row["command_id"]),
+        owner_id=_to_uuid(row["owner_id"]),
+        account_id=_to_uuid(row["account_id"]) if row["account_id"] else None,
+        day_id=_to_uuid(row["day_id"]) if row["day_id"] else None,
         command_type=CommandType(row["command_type"]),
         idempotency_key=row["idempotency_key"],
         request_hash=row["request_hash"],
@@ -968,12 +975,12 @@ def _row_to_command(row: asyncpg.Record) -> Command:
 
 def _row_to_order(row: asyncpg.Record) -> Order:
     return Order(
-        order_id=UUID(row["order_id"]),
-        account_id=UUID(row["account_id"]),
-        day_id=UUID(row["day_id"]),
+        order_id=_to_uuid(row["order_id"]),
+        account_id=_to_uuid(row["account_id"]),
+        day_id=_to_uuid(row["day_id"]),
         origin=row["origin"],
         actor=row["actor"],
-        signal_id=UUID(row["signal_id"]) if row["signal_id"] else None,
+        signal_id=_to_uuid(row["signal_id"]) if row["signal_id"] else None,
         side=OrderSide(row["side"]),
         order_type=OrderType(row["order_type"]),
         instrument=row["instrument"],
@@ -991,9 +998,9 @@ def _row_to_order(row: asyncpg.Record) -> Order:
 
 def _row_to_fill(row: asyncpg.Record) -> Fill:
     return Fill(
-        fill_id=UUID(row["fill_id"]),
-        order_id=UUID(row["order_id"]),
-        account_id=UUID(row["account_id"]),
+        fill_id=_to_uuid(row["fill_id"]),
+        order_id=_to_uuid(row["order_id"]),
+        account_id=_to_uuid(row["account_id"]),
         execution_quote_id=row["execution_quote_id"],
         instrument=row["instrument"],
         side=OrderSide(row["side"]),
@@ -1011,9 +1018,9 @@ def _row_to_fill(row: asyncpg.Record) -> Fill:
 
 def _row_to_position(row: asyncpg.Record) -> Position:
     return Position(
-        position_id=UUID(row["position_id"]),
-        account_id=UUID(row["account_id"]),
-        day_id=UUID(row["day_id"]),
+        position_id=_to_uuid(row["position_id"]),
+        account_id=_to_uuid(row["account_id"]),
+        day_id=_to_uuid(row["day_id"]),
         instrument=row["instrument"],
         side=PositionSide(row["side"]),
         qty=Decimal(row["qty"]),
@@ -1036,10 +1043,10 @@ def _row_to_position(row: asyncpg.Record) -> Position:
 
 def _row_to_posting(row: asyncpg.Record) -> JournalPosting:
     return JournalPosting(
-        posting_id=UUID(row["posting_id"]),
-        account_id=UUID(row["account_id"]),
-        day_id=UUID(row["day_id"]) if row["day_id"] else None,
-        event_id=UUID(row["event_id"]),
+        posting_id=_to_uuid(row["posting_id"]),
+        account_id=_to_uuid(row["account_id"]),
+        day_id=_to_uuid(row["day_id"]) if row["day_id"] else None,
+        event_id=_to_uuid(row["event_id"]),
         source_type=JournalSourceType(row["source_type"]),
         source_ref=row["source_ref"],
         currency=row["currency"],
@@ -1052,8 +1059,8 @@ def _row_to_posting(row: asyncpg.Record) -> JournalPosting:
 
 def _row_to_signal(row: asyncpg.Record) -> Signal:
     return Signal(
-        signal_id=UUID(row["signal_id"]),
-        account_id=UUID(row["account_id"]) if row["account_id"] else None,
+        signal_id=_to_uuid(row["signal_id"]),
+        account_id=_to_uuid(row["account_id"]) if row["account_id"] else None,
         strategy_version=row["strategy_version"],
         instrument=row["instrument"],
         closed_bar_time=row["closed_bar_time"],
