@@ -97,7 +97,7 @@ class PaperTradingService:
         cmd_manual = await self.repo.submit_command(
             command_id=_u4(),
             owner_id=UUID(req.owner_id) if isinstance(req.owner_id, str) else req.owner_id,
-            idempotency_key=f"start-{day.id}-manual",
+            idempotency_key=f"start-{day.day_id}-manual",
             command_type=CommandType("start_day"),
             payload={"account_kind": "manual", "mode": req.mode},
             account_id=UUID(str(manual.account_id)) if manual else None,
@@ -106,7 +106,7 @@ class PaperTradingService:
         cmd_auto = await self.repo.submit_command(
             command_id=_u4(),
             owner_id=UUID(req.owner_id) if isinstance(req.owner_id, str) else req.owner_id,
-            idempotency_key=f"start-{day.id}-auto",
+            idempotency_key=f"start-{day.day_id}-auto",
             command_type=CommandType("start_day"),
             payload={"account_kind": "auto", "mode": req.mode},
             account_id=UUID(str(auto.account_id)) if auto else None,
@@ -271,7 +271,7 @@ class PaperTradingService:
             account_id=str(auto.account_id),
             day_id=str(day.day_id),
             command_type="pause_auto",
-            idempotency_key=f"pause-{day.id}",
+            idempotency_key=f"pause-{day.day_id}",
             payload={},
         )
         return {"ok": True, "command_id": str(cmd)}
@@ -291,7 +291,7 @@ class PaperTradingService:
             account_id=str(auto.account_id),
             day_id=str(day.day_id),
             command_type="resume_auto",
-            idempotency_key=f"resume-{day.id}",
+            idempotency_key=f"resume-{day.day_id}",
             payload={},
         )
         return {"ok": True, "command_id": str(cmd)}
@@ -307,7 +307,7 @@ class PaperTradingService:
             account_id="",  # both accounts
             day_id=str(day.day_id),
             command_type="finish_day",
-            idempotency_key=f"finish-{day.id}",
+            idempotency_key=f"finish-{day.day_id}",
             payload={},
         )
         return {"ok": True, "command_id": str(cmd)}
