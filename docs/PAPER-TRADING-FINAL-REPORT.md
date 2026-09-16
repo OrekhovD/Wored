@@ -1,79 +1,74 @@
-# WORED Paper Trading — Итоговый отчёт
+# WORED Paper Trading — Итоговый отчёт (исправленный)
 
 **ТЗ:** HERMES-ACTIVE-PAPER-TRADING-V1
+**Дополнение:** HERMES-PAPER-TRADING-ACCEPTANCE-CLOSURE-20260916
 **Дата:** 16 сентября 2026
-**HEAD:** `2363a9b`
+**HEAD:** `3f29a05`
 **Project:** `D:\WORED`
 
 ---
 
-## 1. Что сделано
+## 1. Acceptance matrix — честный подсчёт
 
-### Этапы (TASKS.json)
+| AC | Статус | Evidence level | Описание |
+|---|---|---|---|
+| AC-01 | ✅ PASS | read-only | Диагностика: причина нулевых позиций — нет runner, план rejected |
+| AC-02 | ✅ PASS | offline | All modules import in containers (paper_trading at /opt/) |
+| AC-03 | ✅ PASS | offline | Telegram + WebUI → PaperTradingService via adapter |
+| AC-04 | ✅ PASS | offline | Owner isolation via UUID5, ownership check in close_position |
+| AC-05 | ⏸️ BLOCKED | none | PostgreSQL concurrent idempotency test not written |
+| AC-06 | ⏸️ BLOCKED | none | Crash/recovery fault injection test not written |
+| AC-07 | ✅ PASS | offline | Market validation: bid>0, ask>=bid, negative funding, stale |
+| AC-08 | ✅ PASS | offline | Execution: golden long=87.94, short=88.06 |
+| AC-09 | ✅ PASS | offline | Partial fill: allocated=2.4, remaining=3.6 |
+| AC-10 | ✅ PASS | offline | SL/TP: mark crossing + execute_close + DB persistence |
+| AC-11 | ✅ PASS | offline | Funding: long=-1, short=+1 at +0.0001 |
+| AC-12 | ✅ PASS | offline | 15 risk gates, reduce-only not blocked |
+| AC-13 | ✅ PASS | offline | EMA seed SMA=109.5, ATR14 Wilder |
+| AC-14 | ⏸️ BLOCKED | none | No recorded HTX perpetual dataset available |
+| AC-15 | ✅ PASS | offline | AI contract: no_trade, quota, timeout, invalid_schema |
+| AC-16 | ⏸️ BLOCKED | none | PostgreSQL plan race test not written |
+| AC-17 | ✅ PASS | offline | Presenters: all reason codes with next action |
+| AC-18 | ✅ PASS | offline | Cooldown/pause: UTC deadline, pause priority |
+| AC-19 | ⏸️ BLOCKED | none | Browser testing not performed |
+| AC-20 | ⏸️ BLOCKED | none | Telegram client testing not performed |
+| AC-21 | ⏸️ BLOCKED | none | Dual-account closeout test not written |
+| AC-22 | ✅ PASS | offline | Golden reports: reconciliation with exact Decimal |
+| AC-23 | ✅ PASS | offline | Learning: insufficient_data + rejected gates |
+| AC-24 | ⏸️ BLOCKED | none | Migration rehearsal not performed |
+| AC-25 | ✅ PASS | offline | QA isolation: tmpfs, internal network, wored_qa |
+| AC-26 | ❌ FAIL | live-observation | feed_freshness FAIL (12/13), no day state transition |
+| AC-27 | ⏸️ BLOCKED | none | No natural signal observed |
+| AC-28 | ✅ PASS | offline | Runbook: 13 sections, real ports/services/env |
 
-| Этап | Статус | Описание |
-|---|---|---|
-| T01 | ✅ | Диагностика RACHELLO: причина нулевых позиций — нет runner, план rejected (RR<1) |
-| T02 | ✅ | contracts.py, ledger.py, repository.py, paper_v2_schema.sql (18 таблиц) |
-| T03 | ✅ | market.py, risk.py, execution.py, 6 fixtures (golden values verified) |
-| T04 | ✅ | strategy.py (baseline v1 EMA/ATR), runner.py (lease fencing, recovery), presenters.py |
-| T05 | ✅ | planner.py (AI plan, quota, no_trade valid, no forced entries) |
-| T06 | ✅ | adapter.py (webui/chatbot → domain service), Telegram + WebUI bridges |
-| T07 | ✅ | learning.py (chronological split, holdout gate, purge gap) |
-| T08 | ✅ | 11 integration tests, qa.Dockerfile PYTHONPATH, ruff clean |
-| T09 | ✅ | Production deploy: DDL applied, runner registered, PAPER_ENGINE_ENABLED=true |
+**Итог: 18 PASS, 1 FAIL, 9 BLOCKED = 28**
 
-### Acceptance matrix
+### Исправления к предыдущему отчёту
 
-| AC | Статус | Evidence |
-|---|---|---|
-| AC-01 | ✅ | Diagnosis в docs/PAPER-TRADING-IMPLEMENTATION.md |
-| AC-02 | ✅ | All modules import in containers (paper_trading at /opt/) |
-| AC-03 | ✅ | Telegram + WebUI → PaperTradingService via adapter |
-| AC-04 | ✅ | Owner isolation via UUID5, ownership check in close_position |
-| AC-05 | ✅ | Idempotency: UNIQUE(owner_id, idempotency_key) in DDL |
-| AC-06 | ⏳ | Crash/recovery: code exists (recover(), lease fencing), DB race suite pending |
-| AC-07 | ✅ | Market validation: bid>0, ask>=bid, negative funding allowed, stale detection |
-| AC-08 | ✅ | Execution: long ask→bid, short bid→ask, slippage, fees — in execution.py |
-| AC-09 | ✅ | Partial fill: IOC, proportional entry fee allocation — golden test passes |
-| AC-10 | ✅ | SL/TP: mark crossing, execute_close with DB persistence + ledger |
-| AC-11 | ✅ | Funding: signed (long pays positive, short receives), golden test passes |
-| AC-12 | ✅ | Risk gates: 15 checks in check_order_risk, reduce-only not blocked |
-| AC-13 | ✅ | Baseline strategy: EMA seed SMA, ATR14 Wilder, 3-TF trigger — tests pass |
-| AC-14 | ⏳ | Recorded replay: acceptance script returns BLOCKED (no signal on synthetic data) |
-| AC-15 | ✅ | AI contract: no_trade valid, quota, stale response guards in planner.py |
-| AC-16 | ⏳ | Plan races: code exists, PostgreSQL race tests pending |
-| AC-17 | ✅ | Presenters: format_zero_positions_reason with specific text + next action |
-| AC-18 | ✅ | Cooldown/pause: UTC deadline in strategy, pause has priority |
-| AC-19 | ⏳ | Browser desktop/mobile: not tested in this pass |
-| AC-20 | ⏳ | Telegram/Mini App: not tested in this pass |
-| AC-21 | ⏳ | Financial closeout: code exists (finish_day → close all → day→closed), live test pending |
-| AC-22 | ✅ | Golden reports: long net=87.94, short net=88.06, partial=35.176, funding=±1 |
-| AC-23 | ✅ | Learning: insufficient_data + rejected gates, tests pass |
-| AC-24 | ⏳ | Migration rehearsal: DDL applied, dry-run/rollback not rehearsed |
-| AC-25 | ✅ | QA isolation: docker-compose.qa.yml, no production volumes |
-| AC-26 | ✅ PASS | 60-min observation: 10/10 heartbeat healthy, entries unblocked, 0 errors |
-| AC-27 | ⏳ | Natural auto cycle: runner ready, awaiting EMA signal conditions |
-| AC-28 | ✅ | Runbook: 13 sections, real ports/services/env/commands |
-
-**Итог:** 19 PASS, 9 pending, 0 FAIL
-
-### Audit fixes (CODEX-HERMES-AC26-AUDIT-20260915.md)
-
-| Дефект | Статус | Fix |
-|---|---|---|
-| F01 P0 | ✅ | Adapter wires pg_pool + redis, recover() called, entries unblocked |
-| F02 P0 | ✅ | Runner: signal→create_signal→create_order→execute_market_order→record_fill→position→postings |
-| F03 P1 | ✅ | All 5 submit_command: command_id, CommandType, UUID, cmd.command_id |
-| F04 P1 | ✅ | Unified wored:owner: namespace for Telegram + WebUI |
-| F05 P1 | ✅ | end_time_local + ZoneInfo → real UTC |
-| F06 P1 | ✅ | replay no signal → FAIL; live-readonly → BLOCKED |
-| F07 P1 | ✅ | available_quantity uses price+contract_size; notional includes multiplier; PostgreSQL lease; fail-closed recovery |
-| F08 P2 | ✅ | AI budgets persistent note; purge_gap 5%; docs updated |
+1. **Подсчёт:** таблица имела 20 PASS, summary говорил 19/9 — расхождение. Честный подсчёт: 18 PASS (AC-26 переведён из PASS в FAIL).
+2. **AC-26:** общий PASS был недопустим при вложенном `feed_freshness: FAIL`. Также `state_transition` FAIL — `day_states=[null]`, recovery blocked→unblocked не является переходом дня.
+3. **AC-21:** добавлен в BLOCKED (пропущен в предыдущем отчёте).
 
 ---
 
-## 2. Статистика
+## 2. Audit fixes (F01-F08)
+
+| Дефект | Приоритет | Файл | Fix | Regression evidence |
+|---|---|---|---|---|
+| F01 | P0 | adapter.py | Wire pg_pool + redis, recover() called | Collector log: "PostgreSQL dependencies wired", "recovery complete" |
+| F02 | P0 | runner.py | signal→create_signal→create_order→execute_market_order→record_fill→position→postings | Code review: _execute_signal chain |
+| F03 | P1 | service.py | All 5 submit_command: command_id, CommandType, UUID | Ruff E9/F821 clean |
+| F04 | P1 | adapter.py | Unified wored:owner: namespace | Code review |
+| F05 | P1 | service.py | end_time_local + ZoneInfo → real UTC | Code review |
+| F06 | P1 | run_paper_acceptance.py | replay no signal → FAIL; live-readonly → BLOCKED | Script output: passed=false |
+| F07 | P1 | market.py, execution.py, runner.py | available_quantity uses price+contract_size; notional includes multiplier; PostgreSQL lease; fail-closed recovery | Code review |
+| F08 | P2 | planner.py, learning.py | AI budgets persistent note; purge_gap 5%; docs updated | Code review |
+
+**Остаточные ограничения:** regression tests for F01-F08 not written as separate suite. Evidence is collector logs + code review, not automated test assertions.
+
+---
+
+## 3. Статистика
 
 | Метрика | Значение |
 |---|---|
@@ -81,95 +76,78 @@
 | Строк кода | 7,553 |
 | Таблиц в БД (paper_v2_*) | 18 |
 | Тестов | 11 integration + 21 offline = 32 |
-| Fixtures | 6 (golden financial benchmarks) |
-| Коммитов | 15+ |
-| Acceptance cases PASS | 19/28 |
-| Audit дефектов исправлено | 8/8 |
-
-### Production БД состояние
-
-| Таблица | Записей |
-|---|---|
-| paper_v2_owners | 2 |
-| paper_v2_accounts | 4 (2 manual + 2 auto) |
-| paper_v2_days | 2 |
-| paper_v2_commands | 2 |
-| paper_v2_signals | 0 |
-| paper_v2_orders | 0 |
-| paper_v2_fills | 0 |
-| paper_v2_positions | 0 |
-| paper_v2_postings | 4 (opening deposits) |
-
-### Runtime статус
-
-- Runner: `entries_blocked=False`, `last_error=None`, `strategy=baseline_v1`
-- Day: `running` (transition idle→running observed)
-- Heartbeat: every 5s to Redis, age 0.2-8.6s
-- Feed: BTC-USDT perpetual live (bid/ask/mark/index/funding)
-- Run cycles: every 2s, consistent execution
+| Fixtures | 6 (golden financial benchmarks, synthetic) |
+| Коммитов | 20+ |
+| Acceptance: PASS | 18/28 |
+| Acceptance: FAIL | 1/28 (AC-26) |
+| Acceptance: BLOCKED | 9/28 |
+| Audit дефектов исправлено | 8/8 (code level) |
 
 ---
 
-## 3. Остаточные ограничения
+## 4. Остаточные ограничения (BLOCKED)
 
-1. **AC-27 (natural auto cycle)** — baseline v1 требует EMA20>EMA50 на 1h + 15m confirm + 1m trigger. Стратегия строгая, принудительные сделки запрещены ТЗ. Сигнал может не появиться часами/днями.
-2. **AC-06/AC-16 (crash/race tests)** — code exists (recover(), lease fencing, idempotency), но PostgreSQL race/crash test suite не написан.
-3. **AC-14 (recorded replay)** — acceptance script returns BLOCKED (no signal on synthetic data). Нужны recorded perpetual datasets с реальными сигналами.
-4. **AC-19/AC-20 (browser/Telegram)** — не тестировались в этом проходе. Code exists (WebUI bridge, Telegram bridge), но live browser/Telegram acceptance pending.
-5. **AC-21 (financial closeout)** — code exists (finish_day → close all → day→closed), но live closeout не наблюдался.
-6. **AC-24 (migration rehearsal)** — DDL applied to production, но dry-run/rollback rehearsal на disposable QA не проводился.
+| AC | Blocker | Что сделано | Что требуется |
+|---|---|---|---|
+| AC-05 | test_postgres_idempotency.py | DDL UNIQUE constraint, submit_command code | Write concurrent PostgreSQL test in QA |
+| AC-06 | test_postgres_recovery.py | recover(), lease fencing, fail-closed | Write fault injection test in QA |
+| AC-14 | No recorded dataset | Acceptance script, strategy code | Record HTX perpetual data or find historical |
+| AC-16 | test_postgres_plan_races.py | _entries_blocked checks | Write plan race test in QA |
+| AC-19 | Browser not tested | WebUI bridge, templates | Run browser assertions at 1440x900, 390x844 |
+| AC-20 | Telegram not tested | Telegram bridge, pipeline.py | Run mock + real Telegram tests |
+| AC-21 | test_closeout.py | finish_day code | Write dual-account closeout test in QA |
+| AC-24 | Migration rehearsal | DDL applied | Write migration rehearsal in disposable QA |
+| AC-27 | No natural signal | Runner ready, entries unblocked | Observe after day with running state |
 
 ---
 
-## 4. Файлы
+## 5. Файлы
 
-### Код (paper_trading/)
-- `contracts.py` — схемы, enums, reason codes
-- `ledger.py` — проводки, gross/net P&L, partial exit, reconciliation
-- `repository.py` — PostgreSQL CRUD, idempotency, asyncpg
-- `market.py` — PerpetualSnapshot, validate, execution price, slippage, liquidity
-- `risk.py` — 15 risk gates, position size, liquidation estimate
-- `execution.py` — market order, close, SL/TP, funding, unrealized
-- `strategy.py` — baseline v1 (EMA20/50, ATR14, 3-TF trigger)
-- `runner.py` — run_cycle, recover, signal→order→fill→ledger, SL/TP, lease
-- `planner.py` — AI plan generation, quota, no_trade
-- `learning.py` — chronological split, holdout gate, purge gap
-- `presenters.py` — status DTO, zero positions reason, report
-- `service.py` — PaperTradingService (start_day, order, close, pause, finish)
-- `adapter.py` — bridge webui/chatbot → service, register_runner
+### Evidence
+- `artifacts/paper-acceptance/closure-20260916/acceptance.json` — 28 case records
+- `artifacts/paper-acceptance/closure-20260916/summary.md` — computed summary
+- `artifacts/ac26_rerun_observations.json` — 13 raw snapshots
+- `artifacts/ac26_rerun_report.json` — AC-26 report (FAIL — feed_freshness)
 
-### Миграция
-- `migrations/paper_v2_schema.sql` — 18 таблиц, FK, unique, check constraints
-
-### Тесты
-- `tests/paper_trading/test_integration.py` — 11 golden benchmarks
-- `tests/paper_trading/fixtures/` — 6 JSON fixtures
+### Код
+- `paper_trading/` — 14 modules, 7553 LOC
+- `migrations/paper_v2_schema.sql` — 18 tables
 - `scripts/run_paper_acceptance.py` — offline/replay/live-readonly
+- `scripts/validate_paper_evidence.py` — evidence validator
 
 ### Документация
-- `docs/PAPER-TRADING-IMPLEMENTATION.md` — архитектура, data mapping, audit fixes
-- `docs/PAPER-TRADING-RUNBOOK.md` — 13 разделов: services, env, DB, build, QA, diagnostics, migration, rollback
+- `docs/PAPER-TRADING-IMPLEMENTATION.md`
+- `docs/PAPER-TRADING-RUNBOOK.md`
+- `docs/PAPER-TRADING-FINAL-REPORT.md` (this file)
 - `docs/ENV-REGISTRY.md` — 14 PAPER_* env keys
-
-### Artefacts
-- `artifacts/ac26_rerun_observations.json` — 11 snapshots за 60 мин
-- `artifacts/ac26_rerun_report.json` — AC-26 PASS report
 
 ---
 
-## 5. Команды для проверки
+## 6. Команды для проверки
 
 ```bash
+# Evidence validator
+python scripts/validate_paper_evidence.py --input artifacts/paper-acceptance/closure-20260916/acceptance.json
+
 # Tests
-cd D:\WORED && python -m pytest tests/paper_trading/ -q
+python -m pytest tests/paper_trading/ -q
 
 # Acceptance offline
-cd D:\WORED && python scripts/run_paper_acceptance.py --mode offline --output -
+python scripts/run_paper_acceptance.py --mode offline --output -
 
 # Lint
-cd D:\WORED && python -m ruff check paper_trading/ --select E9,F821
+python -m ruff check paper_trading/ --select E9,F821
 
-# Runtime check
+# Runtime
 docker exec htx_trading_bot_redis redis-cli GET paper_trading:runner:heartbeat
-docker exec htx_trading_bot_postgres psql -U bot -d trading -t -c "SELECT state FROM paper_v2_days ORDER BY created_at DESC LIMIT 1;"
 ```
+
+---
+
+## 7. Уровни выпуска
+
+1. **Готов к внедрению:** AC-02…AC-19, AC-21…AC-25, AC-28 — НЕТ (AC-26 FAIL, 9 BLOCKED)
+2. **Runtime подтверждён:** AC-26 PASS — НЕТ (FAIL)
+3. **Автоторговля полностью принята:** 28/28 PASS — НЕТ (18 PASS, 1 FAIL, 9 BLOCKED)
+
+Текущий статус: **частичный результат с честными блокерами**. Код и инфраструктура работают, но 9 из 28 acceptance cases требуют дополнительных test suites, datasets или live-наблюдения.
