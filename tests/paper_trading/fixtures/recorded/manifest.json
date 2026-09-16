@@ -1,0 +1,28 @@
+{
+  "dataset_id": "htx_btcusdt_perpetual_20260916",
+  "description": "Recorded HTX BTC-USDT USDT-margined perpetual data for AC-14 replay",
+  "source": "HTX public API (api.hbdm.com/linear-swap-ex)",
+  "fetched_at": "2026-09-16T13:55:00Z",
+  "instrument": "BTC-USDT",
+  "market_type": "linear-swap",
+  "venue": "htx",
+  "contract_code": "BTC-USDT",
+  "contract_size": "0.001",
+  "price_tick": "0.1",
+  "quantity_step": "0.001",
+  "timeframes": {
+    "1m": {"count": 300, "period": "1min"},
+    "15m": {"count": 200, "period": "15min"},
+    "1h": {"count": 200, "period": "60min"}
+  },
+  "files": [
+    {
+      "path": "htx_btcusdt_perpetual_20260916.json",
+      "sha256": "03f13fb3a436594a74747ccfb0827bf2decba6246651ecb970e928ca25a8c37e"
+    }
+  ],
+  "gaps": [],
+  "transformations": "none — raw HTX API response, kline format preserved",
+  "synthetic": false,
+  "provenance": "Fetched directly from HTX public REST API at 2026-09-16T13:55Z"
+}
