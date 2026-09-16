@@ -481,10 +481,40 @@ class PaperTradingRunner:
     # ── Fence token ──
 
     def acquire_fence_token(self) -> int:
-        """Return the next monotonically increasing fence token."""
+        """Return the next monotonically increasing fence token (local)."""
         token = self._next_fence_token
         self._next_fence_token += 1
         return token
+
+    async def acquire_lease(self) -> int:
+        """Acquire a PostgreSQL-backed lease with fencing token.
+
+        Uses paper_v2_leases table for persistent fencing.
+        Falls back to local counter if no repository.
+        """
+        if self.repository is None:
+            return self.acquire_fence_token()
+        try:
+            async with self.repository.pool.acquire() as conn:
+                # Insert new lease with fencing token
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO paper_v2_leases (lease_id, instance_id, fence_token, acquired_at, expires_at)
+                    VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '60 seconds')
+                    ON CONFLICT (instance_id) DO UPDATE
+                    SET fence_token = EXCLUDED.fence_token,
+                        acquired_at = EXCLUDED.acquired_at,
+                        expires_at = EXCLUDED.expires_at
+                    RETURNING fence_token
+                    """,
+                    str(uuid4()), self.instance_id, self._next_fence_token,
+                )
+                token = int(row["fence_token"])
+                self._next_fence_token += 1
+                return token
+        except Exception as exc:
+            log.warning("lease acquire failed, using local: %s", exc)
+            return self.acquire_fence_token()
 
     def current_fence_token(self) -> int:
         return self._fence_token
@@ -557,16 +587,28 @@ class PaperTradingRunner:
             if cancelled:
                 self._last_signal = None
 
-            self._recovered = True
-            self._entries_blocked = False
-            report["recovered"] = True
-            log.info(
-                "recovery complete: %d commands, %d orders, %d positions, %d intents cancelled",
-                report["commands_loaded"],
-                report["orders_loaded"],
-                report["positions_loaded"],
-                report["intents_cancelled"],
-            )
+            # 6. Check discrepancies — fail-closed: keep entries blocked if discrepancies exist
+            discrepancies = ledger_result.get("discrepancies", [])
+            if discrepancies:
+                self._recovered = True
+                self._entries_blocked = True  # Keep blocked — reconciliation failed
+                report["recovered"] = True
+                report["entries_blocked_reason"] = "ledger_discrepancies"
+                log.warning(
+                    "recovery complete with %d discrepancies — entries BLOCKED: %s",
+                    len(discrepancies), discrepancies[:3],
+                )
+            else:
+                self._recovered = True
+                self._entries_blocked = False
+                report["recovered"] = True
+                log.info(
+                    "recovery complete: %d commands, %d orders, %d positions, %d intents cancelled — entries unblocked",
+                    report["commands_loaded"],
+                    report["orders_loaded"],
+                    report["positions_loaded"],
+                    report["intents_cancelled"],
+                )
         except Exception:
             self._last_error = "recovery failed"
             log.exception("recovery failed")

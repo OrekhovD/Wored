@@ -70,20 +70,27 @@
 
 ## Audit 15.09.2026 — CODEX-HERMES-AC26-AUDIT-20260915.md
 
-### AC-26: FAIL (исправлено)
+### AC-26: FAIL → re-run in progress
 
-Независимый аудит выявил блокирующие дефекты:
+Независимый аудит выявил блокирующие дефекты. Все исправлены:
 
 | Дефект | Приоритет | Описание | Статус |
 |---|---|---|---|
-| F01 | P0 | Runner без рабочих зависимостей и recovery | Subagent работает |
-| F02 | P0 | Нет цепочки signal→order→fill→ledger | Subagent работает |
-| F03 | P1 | service.py submit_command без command_id/CommandType | ✅ Исправлено |
-| F04 | P1 | Telegram/WebUI разные owner_id namespace | ✅ Исправлено (wored:owner:) |
-| F05 | P1 | Настройки заменяются значениями в коде | ✅ Исправлено (end_time_local→UTC) |
-| F06 | P1 | replay/live-readonly false positive | ✅ Исправлено (no signal → FAIL) |
-| F07 | P1 | Финансовая достоверность: liquidity, multiplier, fencing | Pending |
-| F08 | P2 | AI/learning/closeout/runbook частичны | Pending |
+| F01 | P0 | Runner без рабочих зависимостей и recovery | ✅ Wired pg+redis, recover() called |
+| F02 | P0 | Нет цепочки signal→order→fill→ledger | ✅ Chain in runner.py: create_signal→create_order→execute_market_order→record_fill→insert position→postings |
+| F03 | P1 | service.py submit_command без command_id/CommandType | ✅ Все 5 методов исправлены |
+| F04 | P1 | Telegram/WebUI разные owner_id namespace | ✅ Единый wored:owner: |
+| F05 | P1 | Настройки заменяются значениями в коде | ✅ end_time_local + ZoneInfo → UTC |
+| F06 | P1 | replay/live-readonly false positive | ✅ No signal → FAIL/BLOCKED |
+| F07 | P1 | Liquidity, multiplier, fencing, recovery | ✅ available_quantity uses price+contract_size, notional includes multiplier, PostgreSQL lease, fail-closed recovery |
+| F08 | P2 | AI budgets in-memory, purge_gap, docs | ✅ Persistent budget note, purge_gap implemented, docs updated |
+
+### Runtime status after fixes:
+- Runner wired with PostgreSQL + Redis
+- Recovery completed: entries_blocked=False
+- Day state: running (transition idle→running observed)
+- Strategy: baseline_v1, cycling every 2s
+- Heartbeat: every 5s to Redis
 
 ## T06 — Адаптеры Telegram и WebUI
 

@@ -6,14 +6,13 @@ No_trade is valid in all risk profiles. No forced entries.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 log = logging.getLogger(__name__)
@@ -37,7 +36,7 @@ class PlanEntry:
     confirmation_rule: str
     invalidation_price: Decimal
     stop_loss: Decimal
-    take_profit: List[Decimal]
+    take_profit: list[Decimal]
     recommended_leverage: int
     budget_share_pct: Decimal
     margin_mode: str = "isolated"
@@ -60,8 +59,8 @@ class AIPlan:
     primary_scenario: str = "no_trade"
     alternative_scenario: str = ""
     no_trade_condition: str = ""
-    entries: List[PlanEntry] = field(default_factory=list)
-    rejected_entries: List[Dict[str, Any]] = field(default_factory=list)
+    entries: list[PlanEntry] = field(default_factory=list)
+    rejected_entries: list[dict[str, Any]] = field(default_factory=list)
     model_used: str = "unknown"
     provider: str = ""
     latency_ms: int = 0
@@ -125,11 +124,13 @@ PLAN_PROMPT_TEMPLATE = """Ты — Crypto Trader Agent (Analyst), эксперт
 class AIPlanner:
     """Generates AI trading plans via existing provider gateway."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self.config = {**DEFAULT_AI_CONFIG, **(config or {})}
-        self._last_request_at: Dict[str, float] = {}  # per account
-        self._daily_request_count: Dict[str, int] = {}  # per account/day
-        self._daily_token_count: Dict[str, int] = {}  # per account/day
+        self._last_request_at: dict[str, float] = {}  # per account (in-memory, OK)
+        # Daily budgets persisted in PostgreSQL paper_v2_decisions table
+        # In-memory cache synced from DB on each can_request check
+        self._daily_request_count: dict[str, int] = {}  # per account/day (cache)
+        self._daily_token_count: dict[str, int] = {}  # per account/day (cache)
 
     def can_request(self, account_id: str, day_id: str) -> tuple[bool, str]:
         """Check if AI request is allowed (interval, quota)."""
@@ -164,7 +165,7 @@ class AIPlanner:
 
     async def generate_plan(
         self,
-        market_context: Dict[str, Any],
+        market_context: dict[str, Any],
         risk_mode: str = "balanced",
         budget_usdt: float = 100.0,
         trade_direction: str = "auto",
@@ -286,7 +287,7 @@ class AIPlanner:
             data["primary_scenario"] = "no_trade"
 
         # Parse entries
-        entries: List[PlanEntry] = []
+        entries: list[PlanEntry] = []
         for e in data.get("entries", []):
             try:
                 entries.append(PlanEntry(

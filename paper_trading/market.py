@@ -16,28 +16,28 @@ All monetary values are :class:`~decimal.Decimal` — never float.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, Optional
+from typing import Any
 
 __all__ = [
-    "PerpetualSnapshot",
-    "DEFAULT_MAX_AGE_SECONDS",
+    "DEFAULT_AVAILABLE_FRACTION",
     "DEFAULT_LATENCY_MS",
+    "DEFAULT_MAX_AGE_SECONDS",
     "DEFAULT_SLIPPAGE_BPS",
     "DEFAULT_SPREAD_MAX_BPS",
-    "DEFAULT_AVAILABLE_FRACTION",
-    "validate_snapshot",
-    "is_fresh",
-    "get_execution_price",
-    "apply_slippage",
+    "PerpetualSnapshot",
     "apply_latency",
-    "check_spread",
+    "apply_slippage",
     "available_quantity",
+    "check_spread",
+    "get_execution_price",
+    "is_fresh",
     "read_snapshot_from_redis",
     "snapshot_from_dict",
     "snapshot_to_dict",
+    "validate_snapshot",
 ]
 
 DEFAULT_MAX_AGE_SECONDS = 5.0
@@ -120,9 +120,9 @@ class PerpetualSnapshot:
     last: Decimal
     mark: Decimal
     index: Decimal
-    funding_rate: Optional[Decimal]
-    next_funding_at: Optional[str]
-    component_times: Dict[str, str]
+    funding_rate: Decimal | None
+    next_funding_at: str | None
+    component_times: dict[str, str]
     contract_size: Decimal
     price_tick: Decimal
     quantity_step: Decimal
@@ -141,7 +141,7 @@ class PerpetualSnapshot:
         """Price at which an existing position is closed: bid for long, ask for short."""
         return self.bid if position_side == "long" else self.ask
 
-    def public_dict(self) -> Dict[str, Any]:
+    def public_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-safe dict with Decimal fields as plain strings."""
         return {
             key: (format(value, "f") if isinstance(value, Decimal) else value)
@@ -157,7 +157,7 @@ class PerpetualSnapshot:
 def validate_snapshot(
     snapshot: PerpetualSnapshot,
     *,
-    expected_contract: Optional[str] = None,
+    expected_contract: str | None = None,
 ) -> PerpetualSnapshot:
     """Validate invariants of a :class:`PerpetualSnapshot`.
 
@@ -380,24 +380,42 @@ def available_quantity(
     snapshot: PerpetualSnapshot,
     *,
     fraction: Decimal = DEFAULT_AVAILABLE_FRACTION,
+    used: Decimal = Decimal("0"),
 ) -> Decimal:
     """Estimate the executable quantity available at the top of book.
 
-    In paper trading we don't have real order-book depth, so we estimate the
-    available quantity as ``fraction`` of 1 contract, quantized to
-    ``quantity_step``.  For HTX BTC-USDT with quantity_step=0.001 and the
-    default fraction of 0.1, this returns 0.1 contracts.
+    For v1 (top-of-book snapshot model), the available quantity is a fraction
+    of the observed notional at the best quote, minus already-used volume in
+    this quote sequence.  Without real order-book depth, we use the bid/ask
+    price and the contract size to estimate how much is executable.
 
     The result is always rounded down to the nearest ``quantity_step``.
     """
     if fraction <= 0:
         raise ValueError("fraction: must be positive")
-    raw = Decimal(1) * fraction
     step = snapshot.quantity_step
     if step <= 0:
         raise ValueError("quantity_step: must be positive")
-    quantized = (raw / step).to_integral_value(rounding="ROUND_DOWN") * step
-    return quantized
+
+    # Use observed price to estimate notional, then convert to contracts
+    # For HTX BTC-USDT: contract_size=0.001 BTC, so 1 contract = 0.001 * price
+    ref_price = snapshot.ask if snapshot.ask else snapshot.last
+    if ref_price <= 0:
+        ref_price = snapshot.last
+    if ref_price <= 0:
+        raise ValueError("no valid reference price for liquidity estimation")
+
+    contract_notional = snapshot.contract_size * ref_price
+    # Max visible notional = some assumed top-of-book size * fraction
+    # Without real volume data, use a configurable fraction of 1 BTC equivalent
+    max_notional = ref_price * fraction  # e.g. 0.1 * price = 0.1 BTC worth
+    available_notional = max_notional - used * contract_notional
+    if available_notional <= 0:
+        return Decimal("0")
+
+    raw_contracts = available_notional / contract_notional
+    quantized = (raw_contracts / step).to_integral_value(rounding="ROUND_DOWN") * step
+    return quantized if quantized > 0 else Decimal("0")
 
 
 # ---------------------------------------------------------------------------
@@ -406,10 +424,10 @@ def available_quantity(
 
 
 def snapshot_from_dict(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     *,
-    expected_contract: Optional[str] = None,
-    mode: Optional[str] = None,
+    expected_contract: str | None = None,
+    mode: str | None = None,
 ) -> PerpetualSnapshot:
     """Construct and validate a :class:`PerpetualSnapshot` from a dict.
 
@@ -425,7 +443,7 @@ def snapshot_from_dict(
         )
 
     funding_raw = payload.get("funding_rate")
-    funding_rate: Optional[Decimal]
+    funding_rate: Decimal | None
     if funding_raw is None or funding_raw == "":
         funding_rate = None
     else:
@@ -456,7 +474,7 @@ def snapshot_from_dict(
     return validate_snapshot(snapshot, expected_contract=expected_contract)
 
 
-def snapshot_to_dict(snapshot: PerpetualSnapshot) -> Dict[str, Any]:
+def snapshot_to_dict(snapshot: PerpetualSnapshot) -> dict[str, Any]:
     """Serialize a :class:`PerpetualSnapshot` to a JSON-safe dict."""
     return snapshot.public_dict()
 

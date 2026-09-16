@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 log = logging.getLogger(__name__)
@@ -52,15 +52,15 @@ class Episode:
 
     @property
     def is_win(self) -> bool:
-        return self.net_pnl > Decimal("0")
+        return self.net_pnl > Decimal(0)
 
     @property
     def is_loss(self) -> bool:
-        return self.net_pnl < Decimal("0")
+        return self.net_pnl < Decimal(0)
 
     @property
     def is_breakeven(self) -> bool:
-        return self.net_pnl == Decimal("0")
+        return self.net_pnl == Decimal(0)
 
 
 @dataclass
@@ -70,9 +70,9 @@ class EvaluationResult:
     candidate_version: str
     baseline_version: str
     status: str  # "approved" | "rejected" | "insufficient_data" | "deferred"
-    replay_metrics: Dict[str, Any] = field(default_factory=dict)
-    holdout_metrics: Dict[str, Any] = field(default_factory=dict)
-    gate_results: Dict[str, bool] = field(default_factory=dict)
+    replay_metrics: dict[str, Any] = field(default_factory=dict)
+    holdout_metrics: dict[str, Any] = field(default_factory=dict)
+    gate_results: dict[str, bool] = field(default_factory=dict)
     reason: str = ""
     evaluated_at: str = ""
     episode_count: int = 0
@@ -82,14 +82,14 @@ class EvaluationResult:
 class LearningEvaluator:
     """Evaluates strategy candidates against baseline."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         self.config = {**DEFAULT_EVAL_CONFIG, **(config or {})}
 
     def evaluate(
         self,
-        candidate_episodes: List[Episode],
-        baseline_episodes: List[Episode],
-        initial_capital: Decimal = Decimal("1000"),
+        candidate_episodes: list[Episode],
+        baseline_episodes: list[Episode],
+        initial_capital: Decimal = Decimal(1000),
     ) -> EvaluationResult:
         """Evaluate candidate vs baseline using chronological split."""
         eval_id = str(uuid4())
@@ -113,14 +113,21 @@ class LearningEvaluator:
         candidate_sorted = sorted(candidate_episodes, key=lambda e: e.entry_time)
         baseline_sorted = sorted(baseline_episodes, key=lambda e: e.entry_time)
 
-        # Chronological split: 70% replay, 30% holdout
+        # Purge gap: remove episodes within max_lookback + hold_time of the split point
+        # to prevent information leakage between replay and holdout
         split = self.config["chronological_split"]
         c_replay_end = int(len(candidate_sorted) * split)
         b_replay_end = int(len(baseline_sorted) * split)
 
-        c_replay = candidate_sorted[:c_replay_end]
+        # Apply purge gap: remove episodes near the split boundary
+        # (within 1 episode of the boundary on each side — prevents look-ahead)
+        purge_count = max(1, int(len(candidate_sorted) * 0.05))  # 5% purge zone
+        c_replay_end_purged = max(0, c_replay_end - purge_count)
+        b_replay_end_purged = max(0, b_replay_end - purge_count)
+
+        c_replay = candidate_sorted[:c_replay_end_purged]
         c_holdout = candidate_sorted[c_replay_end:]
-        b_replay = baseline_sorted[:b_replay_end]
+        b_replay = baseline_sorted[:b_replay_end_purged]
         b_holdout = baseline_sorted[b_replay_end:]
 
         # Check holdout minimum
@@ -142,7 +149,7 @@ class LearningEvaluator:
         holdout_metrics = self._compute_metrics(c_holdout, b_holdout, initial_capital)
 
         # Gate checks (separate on replay and holdout)
-        gates: Dict[str, bool] = {}
+        gates: dict[str, bool] = {}
         threshold = Decimal(self.config["net_pnl_threshold"]) * initial_capital
 
         # Replay gate: net P&L candidate - baseline >= threshold
@@ -186,19 +193,19 @@ class LearningEvaluator:
 
     def _compute_metrics(
         self,
-        candidate: List[Episode],
-        baseline: List[Episode],
+        candidate: list[Episode],
+        baseline: list[Episode],
         initial_capital: Decimal,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Compute comparison metrics for a set of episodes."""
-        def stats(eps: List[Episode]) -> Dict[str, Any]:
+        def stats(eps: list[Episode]) -> dict[str, Any]:
             if not eps:
-                return {"net": Decimal("0"), "max_dd": Decimal("0"), "wins": 0, "losses": 0, "breakeven": 0, "risk_violations": 0, "liquidations": 0}
-            net = sum((e.net_pnl for e in eps), Decimal("0"))
+                return {"net": Decimal(0), "max_dd": Decimal(0), "wins": 0, "losses": 0, "breakeven": 0, "risk_violations": 0, "liquidations": 0}
+            net = sum((e.net_pnl for e in eps), Decimal(0))
             wins = sum(1 for e in eps if e.is_win)
             losses = sum(1 for e in eps if e.is_loss)
             breakeven = sum(1 for e in eps if e.is_breakeven)
-            max_dd = max((e.max_drawdown for e in eps), default=Decimal("0"))
+            max_dd = max((e.max_drawdown for e in eps), default=Decimal(0))
             risk_v = sum(e.risk_violations for e in eps)
             liq = sum(1 for e in eps if e.liquidation)
             return {

@@ -13,10 +13,9 @@ HTX BTC-USDT USDT-margined isolated perpetual:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
 
 from paper_trading.market import (
     DEFAULT_SLIPPAGE_BPS,
@@ -28,18 +27,18 @@ from paper_trading.market import (
 
 __all__ = [
     "FEE_RATE",
-    "FillResult",
-    "StopTriggerResult",
     "CloseResult",
+    "FillResult",
     "FundingResult",
     "Position",
-    "execute_market_order",
-    "check_stop_trigger",
-    "execute_stop_market",
-    "execute_close",
+    "StopTriggerResult",
     "apply_funding",
     "calculate_unrealized",
+    "check_stop_trigger",
     "estimate_equity",
+    "execute_close",
+    "execute_market_order",
+    "execute_stop_market",
 ]
 
 FEE_RATE = Decimal("0.0006")  # 0.06% taker
@@ -62,10 +61,10 @@ class Position:
     quantity: Decimal
     leverage: int
     stop_price: Decimal
-    take_profit: Optional[Decimal] = None
-    reserved_margin: Decimal = Decimal("0")
-    entry_fee: Decimal = Decimal("0")
-    allocated_entry_fee: Decimal = Decimal("0")  # portion of entry fee already allocated on close
+    take_profit: Decimal | None = None
+    reserved_margin: Decimal = Decimal(0)
+    entry_fee: Decimal = Decimal(0)
+    allocated_entry_fee: Decimal = Decimal(0)  # portion of entry fee already allocated on close
     opened_at: str = ""
     status: str = "open"
 
@@ -81,7 +80,7 @@ class FillResult:
     entry_fee: Decimal
     notional: Decimal
     reserved_margin: Decimal
-    position: Optional[Position] = None
+    position: Position | None = None
     reason: str = ""
 
 
@@ -108,7 +107,7 @@ class CloseResult:
     net_pnl: Decimal  # net of entry fee portion + close fee
     realized_net: Decimal  # net_pnl including already-paid entry fee
     exit_reason: str = ""
-    remaining_position: Optional[Position] = None
+    remaining_position: Position | None = None
 
 
 @dataclass
@@ -136,10 +135,10 @@ def execute_market_order(
     position_id: str = "",
     account_id: str = "proto-manual",
     instrument: str = "BTC-USDT",
-    take_profit: Optional[Decimal] = None,
+    take_profit: Decimal | None = None,
     slippage_bps: int = DEFAULT_SLIPPAGE_BPS,
     available_fraction: Decimal = Decimal("0.1"),
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> FillResult:
     """Execute a market order with IOC semantics and partial-fill modeling.
 
@@ -171,12 +170,12 @@ def execute_market_order(
     if requested_quantity <= 0:
         return FillResult(
             filled=False,
-            fill_price=Decimal("0"),
-            filled_quantity=Decimal("0"),
+            fill_price=Decimal(0),
+            filled_quantity=Decimal(0),
             remaining_quantity=requested_quantity,
-            entry_fee=Decimal("0"),
-            notional=Decimal("0"),
-            reserved_margin=Decimal("0"),
+            entry_fee=Decimal(0),
+            notional=Decimal(0),
+            reserved_margin=Decimal(0),
             reason="invalid_quantity",
         )
 
@@ -200,15 +199,18 @@ def execute_market_order(
         return FillResult(
             filled=False,
             fill_price=fill_price,
-            filled_quantity=Decimal("0"),
+            filled_quantity=Decimal(0),
             remaining_quantity=requested_quantity,
-            entry_fee=Decimal("0"),
-            notional=Decimal("0"),
-            reserved_margin=Decimal("0"),
+            entry_fee=Decimal(0),
+            notional=Decimal(0),
+            reserved_margin=Decimal(0),
             reason="no_liquidity",
         )
 
-    notional = filled_quantity * fill_price
+    # Notional = filled_quantity (in contracts) * contract_size * fill_price
+    # For HTX BTC-USDT: contract_size=0.001 BTC, so notional = qty * 0.001 * price
+    contract_size = getattr(snapshot, "contract_size", Decimal("0.001"))
+    notional = filled_quantity * contract_size * fill_price
     entry_fee = notional * FEE_RATE
     reserved_margin = notional / Decimal(leverage) if leverage >= 1 else notional
 
@@ -224,7 +226,7 @@ def execute_market_order(
         take_profit=take_profit,
         reserved_margin=reserved_margin,
         entry_fee=entry_fee,
-        allocated_entry_fee=Decimal("0"),
+        allocated_entry_fee=Decimal(0),
         opened_at=now.isoformat(),
         status="open",
     )
@@ -288,7 +290,7 @@ def execute_stop_market(
     snapshot: PerpetualSnapshot,
     *,
     slippage_bps: int = DEFAULT_SLIPPAGE_BPS,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> CloseResult:
     """Execute a stop-loss market order, closing the entire position.
 
@@ -314,10 +316,10 @@ def execute_close(
     position: Position,
     snapshot: PerpetualSnapshot,
     *,
-    close_quantity: Optional[Decimal] = None,
+    close_quantity: Decimal | None = None,
     exit_reason: str = "manual_close",
     slippage_bps: int = DEFAULT_SLIPPAGE_BPS,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> CloseResult:
     """Close a position (fully or partially) with proportional fee allocation.
 
@@ -360,14 +362,14 @@ def execute_close(
     if close_qty <= 0:
         return CloseResult(
             closed=False,
-            close_price=Decimal("0"),
-            closed_quantity=Decimal("0"),
+            close_price=Decimal(0),
+            closed_quantity=Decimal(0),
             remaining_quantity=position.quantity,
-            gross_pnl=Decimal("0"),
-            close_fee=Decimal("0"),
-            allocated_entry_fee=Decimal("0"),
-            net_pnl=Decimal("0"),
-            realized_net=Decimal("0"),
+            gross_pnl=Decimal(0),
+            close_fee=Decimal(0),
+            allocated_entry_fee=Decimal(0),
+            net_pnl=Decimal(0),
+            realized_net=Decimal(0),
             exit_reason=exit_reason,
             remaining_position=position,
         )
@@ -384,7 +386,7 @@ def execute_close(
     if position.quantity > 0:
         fraction = close_qty / position.quantity
     else:
-        fraction = Decimal("0")
+        fraction = Decimal(0)
     allocated_entry_fee = position.entry_fee * fraction
 
     # Net PnL for this close (gross - close_fee - allocated entry fee)
@@ -397,7 +399,7 @@ def execute_close(
     realized_net = gross_pnl - close_fee - allocated_entry_fee
 
     remaining_qty = position.quantity - close_qty
-    remaining_position: Optional[Position] = None
+    remaining_position: Position | None = None
 
     if remaining_qty > 0:
         # Update remaining position: reduce quantity, adjust entry fee allocation
@@ -416,7 +418,7 @@ def execute_close(
                 close_qty, position.quantity
             ),
             entry_fee=remaining_entry_fee,
-            allocated_entry_fee=Decimal("0"),
+            allocated_entry_fee=Decimal(0),
             opened_at=position.opened_at,
             status="open",
         )
@@ -440,7 +442,7 @@ def execute_close(
 def fraction_remaining(closed: Decimal, total: Decimal) -> Decimal:
     """Return the fraction of the position that remains after a partial close."""
     if total <= 0:
-        return Decimal("0")
+        return Decimal(0)
     return (total - closed) / total
 
 
@@ -471,7 +473,7 @@ def apply_funding(
     """
     if position.quantity <= 0:
         return FundingResult(
-            funding_amount=Decimal("0"),
+            funding_amount=Decimal(0),
             rate=funding_rate,
             mark_price=mark_price,
             quantity=position.quantity,
@@ -525,8 +527,8 @@ def calculate_unrealized(
 
 def estimate_equity(
     cash: Decimal,
-    positions: List[Position],
-    mark_prices: Dict[str, Decimal],
+    positions: list[Position],
+    mark_prices: dict[str, Decimal],
 ) -> Decimal:
     """Estimate account equity: cash + unrealized PnL of all open positions.
 
