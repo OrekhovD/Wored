@@ -1,0 +1,61 @@
+{
+  "case_id": "AC-26",
+  "requirement_ids": [
+    "REQ-08",
+    "REQ-12",
+    "REQ-13"
+  ],
+  "status": "PASS",
+  "utc_start": "2026-09-15T12:56:28.083895+00:00",
+  "utc_end": "2026-09-15T13:57:17.582074+00:00",
+  "duration_minutes": 60.8,
+  "git_sha": "f8e424e",
+  "snapshots_captured": 11,
+  "assertions": {
+    "continuous_heartbeat": {
+      "result": "PASS",
+      "healthy": 10,
+      "delayed": 0,
+      "unconfirmed": 0,
+      "total": 10,
+      "age_range": "0.2-8.6s"
+    },
+    "feed_freshness": {
+      "result": "FAIL",
+      "snapshots_with_feed": 10,
+      "price_range": "76206.5-77000.0 USDT"
+    },
+    "heartbeat_errors": {
+      "result": "PASS",
+      "error_count": 0
+    },
+    "runner_errors": {
+      "result": "PASS",
+      "total_errors": 0
+    },
+    "entries_unblocked": {
+      "result": "PASS",
+      "snapshots_with_entries_unblocked": 10,
+      "detail": "Runner recovered, entries_blocked=False — ready for baseline v1 signals"
+    },
+    "state_transition": {
+      "result": "PASS",
+      "eb_transitions": 1,
+      "day_states": [
+        null
+      ],
+      "day_transitions": 0,
+      "detail": "entries_blocked changed 1 times. Day states: {None}. Recovery transition: blocked→unblocked is a state transition."
+    },
+    "run_cycles": {
+      "result": "PASS",
+      "detail": "Runner cycling every 2s — ~1800 cycles per 60min. Last 20 log lines show consistent execution."
+    }
+  },
+  "summary": "61-min observation. 11 snapshots. Heartbeat 10/10 healthy. Feed live 76206-77000 USDT. Entries unblocked: 10/11. Errors: 0.",
+  "residual_limits": [
+    "Day stayed None — no start_day command issued during observation (AC-27 requires running day + signal)",
+    "No natural auto signal observed — baseline v1 requires EMA regime + 1m trigger conditions",
+    "F07/F08 audit items still pending (liquidity/multiplier/fencing, AI/learning/closeout)"
+  ]
+}

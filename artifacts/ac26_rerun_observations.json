@@ -1,0 +1,239 @@
+[
+  {
+    "timestamp": "2026-09-15T12:56:28.083895+00:00",
+    "checks": {
+      "healthz": {
+        "alive": true
+      },
+      "readyz": {
+        "error": "no response"
+      },
+      "heartbeat": {
+        "instance_id": "ebd13486-a56",
+        "age_seconds": 5.3,
+        "last_error": null,
+        "entries_blocked": false,
+        "strategy_version": "baseline_v1"
+      },
+      "feed": {
+        "bid": "77019.9",
+        "ask": "77020",
+        "last": "77023.7",
+        "funding_rate": "0.000100000000000000",
+        "received_at": "2026-09-15T12:56:28.21319"
+      },
+      "paper_trading": {
+        "day_state": null,
+        "day_id": null,
+        "accounts": [],
+        "next_action": "start"
+      },
+      "collector": {
+        "run_cycles_last_20": 0,
+        "errors_last_20": 0,
+        "last_error": null
+      },
+      "containers": {
+        "collector": "Up 2 minutes",
+        "webui": "Up 8 minutes (unhealthy)",
+        "chatbot": "Up 8 minutes",
+        "chatbot_wored": "Up 8 minutes",
+        "postgres": "Up 8 minutes (healthy)",
+        "redis": "Up 8 minutes",
+        "tunnel": "Up 8 minutes"
+      }
+    }
+  },
+  {
+    "timestamp": "2026-09-15T13:03:14.301983+00:00",
+    "checks": {
+      "heartbeat_age": 0.2,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76979.2",
+      "feed_last": "76988.2",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-15T13:09:15.015111+00:00",
+    "checks": {
+      "heartbeat_age": 1.0,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "77000",
+      "feed_last": "77000",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-15T13:15:15.118586+00:00",
+    "checks": {
+      "heartbeat_age": 1.0,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76976",
+      "feed_last": "76970.8",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-15T13:21:15.520107+00:00",
+    "checks": {
+      "heartbeat_age": 1.4,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76939.3",
+      "feed_last": "76932.3",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-15T13:27:15.641394+00:00",
+    "checks": {
+      "heartbeat_age": 1.5,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76898.9",
+      "feed_last": "76894.5",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-15T13:33:15.901223+00:00",
+    "checks": {
+      "heartbeat_age": 6.7,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76757.1",
+      "feed_last": "76744.4",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-15T13:39:16.288819+00:00",
+    "checks": {
+      "heartbeat_age": 7.2,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76268.2",
+      "feed_last": "76273",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-15T13:45:16.971226+00:00",
+    "checks": {
+      "heartbeat_age": 8.0,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76456.2",
+      "feed_last": "76460.9",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-15T13:51:17.036724+00:00",
+    "checks": {
+      "heartbeat_age": 7.9,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76214",
+      "feed_last": "76206.5",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-15T13:57:17.582074+00:00",
+    "checks": {
+      "heartbeat_age": 8.6,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76435.1",
+      "feed_last": "76420",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-15T14:03:18.310346+00:00",
+    "checks": {
+      "heartbeat_age": -0.7,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76479.8",
+      "feed_last": "76482",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  },
+  {
+    "timestamp": "2026-09-15T14:09:18.618675+00:00",
+    "checks": {
+      "heartbeat_age": -0.4,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76402.2",
+      "feed_last": "76402.3",
+      "paper_trading": {
+        "day_state": null,
+        "accounts": []
+      },
+      "run_cycles": 0,
+      "runner_errors": 0
+    }
+  }
+]
