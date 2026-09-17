@@ -121,8 +121,8 @@
   function fmt(v, d) { d = d == null ? 1 : d; return v == null || !isFinite(v) ? '—' : v.toLocaleString('ru-RU', { minimumFractionDigits: d, maximumFractionDigits: d }); }
   function fmtUsd(v, d) { d = d == null ? 2 : d; return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(d); }
   function pct(v, d) { d = d == null ? 2 : d; return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v * 100).toFixed(d) + '%'; }
-  function hhmm(t) { return new Date(t * 1000).toISOString().slice(11, 16); }
-  function ddhh(t) { var s = new Date(t * 1000).toISOString(); return s.slice(8, 10) + '.' + s.slice(5, 7) + ' ' + s.slice(11, 16); }
+  function hhmm(t) { var d = new Date(t * 1000 + 7 * 3600 * 1000); return d.toISOString().slice(11, 16); }
+  function ddhh(t) { var s = new Date(t * 1000 + 7 * 3600 * 1000).toISOString(); return s.slice(8, 10) + '.' + s.slice(5, 7) + ' ' + s.slice(11, 16); }
 
   // ── chart initialization ────────────────────────────────────────
   function initChart() {
@@ -184,7 +184,7 @@
       if (!p || !p.time) { renderLegend(); return; }
       var f = chartData.forecast.find(function (x) { return x.time === p.time; });
       if (f) {
-        L.innerHTML = '<span style="color:var(--ui-accent)">ПРОГНОЗ t+' + f.step + ' · ' + hhmm(f.time) + ' UTC</span>' +
+        L.innerHTML = '<span style="color:var(--ui-accent)">ПРОГНОЗ t+' + f.step + ' · ' + hhmm(f.time) + ' BKK</span>' +
           '<span>O ' + fmt(f.open) + '</span><span>C q10/q50/q90 ' + fmt(f.c10) + ' / ' + fmt(f.close) + ' / ' + fmt(f.c90) + '</span>' +
           '<span>H q90 ' + fmt(f.h90) + '</span><span>L q10 ' + fmt(f.l10) + '</span><span>P(up) ' + (f.p_up * 100).toFixed(0) + '%</span>';
         return;

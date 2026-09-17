@@ -72,23 +72,27 @@ def fmt_qty(value: Optional[float], asset: str = 'BTC') -> str:
 
 
 def fmt_time(iso: Optional[str]) -> str:
-    """Format ISO UTC → 'DD.MM HH:MM UTC'. None → '—'."""
+    """Format ISO UTC → 'DD.MM HH:MM Bangkok'. None → '—'."""
     if not iso:
         return '—'
     try:
         d = datetime.fromisoformat(iso.replace('Z', '+00:00'))
-        return d.strftime('%d.%m %H:%M') + ' UTC'
+        from datetime import timedelta as _td
+        tz_bangkok = timezone(_td(hours=7))
+        return d.astimezone(tz_bangkok).strftime('%d.%m %H:%M')
     except (ValueError, AttributeError):
         return '—'
 
 
 def fmt_time_full(iso: Optional[str]) -> str:
-    """Format ISO UTC → 'DD.MM.YYYY HH:MM:SS UTC'. None → '—'."""
+    """Format ISO UTC → 'DD.MM.YYYY HH:MM:SS Bangkok'. None → '—'."""
     if not iso:
         return '—'
     try:
         d = datetime.fromisoformat(iso.replace('Z', '+00:00'))
-        return d.strftime('%d.%m.%Y %H:%M:%S') + ' UTC'
+        from datetime import timedelta as _td
+        tz_bangkok = timezone(_td(hours=7))
+        return d.astimezone(tz_bangkok).strftime('%d.%m.%Y %H:%M:%S')
     except (ValueError, AttributeError):
         return '—'
 

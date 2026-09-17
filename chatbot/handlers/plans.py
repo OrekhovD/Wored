@@ -79,7 +79,11 @@ async def cmd_plans(message: Message):
         if plans:
             lines.append("🔄 <b>Версии планов</b>")
             for p in plans:
-                lines.append(f"  v{p['version']} — {p['created_at'].strftime('%H:%M UTC')}")
+                from datetime import timezone, timedelta
+                tz_bkk = timezone(timedelta(hours=7))
+                created = p['created_at']
+                ts_str = created.astimezone(tz_bkk).strftime('%H:%M') if hasattr(created, 'astimezone') else str(created)
+                lines.append(f"  v{p['version']} — {ts_str} BKK")
             lines.append("")
 
         if revisions:

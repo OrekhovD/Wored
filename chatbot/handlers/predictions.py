@@ -51,7 +51,7 @@ def _compact_target_label(value: str | None) -> str:
     if " " in value:
         parts = value.split()
         if len(parts) >= 2:
-            return f"{parts[1]} UTC"
+            return f"{parts[1]} BKK"
     return value
 
 

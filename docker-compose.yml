@@ -4,6 +4,9 @@ services:
     container_name: htx_trading_bot_postgres
     env_file:
       - .env.postgres
+    environment:
+      - TZ=Asia/Bangkok
+      - PGTZ=Asia/Bangkok
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -19,6 +22,8 @@ services:
   redis:
     image: redis:7
     container_name: htx_trading_bot_redis
+    environment:
+      - TZ=Asia/Bangkok
     ports:
       - '127.0.0.1:6379:6379'
     restart: unless-stopped
@@ -41,6 +46,7 @@ services:
       - ./paper_trading:/opt/paper_trading:ro
     environment:
       - PYTHONPATH=/app:/chatbot:/webui:/opt
+      - TZ=Asia/Bangkok
     command: python main.py
     restart: unless-stopped
 
@@ -60,6 +66,7 @@ services:
       - ./config:/config:ro
     environment:
       - PYTHONPATH=/app:/opt
+      - TZ=Asia/Bangkok
     command: python main.py
     restart: unless-stopped
 
@@ -79,6 +86,7 @@ services:
       - ./config:/config:ro
     environment:
       - PYTHONPATH=/app:/opt
+      - TZ=Asia/Bangkok
     command: python main.py
     restart: unless-stopped
 
@@ -101,6 +109,7 @@ services:
       - ./config:/config:ro
     environment:
       - PYTHONPATH=/app:/chatbot:/opt
+      - TZ=Asia/Bangkok
     command: uvicorn app:app --host 0.0.0.0 --port 8000
     ports:
       - '127.0.0.1:${WEBUI_PORT:-8080}:8000'

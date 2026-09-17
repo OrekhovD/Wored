@@ -27,7 +27,13 @@ async def send_alerts(message: Message):
     for alert in valid_history:
         sym = alert['symbol'].upper()
         # format timestamp
-        ts = alert['timestamp'].strftime("%Y-%m-%d %H:%M")
+        from datetime import datetime, timezone, timedelta
+        tz_bkk = timezone(timedelta(hours=7))
+        ts_obj = alert['timestamp']
+        if hasattr(ts_obj, 'astimezone'):
+            ts = ts_obj.astimezone(tz_bkk).strftime("%Y-%m-%d %H:%M")
+        else:
+            ts = str(ts_obj)
         emoji = "🚀" if alert['threshold'] > 0 else "🩸"
         lines.append(f"{emoji} <b>{sym}</b> {alert['threshold']:+.2f}% в <code>{ts}</code>")
         
