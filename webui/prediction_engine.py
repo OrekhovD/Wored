@@ -179,8 +179,8 @@ MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
         base_url=OLLAMA_BASE_URL,
         api_key_env="OLLAMA_API_KEY",
         tier="analyst",
-        timeout=40.0,
-        max_tokens=2000,
+        timeout=60.0,
+        max_tokens=4000,
     ),
     "premium": PredictionModelConfig(
         key="premium",
@@ -189,8 +189,8 @@ MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
         base_url=OLLAMA_BASE_URL,
         api_key_env="OLLAMA_API_KEY",
         tier="premium",
-        timeout=45.0,
-        max_tokens=2000,
+        timeout=90.0,
+        max_tokens=8000,
     ),
     "minimax": PredictionModelConfig(
         key="minimax",
@@ -691,7 +691,9 @@ async def _ollama_chat(
         resp.raise_for_status()
         data = resp.json()
 
-    if data.get("done") is not True or data.get("done_reason") not in (None, "stop"):
+    # Accept done_reason in (None, "stop", "length") — reasoning models may hit
+    # token limit ("length") after producing valid content in the final message.
+    if data.get("done") is not True or data.get("done_reason") not in (None, "stop", "length"):
         raise ValueError("Model response is incomplete")
     content = (data.get("message", {}).get("content", "") or "").strip()
     if not content:

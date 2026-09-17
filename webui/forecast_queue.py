@@ -186,7 +186,7 @@ async def process_one(
                 raise
             except Exception as exc:
                 error_code = type(exc).__name__
-                log.warning("Forecast %s failed: %s", request_id, error_code)
+                log.warning("Forecast %s failed: %s: %s", request_id, error_code, exc, exc_info=True)
 
             # Signal heartbeat to stop
             heartbeat_stop.set()
