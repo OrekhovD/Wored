@@ -30,14 +30,18 @@ __all__ = [
     "CloseResult",
     "FillResult",
     "FundingResult",
+    "MarginAdjustResult",
     "Position",
+    "ReverseResult",
     "StopTriggerResult",
+    "adjust_margin",
     "apply_funding",
     "calculate_unrealized",
     "check_stop_trigger",
     "estimate_equity",
     "execute_close",
     "execute_market_order",
+    "execute_reverse",
     "execute_stop_market",
 ]
 
@@ -555,3 +559,177 @@ def estimate_equity(
             continue
         equity += calculate_unrealized(pos, mark)
     return equity
+
+
+# ---------------------------------------------------------------------------
+# Margin adjustment (idempotent)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MarginAdjustResult:
+    """Result of an adjust_margin operation."""
+
+    position_id: str
+    delta: Decimal
+    new_reserved_margin: Decimal
+    new_liquidation_distance: Decimal
+    idempotency_key: str
+    applied: bool = True
+    reason: str = ""
+
+
+def adjust_margin(
+    position: Position,
+    delta: Decimal,
+    *,
+    idempotency_key: str,
+    maintenance_margin_rate: Decimal,
+    taker_fee_rate: Decimal = FEE_RATE,
+    notional: Decimal | None = None,
+    applied_keys: set[str] | None = None,
+) -> MarginAdjustResult:
+    """Adjust isolated margin on a position (idempotent).
+
+    A positive ``delta`` adds margin (top-up); a negative delta withdraws.
+    The operation is idempotent: if ``idempotency_key`` is in
+    ``applied_keys``, the result is returned without re-applying.
+
+    Parameters
+    ----------
+    position
+        The open position to adjust.
+    delta
+        Amount of USDT to add (positive) or withdraw (negative).
+    idempotency_key
+        Unique key for this operation.  Retry with the same key is a no-op.
+    maintenance_margin_rate
+        Current V5 MMR from the risk tier snapshot.
+    taker_fee_rate
+        Taker fee rate for liquidation distance recalculation.
+    notional
+        Position notional value.  If omitted, estimated from entry * qty.
+    applied_keys
+        Set of already-applied idempotency keys.  If provided and the key
+        is present, the operation is skipped.
+    """
+    if position.status != "open":
+        return MarginAdjustResult(
+            position_id=position.position_id,
+            delta=delta,
+            new_reserved_margin=position.reserved_margin,
+            new_liquidation_distance=Decimal(0),
+            idempotency_key=idempotency_key,
+            applied=False,
+            reason="position_not_open",
+        )
+
+    if applied_keys and idempotency_key in applied_keys:
+        return MarginAdjustResult(
+            position_id=position.position_id,
+            delta=delta,
+            new_reserved_margin=position.reserved_margin,
+            new_liquidation_distance=Decimal(0),
+            idempotency_key=idempotency_key,
+            applied=False,
+            reason="duplicate_idempotency_key",
+        )
+
+    new_margin = position.reserved_margin + delta
+    if new_margin <= 0:
+        return MarginAdjustResult(
+            position_id=position.position_id,
+            delta=delta,
+            new_reserved_margin=position.reserved_margin,
+            new_liquidation_distance=Decimal(0),
+            idempotency_key=idempotency_key,
+            applied=False,
+            reason="topup_rejected: margin would be non-positive",
+        )
+
+    eff_notional = notional or (position.entry_price * position.quantity)
+    d_liq = (new_margin) / eff_notional - maintenance_margin_rate - taker_fee_rate
+
+    position.reserved_margin = new_margin
+
+    return MarginAdjustResult(
+        position_id=position.position_id,
+        delta=delta,
+        new_reserved_margin=new_margin,
+        new_liquidation_distance=d_liq,
+        idempotency_key=idempotency_key,
+        applied=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Reverse position (atomic close + new order)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ReverseResult:
+    """Result of a reverse operation (close + new entry in one transaction)."""
+
+    closed_position_id: str
+    new_position_id: str
+    close_result: CloseResult
+    fill_result: FillResult
+    reason: str = ""
+
+
+def execute_reverse(
+    position: Position,
+    snapshot: PerpetualSnapshot,
+    *,
+    idempotency_key: str,
+    new_quantity: Decimal | None = None,
+    new_leverage: int | None = None,
+    new_stop_price: Decimal | None = None,
+    new_take_profit: Decimal | None = None,
+) -> ReverseResult:
+    """Reverse a position: close the current one and open in the opposite direction.
+
+    This is a logical atomic operation.  The caller is responsible for
+    wrapping both the close and new-order repository writes in a single
+    database transaction.
+
+    The new position direction is the opposite of the current one.
+    Entry price, stop, and take-profit are derived from the current
+    snapshot for the new direction.
+    """
+    from paper_trading.risk import calculate_liquidation_price, DEFAULT_MAINTENANCE_MARGIN_RATE
+
+    # 1. Close current position
+    close_res = execute_close(position, snapshot, close_quantity=position.quantity)
+
+    # 2. Determine new direction
+    new_direction = "short" if position.direction == "long" else "long"
+    qty = new_quantity or position.quantity
+    lev = new_leverage or position.leverage
+
+    # 3. Execute new market order in opposite direction
+    new_stop = new_stop_price or (
+        snapshot.bid * Decimal("0.995") if new_direction == "long"
+        else snapshot.ask * Decimal("1.005")
+    )
+    fill_res = execute_market_order(
+        snapshot=snapshot,
+        direction=new_direction,
+        requested_quantity=qty,
+        leverage=int(lev),
+        stop_price=new_stop,
+        take_profit=new_take_profit,
+    )
+
+    # 4. Generate new position ID
+    import uuid
+    new_pos_id = str(uuid.uuid4())
+
+    return ReverseResult(
+        closed_position_id=position.position_id,
+        new_position_id=new_pos_id,
+        close_result=close_res,
+        fill_result=fill_res,
+        reason="reverse_executed",
+    )
