@@ -359,9 +359,92 @@ async def get_candles(request: Request, symbol: str = "btcusdt", period: str = "
 
 @router.get("/forecast")
 async def get_forecast(request: Request, symbol: str = "btcusdt"):
-    """Return latest forecast run from Redis or mock."""
+    """Return latest forecast from forecast_requests/forecast_points or mock."""
     _require_api_auth(request)
 
+    # 1. Try PostgreSQL — forecast_requests + forecast_points
+    pool = getattr(request.app.state, "pg_pool", None)
+    if pool is not None:
+        try:
+            async with pool.acquire() as conn:
+                # Latest completed forecast request
+                row = await conn.fetchrow(
+                    "SELECT id, symbol, base_price, horizon_hours, base_timeframe, created_at "
+                    "FROM forecast_requests WHERE symbol = $1 AND status = 'completed' "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    symbol,
+                )
+                if row:
+                    # Get all forecast points for this request, grouped by step
+                    points = await conn.fetch(
+                        "SELECT step_index, target_time, predicted_price, predicted_high, "
+                        "predicted_low, confidence, predicted_change_pct "
+                        "FROM forecast_points WHERE request_id = $1 ORDER BY step_index",
+                        row["id"],
+                    )
+                    # Group by step_index, aggregate into q10/q50/q90
+                    from collections import defaultdict
+                    import statistics
+                    steps_map: dict[int, list[dict]] = defaultdict(list)
+                    for pt in points:
+                        steps_map[pt["step_index"]].append({
+                            "price": float(pt["predicted_price"]),
+                            "high": float(pt["predicted_high"]),
+                            "low": float(pt["predicted_low"]),
+                            "conf": float(pt["confidence"]),
+                            "change_pct": float(pt["predicted_change_pct"]),
+                            "target_time": pt["target_time"],
+                        })
+
+                    steps = []
+                    for step_idx in sorted(steps_map.keys()):
+                        pts = steps_map[step_idx]
+                        prices = [p["price"] for p in pts]
+                        highs = [p["high"] for p in pts]
+                        lows = [p["low"] for p in pts]
+                        n = len(prices)
+                        if n == 0:
+                            continue
+                        c50 = statistics.median(prices)
+                        c10 = sorted(prices)[max(0, int(n * 0.1) - 1)] if n > 1 else prices[0]
+                        c90 = sorted(prices)[min(n - 1, int(n * 0.9))] if n > 1 else prices[0]
+                        h90 = max(highs)
+                        l10 = min(lows)
+                        p_up = sum(1 for p in pts if p["change_pct"] > 0) / n
+                        avg_conf = sum(p["conf"] for p in pts) / n
+                        target_ts = pts[0]["target_time"]
+                        steps.append({
+                            "step": step_idx,
+                            "time": int(target_ts.replace(tzinfo=timezone.utc).timestamp()) if target_ts.tzinfo is None else int(target_ts.timestamp()),
+                            "open": round(c50, 1),
+                            "close": round(c50, 1),
+                            "high": round(h90, 1),
+                            "low": round(l10, 1),
+                            "c10": round(c10, 1),
+                            "c90": round(c90, 1),
+                            "h90": round(h90, 1),
+                            "l10": round(l10, 1),
+                            "vol": 0.0,
+                            "p_up": round(p_up, 2),
+                            "sigma": 0.008,
+                            "confidence": round(avg_conf, 1),
+                        })
+
+                    if steps:
+                        return {
+                            "request_id": row["id"],
+                            "symbol": row["symbol"],
+                            "base_price": float(row["base_price"]),
+                            "base_time": int(row["created_at"].timestamp()),
+                            "horizon_steps": len(steps),
+                            "steps": steps,
+                            "source": "postgres",
+                            "generated_at": row["created_at"].isoformat(),
+                        }
+        except Exception as exc:
+            log.warning("forecast_requests fetch failed: %s", exc)
+
+    # 2. Try Redis cache
     raw = await _redis_get(request, f"trader:forecast:{symbol}")
     if raw:
         try:
@@ -371,12 +454,13 @@ async def get_forecast(request: Request, symbol: str = "btcusdt"):
         except (json.JSONDecodeError, KeyError):
             pass
 
+    # 3. Fallback to mock
     return _mock_forecast()
 
 
 @router.get("/state")
 async def get_state(request: Request):
-    """Return current trading state (mode, profile, plan status, reason)."""
+    """Return current trading state from paper_v2_days or mock."""
     _require_api_auth(request)
 
     global _current_mode, _mode_reason
@@ -391,6 +475,35 @@ async def get_state(request: Request):
         except (json.JSONDecodeError, KeyError):
             pass
 
+    # Try paper_v2_days for real state
+    pool = getattr(request.app.state, "pg_pool", None)
+    if pool is not None:
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT state, strategy_version, settings_snapshot, created_at "
+                    "FROM paper_v2_days ORDER BY created_at DESC LIMIT 1"
+                )
+                if row:
+                    settings = row["settings_snapshot"]
+                    if not isinstance(settings, dict):
+                        settings = {}
+                    state = _mock_state()
+                    state["mode"] = _current_mode
+                    state["reason"] = _mode_reason
+                    state["plan_status"] = "active" if row["state"] == "running" else "idle"
+                    state["plan_version"] = row["strategy_version"] or "baseline_v1"
+                    # Map real settings fields
+                    if settings.get("max_leverage"):
+                        try:
+                            state["leverage"] = int(settings["max_leverage"])
+                        except (ValueError, TypeError):
+                            pass
+                    state["source"] = "paper_v2"
+                    return state
+        except Exception as exc:
+            log.warning("paper_v2_days fetch failed: %s", exc)
+
     state = _mock_state()
     state["mode"] = _current_mode
     state["reason"] = _mode_reason
@@ -399,10 +512,10 @@ async def get_state(request: Request):
 
 @router.get("/positions")
 async def get_positions(request: Request, status: str | None = None):
-    """Return open/closed positions from paper_v2 or mock."""
+    """Return open/closed positions from paper_v2 (honest empty when no data)."""
     _require_api_auth(request)
 
-    # Try paper_v2 / DB when available
+    # Try paper_v2 / DB
     pool = getattr(request.app.state, "pg_pool", None)
     if pool is not None:
         try:
@@ -410,26 +523,52 @@ async def get_positions(request: Request, status: str | None = None):
                 rows = await conn.fetch(
                     "SELECT * FROM paper_v2_positions ORDER BY opened_at DESC LIMIT 100"
                 )
-                if rows:
-                    positions = [dict(row) for row in rows]
-                    if status and status != "all":
-                        positions = [p for p in positions if p.get("status") == status]
-                    return {"positions": positions, "source": "paper_v2"}
+                positions = [dict(row) for row in rows]
+                if status and status != "all":
+                    positions = [p for p in positions if p.get("status") == status]
+                # Return real data — even if empty (honest)
+                return {"positions": positions, "source": "paper_v2", "count": len(positions)}
         except Exception as exc:
             log.warning("paper_v2 positions fetch failed: %s", exc)
 
+    # Fallback to mock only if DB unavailable
     positions = _mock_positions()
     if status and status != "all":
         positions = [p for p in positions if p.get("status") == status]
-    return {"positions": positions, "source": "mock"}
+    return {"positions": positions, "source": "mock", "count": len(positions)}
 
 
 @router.get("/activity")
 async def get_activity(request: Request, limit: int = 20):
-    """Return recent activity feed."""
+    """Return recent activity feed from paper_v2_events or mock."""
     _require_api_auth(request)
     limit = max(1, min(limit, 100))
 
+    # Try paper_v2_events
+    pool = getattr(request.app.state, "pg_pool", None)
+    if pool is not None:
+        try:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT event_type, payload, occurred_at "
+                    "FROM paper_v2_events ORDER BY occurred_at DESC LIMIT $1",
+                    limit,
+                )
+                if rows:
+                    items = []
+                    for r in rows:
+                        payload = r["payload"] or {}
+                        items.append({
+                            "time": int(r["occurred_at"].timestamp()),
+                            "who": payload.get("source", "system") if isinstance(payload, dict) else "system",
+                            "text": payload.get("message", r["event_type"]) if isinstance(payload, dict) else r["event_type"],
+                            "color": payload.get("level", "info") if isinstance(payload, dict) else "info",
+                        })
+                    return {"items": items, "source": "paper_v2"}
+        except Exception as exc:
+            log.warning("paper_v2_events fetch failed: %s", exc)
+
+    # Try Redis
     raw = await _redis_get(request, "trader:activity")
     if raw:
         try:
@@ -439,6 +578,7 @@ async def get_activity(request: Request, limit: int = 20):
         except (json.JSONDecodeError, KeyError):
             pass
 
+    # Fallback to mock
     return {"items": _mock_activity()[:limit], "source": "mock"}
 
 
