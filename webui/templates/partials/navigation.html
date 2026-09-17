@@ -23,10 +23,12 @@
     </div>
 
     {# ── Сессия ── #}
-    <div class="wored-nav-group{% if current_path in ('/daily-session', '/futures-lab', '/strategy') %} is-active{% endif %}">
+    <div class="wored-nav-group{% if current_path in ('/daily-session', '/futures-lab', '/strategy', '/trader') %} is-active{% endif %}">
       <a class="wored-nav-link{% if current_path == '/daily-session' %} is-current{% endif %}"
          href="/daily-session" aria-current="{% if current_path == '/daily-session' %}page{% else %}false{% endif %}">Сессия</a>
       <div class="wored-nav-secondary">
+        <a class="wored-nav-sublink{% if current_path == '/trader' %} is-current{% endif %}"
+           href="/trader" aria-current="{% if current_path == '/trader' %}page{% else %}false{% endif %}">Trader</a>
         <a class="wored-nav-sublink{% if current_path == '/futures-lab' %} is-current{% endif %}"
            href="/futures-lab" aria-current="{% if current_path == '/futures-lab' %}page{% else %}false{% endif %}">Позиции</a>
         <a class="wored-nav-sublink{% if current_path == '/strategy' %} is-current{% endif %}"
