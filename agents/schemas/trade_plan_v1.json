@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TradePlan v1",
+  "description": "Validated trade plan from the Planner role",
+  "type": "object",
+  "required": ["plan_version", "mode", "allowed_sides", "profile", "max_entries", "p_entry_min", "valid_until"],
+  "properties": {
+    "plan_version": {
+      "type": "string",
+      "description": "Semantic version of this plan"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["trade", "reduce_only", "pause"],
+      "description": "Trading mode"
+    },
+    "allowed_sides": {
+      "type": "array",
+      "items": {"type": "string", "enum": ["long", "short"]},
+      "minItems": 0,
+      "maxItems": 2
+    },
+    "profile": {
+      "type": "string",
+      "enum": ["P0", "P1"],
+      "description": "Risk profile. P2/P3 are disabled in v0.1"
+    },
+    "max_entries": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 12,
+      "description": "Maximum entries per plan validity window"
+    },
+    "max_reversals": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4
+    },
+    "p_entry_min": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Minimum probability of up move required for entry"
+    },
+    "valid_from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "valid_until": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "regime": {
+      "type": "string",
+      "enum": ["trend", "range", "volatile"],
+      "description": "Market regime classification"
+    },
+    "features_hash": {
+      "type": "string",
+      "description": "SHA-256 hash of input features for this plan"
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable reason for plan decisions"
+    }
+  },
+  "additionalProperties": false
+}

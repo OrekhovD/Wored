@@ -1,0 +1,76 @@
+{
+  "roles": {
+    "planner": {
+      "model": "deepseek-v4-flash",
+      "max_requests_per_day": 12,
+      "max_input_tokens": 1500,
+      "max_output_tokens": 300,
+      "trigger": "plan_expired or regime_change",
+      "min_interval_minutes": 120,
+      "fallback": "previous_plan_30min_then_reduce_only",
+      "schema": "agents/schemas/trade_plan_v1.json"
+    },
+    "critic": {
+      "model": "minimax-m3",
+      "max_requests_per_day": 12,
+      "max_input_tokens": 800,
+      "max_output_tokens": 160,
+      "trigger": "after_new_planner_plan",
+      "fallback": "confidence_multiplier_0.85",
+      "schema": "agents/schemas/critic_report_v1.json"
+    },
+    "coach": {
+      "model": "deepseek-v4-flash",
+      "max_requests_per_day": 4,
+      "max_input_tokens": 1000,
+      "max_output_tokens": 220,
+      "trigger": "after_auto_position_close",
+      "fallback": "deterministic_summary",
+      "schema": null
+    },
+    "daily_review": {
+      "model": null,
+      "max_requests_per_day": 0,
+      "max_input_tokens": 0,
+      "max_output_tokens": 0,
+      "trigger": "owner_triggered",
+      "fallback": "deterministic_markdown",
+      "schema": null
+    },
+    "weekly_review": {
+      "model": "glm-5.2",
+      "max_requests_per_day": 1,
+      "max_input_tokens": 5000,
+      "max_output_tokens": 500,
+      "trigger": "weekly",
+      "fallback": "no_narrative",
+      "schema": null
+    },
+    "entry_gate": {
+      "model": null,
+      "max_requests_per_day": 0,
+      "max_input_tokens": 0,
+      "max_output_tokens": 0,
+      "trigger": "disabled_v0.1",
+      "fallback": "deterministic_policy",
+      "schema": null
+    },
+    "scout": {
+      "model": null,
+      "max_requests_per_day": 0,
+      "max_input_tokens": 0,
+      "max_output_tokens": 0,
+      "trigger": "disabled_v0.1",
+      "fallback": "deterministic_regime",
+      "schema": null
+    }
+  },
+  "global": {
+    "max_requests_per_day": 48,
+    "max_tokens_per_day": 200000,
+    "target_monthly_cost_usd": 5.0,
+    "one_fallback_per_request": true,
+    "one_schema_retry_for_planner": true,
+    "feature_reuse_within_ttl": true
+  }
+}

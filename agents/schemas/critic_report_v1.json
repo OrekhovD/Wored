@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Critic Report v1",
+  "description": "Forecast-Critic assessment of a trade plan",
+  "type": "object",
+  "required": ["confidence_multiplier", "verdict", "reason"],
+  "properties": {
+    "confidence_multiplier": {
+      "type": "number",
+      "minimum": 0.01,
+      "maximum": 1.0,
+      "description": "Multiplier applied to plan confidence. Must never exceed 1.0 (never increase confidence)"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["accept", "reduce", "reject"],
+      "description": "Critic verdict on the plan"
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Short reason for the verdict"
+    },
+    "concerns": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Specific concerns identified"
+    }
+  },
+  "additionalProperties": false
+}
