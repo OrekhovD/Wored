@@ -508,6 +508,31 @@ async def ensure_prediction_schema(pool: asyncpg.Pool | None) -> None:
 async def get_symbol_snapshot(request: Request, symbol: str) -> dict[str, Any]:
     normalized_symbol = normalize_symbol(symbol)
     redis_client = request.app.state.redis_client
+
+    # 1. Try perpetual snapshot first (HTX USDT-margined linear swap)
+    if redis_client is not None:
+        perp_key = f"market:perpetual:htx:{symbol.upper().replace('USDT', '-USDT')}"
+        raw_perp = await redis_client.get(perp_key)
+        if raw_perp:
+            perp = safe_json(raw_perp)
+            last_price = float(perp.get("last", 0.0) or 0.0)
+            if last_price > 0 and perp.get("quality") in ("live", "ok"):
+                mark_price = float(perp.get("mark", 0.0) or last_price)
+                bid = float(perp.get("bid", 0.0) or 0.0)
+                ask = float(perp.get("ask", 0.0) or 0.0)
+                return {
+                    "symbol": normalized_symbol,
+                    "price": last_price,
+                    "mark": mark_price,
+                    "bid": bid,
+                    "ask": ask,
+                    "change_pct": 0.0,  # perpetual snapshot doesn't carry 24h change
+                    "volume": float(perp.get("volume_24h", 0.0) or 0.0),
+                    "source": "htx-perpetual",
+                    "timestamp": perp.get("source_at"),
+                }
+
+    # 2. Fallback to spot ticker (WebSocket cache)
     if redis_client is not None:
         raw = await redis_client.get(f"ticker:{normalized_symbol}")
         if raw:
@@ -519,10 +544,11 @@ async def get_symbol_snapshot(request: Request, symbol: str) -> dict[str, Any]:
                     "price": price,
                     "change_pct": float(snapshot.get("change_pct", 0.0) or 0.0),
                     "volume": float(snapshot.get("volume", 0.0) or 0.0),
-                    "source": snapshot.get("source", "redis-cache"),
+                    "source": "htx-spot-fallback",
                     "timestamp": snapshot.get("timestamp"),
                 }
 
+    # 3. Final fallback: HTX REST spot detail
     client: httpx.AsyncClient = request.app.state.http_client
     response = await client.get(f"{HTX_REST_URL}/market/detail/merged", params={"symbol": normalized_symbol})
     response.raise_for_status()

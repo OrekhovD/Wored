@@ -276,7 +276,7 @@ class HtxPerpetualPublisher:
             from collector.storage.redis_client import get_redis
         redis = get_redis()
         timeout = httpx.Timeout(8.0, connect=5.0)
-        ttl = max(15, int(self.poll_seconds * 5))
+        ttl = 60  # 60s TTL for perpetual snapshot (was max(15, poll*5))
         async with httpx.AsyncClient(timeout=timeout) as client:
             while True:
                 try:

@@ -48,7 +48,7 @@ async def handle_message(message, redis):
                 "received_at": time.time()
             }
             # Save to redis
-            await redis.set(f"ticker:{symbol}", json.dumps(ticker_data), ex=300)
+            await redis.set(f"ticker:{symbol}", json.dumps(ticker_data), ex=60)
 
     return None
 

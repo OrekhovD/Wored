@@ -15,7 +15,7 @@ async def cache_tickers(tickers: list[dict]):
     r = get_redis()
     pipeline = r.pipeline()
     for t in tickers:
-        pipeline.set(f"ticker:{t['symbol']}", json.dumps(t), ex=300) # cache 5 mins
+        pipeline.set(f"ticker:{t['symbol']}", json.dumps(t), ex=60) # cache 60s
     await pipeline.execute()
 
 async def publish_alert(symbol: str, msg: str):
