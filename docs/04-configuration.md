@@ -39,6 +39,11 @@
 | `LOG_LEVEL` | `INFO` | частично | уровень логирования |
 | `WEBUI_PORT` | `8080` | compose | внешний порт `webui` |
 | `HTX_REST_URL` | `https://api.huobi.pro` | `collector`, `webui` | базовый REST endpoint HTX |
+| `HTX_LINEAR_SWAP_BASE_URL` | `https://api.hbdm.com` | `collector` | публичный REST endpoint USDT-M perpetual; producer не использует торговые ключи |
+| `HTX_PERPETUAL_POLL_SECONDS` | `2` | `collector` | интервал обновления проверенного perpetual snapshot |
+| `PAPER_CONTRACTS` | `BTC-USDT` | `collector` | контракты симулятора через запятую |
+| `PAPER_MARKET_MODE` | `live` | `webui` | `demo` использует явно обозначенную тестовую цену; `live` требует проверенный perpetual-снимок в Redis без fallback |
+| `PAPER_MARKET_MAX_AGE_SECONDS` | `5` | `webui` | максимальный возраст исходной рыночной метки времени; допустимо значение больше 0 и не больше 60 секунд |
 | `WEBUI_AUTH_ENABLED` | `false` | `webui` | включает browser auth |
 | `WEBUI_ADMIN_USERNAME` | `admin` | `webui` | логин webui |
 | `WEBUI_ADMIN_PASSWORD` | пусто | `webui` | пароль webui |

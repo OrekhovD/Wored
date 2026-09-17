@@ -85,7 +85,7 @@ class TestNavStructure:
 
     async def test_nav_current_path_marked(self, client):
         await _login(client)
-        resp = await client.get("/command-deck")
+        resp = await client.get("/system")
         assert 'aria-current="page"' in resp.text
 
     async def test_nav_has_health_dots(self, client):

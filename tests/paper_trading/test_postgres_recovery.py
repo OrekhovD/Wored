@@ -5,9 +5,7 @@ maximum one fill, no orphaned debit/position.
 """
 from __future__ import annotations
 
-import asyncio
 import os
-from decimal import Decimal
 from uuid import uuid4
 
 import asyncpg

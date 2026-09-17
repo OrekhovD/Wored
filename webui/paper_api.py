@@ -43,6 +43,12 @@ try:
 except ImportError:
     pass
 
+
+def _use_pt_domain(request: Request) -> bool:
+    """Use the PostgreSQL domain bridge only when its runtime dependency exists."""
+    return _pt_available and getattr(request.app.state, "pg_pool", None) is not None
+
+
 DEFAULT_SETTINGS = {
     "end_time_local": "21:00",
     "timezone": "Asia/Bangkok",
@@ -253,7 +259,7 @@ def _preview(
 @router.get("/trading-day/current")
 async def get_current_day(request: Request) -> JSONResponse:
     # T06: try paper_trading domain service first
-    if _pt_available:
+    if _use_pt_domain(request):
         try:
             owner_id = _pt_owner_id("admin")  # TODO: get from session
             state = await _pt_get_state(owner_id)
@@ -327,7 +333,7 @@ async def save_settings(request: Request, body: Dict[str, Any] = Body(...)) -> J
 @router.post("/trading-day/start")
 async def start_day(request: Request, body: Dict[str, Any] = Body(...)) -> JSONResponse:
     # T06: try paper_trading domain service first
-    if _pt_available:
+    if _use_pt_domain(request):
         try:
             owner_id = _pt_owner_id("admin")
             result = await _pt_start_day(owner_id=owner_id, mode="baseline_auto")
@@ -604,7 +610,7 @@ def _report_account(
 async def finish_day(request: Request, day_id: str,
                      body: Dict[str, Any] = Body(...)) -> JSONResponse:
     # T06: try paper_trading domain service first
-    if _pt_available:
+    if _use_pt_domain(request):
         try:
             owner_id = _pt_owner_id("admin")
             result = await _pt_finish_day(owner_id)

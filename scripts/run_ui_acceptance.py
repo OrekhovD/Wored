@@ -7,6 +7,7 @@ Handles port-in-use conflicts with UI_QA_PORT_IN_USE exit code.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import socket
 import subprocess
@@ -80,8 +81,9 @@ def run_pytest(host: str, port: str, browser: str, artifacts: str) -> int:
         art_dir = Path(artifacts)
         art_dir.mkdir(parents=True, exist_ok=True)
         env["UI_QA_ARTIFACTS"] = str(art_dir)
-        args.extend(["--html=" + str(art_dir / "report.html"),
-                       "--junitxml=" + str(art_dir / "junit.xml")])
+        args.append("--junitxml=" + str(art_dir / "junit.xml"))
+        if importlib.util.find_spec("pytest_html") is not None:
+            args.append("--html=" + str(art_dir / "report.html"))
 
     proc = subprocess.run(args, cwd=str(ROOT), env=env)
     return proc.returncode

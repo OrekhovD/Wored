@@ -5,97 +5,183 @@
     {
       "provider": "ollama-cloud",
       "model_id": "glm-5.2",
-      "endpoint_type": "native",
+      "endpoint_type": "openai_compatible",
       "enabled": true,
       "cost_class": "free",
-      "capabilities": {"tools": false, "thinking": true, "json_schema": true, "vision": false},
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": true,
+        "vision": false
+      },
       "context_tokens": 131072,
       "max_output_tokens": 8192,
-      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
-      "validation_gate_id": null
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null,
+      "endpoint": "https://ollama.com/v1",
+      "api_key_env": "OLLAMA_CLOUD_API_KEY"
     },
     {
       "provider": "ollama-cloud",
       "model_id": "glm-5.1",
-      "endpoint_type": "native",
+      "endpoint_type": "openai_compatible",
       "enabled": true,
       "cost_class": "free",
-      "capabilities": {"tools": false, "thinking": true, "json_schema": true, "vision": false},
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": true,
+        "vision": false
+      },
       "context_tokens": 131072,
       "max_output_tokens": 8192,
-      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
-      "validation_gate_id": null
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null,
+      "endpoint": "https://ollama.com/v1",
+      "api_key_env": "OLLAMA_CLOUD_API_KEY"
     },
     {
       "provider": "ollama-cloud",
       "model_id": "deepseek-v4-pro",
-      "endpoint_type": "openai",
+      "endpoint_type": "openai_compatible",
       "enabled": true,
       "cost_class": "free",
-      "capabilities": {"tools": false, "thinking": true, "json_schema": true, "vision": false},
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": true,
+        "vision": false
+      },
       "context_tokens": 131072,
       "max_output_tokens": 8192,
-      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
-      "validation_gate_id": null
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null,
+      "endpoint": "https://ollama.com/v1",
+      "api_key_env": "OLLAMA_CLOUD_API_KEY"
     },
     {
       "provider": "ollama-cloud",
       "model_id": "deepseek-v4-flash",
-      "endpoint_type": "openai",
+      "endpoint_type": "openai_compatible",
       "enabled": true,
       "cost_class": "free",
-      "capabilities": {"tools": false, "thinking": true, "json_schema": false, "vision": false},
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": false,
+        "vision": false
+      },
       "context_tokens": 131072,
       "max_output_tokens": 4096,
-      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
-      "validation_gate_id": null
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null,
+      "endpoint": "https://ollama.com/v1",
+      "api_key_env": "OLLAMA_CLOUD_API_KEY"
     },
     {
       "provider": "ollama-cloud",
       "model_id": "minimax-m3",
-      "endpoint_type": "openai",
+      "endpoint_type": "openai_compatible",
       "enabled": true,
       "cost_class": "free",
-      "capabilities": {"tools": false, "thinking": false, "json_schema": true, "vision": false},
+      "capabilities": {
+        "tools": false,
+        "thinking": false,
+        "json_schema": true,
+        "vision": false
+      },
       "context_tokens": 24576,
       "max_output_tokens": 4096,
-      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
-      "validation_gate_id": null
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null,
+      "endpoint": "https://ollama.com/v1",
+      "api_key_env": "OLLAMA_CLOUD_API_KEY"
     },
     {
       "provider": "ollama-cloud",
       "model_id": "kimi-k2.6",
-      "endpoint_type": "native",
+      "endpoint_type": "openai_compatible",
       "enabled": true,
       "cost_class": "included",
-      "capabilities": {"tools": false, "thinking": true, "json_schema": true, "vision": false},
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": true,
+        "vision": false
+      },
       "context_tokens": 131072,
       "max_output_tokens": 8192,
-      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
-      "validation_gate_id": null
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null,
+      "endpoint": "https://ollama.com/v1",
+      "api_key_env": "OLLAMA_CLOUD_API_KEY"
     },
     {
       "provider": "ollama-cloud",
       "model_id": "kimi-k2:1t",
-      "endpoint_type": "native",
+      "endpoint_type": "openai_compatible",
       "enabled": true,
       "cost_class": "included",
-      "capabilities": {"tools": false, "thinking": true, "json_schema": true, "vision": false},
+      "capabilities": {
+        "tools": false,
+        "thinking": true,
+        "json_schema": true,
+        "vision": false
+      },
       "context_tokens": 131072,
       "max_output_tokens": 8192,
-      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
-      "validation_gate_id": null
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
+      "validation_gate_id": null,
+      "endpoint": "https://ollama.com/v1",
+      "api_key_env": "OLLAMA_CLOUD_API_KEY"
     },
     {
       "provider": "tokenrouter",
       "model_id": "moonshotai/kimi-k3-free",
       "endpoint_type": "openai",
-      "enabled": true,
+      "enabled": false,
       "cost_class": "free",
-      "capabilities": {"tools": false, "thinking": false, "json_schema": false, "vision": false},
+      "capabilities": {
+        "tools": false,
+        "thinking": false,
+        "json_schema": false,
+        "vision": false
+      },
       "context_tokens": 131072,
       "max_output_tokens": 4096,
-      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
       "validation_gate_id": null
     },
     {
@@ -104,10 +190,19 @@
       "endpoint_type": "openai",
       "enabled": false,
       "cost_class": "free",
-      "capabilities": {"tools": false, "thinking": false, "json_schema": true, "vision": false},
+      "capabilities": {
+        "tools": false,
+        "thinking": false,
+        "json_schema": true,
+        "vision": false
+      },
       "context_tokens": 131072,
       "max_output_tokens": 4096,
-      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
       "validation_gate_id": null
     },
     {
@@ -116,10 +211,19 @@
       "endpoint_type": "openai",
       "enabled": false,
       "cost_class": "free",
-      "capabilities": {"tools": false, "thinking": false, "json_schema": true, "vision": false},
+      "capabilities": {
+        "tools": false,
+        "thinking": false,
+        "json_schema": true,
+        "vision": false
+      },
       "context_tokens": 24576,
       "max_output_tokens": 4096,
-      "pricing": {"currency": "USD", "input_per_million": 0, "output_per_million": 0},
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0
+      },
       "validation_gate_id": null
     }
   ]

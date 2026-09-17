@@ -5,6 +5,10 @@
 
 {% block content %}
 <div class="page trading-day-page" id="tradingDayPage">
+  <div class="td-prototype-notice" id="tdModeNotice" role="status">
+    <strong>Симуляционная торговля.</strong>
+    Проверяется источник рынка; реальные заявки на биржу никогда не отправляются.
+  </div>
   {# ── Pre-start: two balances, end time, limits, start button ── #}
   <div id="tdPreStart" class="td-section">
     <div class="td-hero">
@@ -89,16 +93,16 @@
       <div class="td-account-card td-manual td-active-card" id="tdManualActiveCard">
         <div class="td-card-header">
           <span class="td-account-label">Ручной счёт</span>
-          <span class="td-account-origin">Manual</span>
+          <span class="td-account-origin">Вы управляете</span>
         </div>
         <div class="td-card-metrics">
-          <div class="td-metric"><span>Equity</span><span class="td-metric-value" id="tdManualEq">—</span></div>
-          <div class="td-metric"><span>Available</span><span class="td-metric-value" id="tdManualAvail">—</span></div>
-          <div class="td-metric"><span>Realized</span><span class="td-metric-value" id="tdManualRealized">—</span></div>
-          <div class="td-metric"><span>Unrealized</span><span class="td-metric-value" id="tdManualUnrealized">—</span></div>
-          <div class="td-metric"><span>Costs</span><span class="td-metric-value" id="tdManualCosts">—</span></div>
-          <div class="td-metric"><span>Loss budget</span><span class="td-metric-value" id="tdManualLossBudget">—</span></div>
-          <div class="td-metric"><span>Positions</span><span class="td-metric-value" id="tdManualPosCount">0</span></div>
+          <div class="td-metric"><span>Стоимость счёта</span><span class="td-metric-value" id="tdManualEq">—</span></div>
+          <div class="td-metric"><span>Доступно</span><span class="td-metric-value" id="tdManualAvail">—</span></div>
+          <div class="td-metric"><span>Зафиксировано</span><span class="td-metric-value" id="tdManualRealized">—</span></div>
+          <div class="td-metric"><span>В позициях</span><span class="td-metric-value" id="tdManualUnrealized">—</span></div>
+          <div class="td-metric"><span>Расходы</span><span class="td-metric-value" id="tdManualCosts">—</span></div>
+          <div class="td-metric"><span>Остаток лимита</span><span class="td-metric-value" id="tdManualLossBudget">—</span></div>
+          <div class="td-metric"><span>Позиций</span><span class="td-metric-value" id="tdManualPosCount">0</span></div>
         </div>
       </div>
       <div class="td-account-card td-auto td-active-card" id="tdAutoActiveCard">
@@ -107,13 +111,13 @@
           <span class="td-account-origin" id="tdAutoStatus">—</span>
         </div>
         <div class="td-card-metrics">
-          <div class="td-metric"><span>Equity</span><span class="td-metric-value" id="tdAutoEq">—</span></div>
-          <div class="td-metric"><span>Available</span><span class="td-metric-value" id="tdAutoAvail">—</span></div>
-          <div class="td-metric"><span>Realized</span><span class="td-metric-value" id="tdAutoRealized">—</span></div>
-          <div class="td-metric"><span>Unrealized</span><span class="td-metric-value" id="tdAutoUnrealized">—</span></div>
-          <div class="td-metric"><span>Costs</span><span class="td-metric-value" id="tdAutoCosts">—</span></div>
-          <div class="td-metric"><span>Loss budget</span><span class="td-metric-value" id="tdAutoLossBudget">—</span></div>
-          <div class="td-metric"><span>Positions</span><span class="td-metric-value" id="tdAutoPosCount">0</span></div>
+          <div class="td-metric"><span>Стоимость счёта</span><span class="td-metric-value" id="tdAutoEq">—</span></div>
+          <div class="td-metric"><span>Доступно</span><span class="td-metric-value" id="tdAutoAvail">—</span></div>
+          <div class="td-metric"><span>Зафиксировано</span><span class="td-metric-value" id="tdAutoRealized">—</span></div>
+          <div class="td-metric"><span>В позициях</span><span class="td-metric-value" id="tdAutoUnrealized">—</span></div>
+          <div class="td-metric"><span>Расходы</span><span class="td-metric-value" id="tdAutoCosts">—</span></div>
+          <div class="td-metric"><span>Остаток лимита</span><span class="td-metric-value" id="tdAutoLossBudget">—</span></div>
+          <div class="td-metric"><span>Позиций</span><span class="td-metric-value" id="tdAutoPosCount">0</span></div>
         </div>
       </div>
     </div>
@@ -128,7 +132,10 @@
 
     {# ── Chart area ── #}
     <div class="td-chart-area">
-      <div class="wored-chart-container" id="tdChartContainer"></div>
+      <div class="wored-chart-container" id="tdChartContainer" aria-label="График HTX BTC-USDT">
+        <div class="td-market-quote" id="tdMarketQuote">Проверка HTX perpetual…</div>
+        <div class="td-live-chart" id="tdLiveChart"></div>
+      </div>
     </div>
 
     {# ── Manual ticket (desktop right, mobile bottom sheet) ── #}
@@ -151,6 +158,9 @@
         <label class="td-field"><span>Риск (USDT)</span>
           <input type="number" id="tdTicketRisk" value="10" min="1" step="0.01">
         </label>
+        <label class="td-field"><span>Плечо</span>
+          <input type="number" id="tdTicketLeverage" value="10" min="1" max="10" step="1">
+        </label>
         <label class="td-field"><span>Стоп (обязателен)</span>
           <input type="number" id="tdTicketStop" step="0.01" required>
         </label>
@@ -161,12 +171,14 @@
       <div class="td-preview-section" id="tdPreviewSection" hidden>
         <div class="ticket-preview-row"><span>Количество</span><span id="tdPreviewQty">—</span></div>
         <div class="ticket-preview-row"><span>Объём</span><span id="tdPreviewNotional">—</span></div>
+        <div class="ticket-preview-row"><span>Плечо</span><span id="tdPreviewLeverage">—</span></div>
         <div class="ticket-preview-row"><span>Комиссия входа</span><span id="tdPreviewEntryFee">—</span></div>
         <div class="ticket-preview-row"><span>Оценка выхода</span><span id="tdPreviewExitFee">—</span></div>
         <div class="ticket-preview-row"><span>Break-even</span><span id="tdPreviewBE">—</span></div>
         <div class="ticket-preview-row"><span>Net at TP</span><span id="tdPreviewNetTP">—</span></div>
         <div class="ticket-preview-row"><span>Net at SL</span><span id="tdPreviewNetSL">—</span></div>
         <div class="ticket-preview-row"><span>Ликвидация</span><span id="tdPreviewLiq">—</span></div>
+        <div class="ticket-preview-row"><span>Источник цены</span><span id="tdPreviewSource">—</span></div>
         <div class="ticket-preview-row"><span>Цена на</span><span id="tdPreviewAsOf">—</span></div>
       </div>
       <div class="wored-action-reason" id="tdTicketReason" aria-live="polite"></div>
@@ -199,5 +211,5 @@
   </div>
 </div>
 
-<script type="module" src="/static/ui/trading-day.js"></script>
+<script type="module" src="/static/ui/trading-day.js?v=20260910-5"></script>
 {% endblock %}

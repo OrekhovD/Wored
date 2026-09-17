@@ -60,6 +60,7 @@ from services.sim_math import preview as simulate_preview, validate_order, settl
 from prediction_timeframes import period_to_minutes, STEP_MINUTES_MAP
 from ui_presenters import present_deck_ui, present_preview_ui
 from paper_api import router as paper_router
+from paper_store import PAPER_TABLES_SQL
 
 
 log = logging.getLogger("webui")
@@ -1792,6 +1793,7 @@ async def lifespan(app: FastAPI):
             await app.state.pg_pool.execute(FORECAST_QUEUE_SCHEMA)
             from services.sim_engine import SIM_TABLES_SQL
             await app.state.pg_pool.execute(SIM_TABLES_SQL)
+            await app.state.pg_pool.execute(PAPER_TABLES_SQL)
             async def runner(request_id, payload, connection):
                 await run_prediction_request_async(app, request_id, **payload, connection=connection)
             app.state.forecast_worker = asyncio.create_task(
@@ -1855,6 +1857,12 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.include_router(paper_router)
+
+
+@app.get("/trader", include_in_schema=False)
+async def trader_page_alias():
+    """Canonical Trader entrypoint; the page is served by Trading Day."""
+    return RedirectResponse(url="/trading-day", status_code=307)
 
 
 @app.get("/trading-day", response_class=HTMLResponse)
@@ -2914,7 +2922,7 @@ async def api_daily_session_active(request: Request):
     if pool is None:
         return JSONResponse({"session": None, "plan": None, "metrics": None, "trades": [], "events": [], "revision": None}, status_code=503)
 
-    async with pool.acquire() as conn:
+    async with pool.acquire() as conn, conn.transaction(isolation="repeatable_read", readonly=True):
         session = await conn.fetchrow(
             "SELECT * FROM trading_sessions ORDER BY created_at DESC LIMIT 1",
         )
@@ -2923,8 +2931,8 @@ async def api_daily_session_active(request: Request):
 
         session_id = str(session["id"])
         plan = await conn.fetchrow(
-            "SELECT * FROM session_plans WHERE session_id = $1 ORDER BY version DESC LIMIT 1",
-            session_id,
+            "SELECT * FROM session_plans WHERE session_id = $1 AND version = $2",
+            session_id, session["active_plan_version"],
         )
         entries = await conn.fetch(
             "SELECT * FROM planned_entries WHERE session_id = $1 AND plan_version = $2 ORDER BY created_at",
@@ -2982,6 +2990,7 @@ async def api_daily_session_active(request: Request):
         "plan": {
             "id": str(plan["id"]),
             "version": session["active_plan_version"],
+            "details": plan_json,
             "thesis": plan_json.get("thesis") if plan_json else None,
             "marketregime": plan_json.get("market_regime") if plan_json else None,
             "primaryscenario": plan_json.get("primary_scenario") if plan_json else None,
@@ -3185,114 +3194,17 @@ async def api_daily_session_revision(request: Request, body: dict = Body(...)):
     if pool is None:
         return JSONResponse({"ok": False, "error": "database_unavailable"}, status_code=503)
 
-    import uuid as uuid_mod
-
-    async with pool.acquire() as conn:
-        session = await conn.fetchrow(
-            "SELECT id, status, active_plan_version FROM trading_sessions WHERE id = $1",
-            session_id,
-        )
-        if not session:
-            return JSONResponse({"ok": False, "error": "session_not_found", "message": "session not found"}, status_code=404)
-
-        current_status = session["status"]
-        if current_status in ("stopped", "completed"):
-            return JSONResponse({"ok": False, "error": "session_ended", "message": f"session is {current_status}"}, status_code=409)
-
-        base_version = session["active_plan_version"]
-        new_version = base_version + 1
-        revision_id = str(uuid_mod.uuid4())
-        event_id = str(uuid_mod.uuid4())
-        now = datetime.now(timezone.utc)
-
-        revision_payload = {
-            "command": command,
-            "source": source,
-            "previous_status": current_status,
-            "applied_at": now.isoformat(),
-        }
-
-        # Write revision record
-        await conn.execute(
-            """
-            INSERT INTO session_revisions
-                (id, session_id, base_version, new_version, execution_command, revision_json, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, NOW())
-            """,
-            revision_id, session_id, base_version, new_version,
-            command, json.dumps(revision_payload),
-        )
-
-        # Update active plan version
-        await conn.execute(
-            "UPDATE trading_sessions SET active_plan_version = $2, updated_at = NOW() WHERE id = $1",
-            session_id, new_version,
-        )
-
-        # Apply state transitions
-        new_status = current_status
-        if command == "pause":
-            new_status = "paused"
-            await conn.execute(
-                "UPDATE trading_sessions SET status = 'paused', updated_at = NOW() WHERE id = $1",
-                session_id,
-            )
-        elif command == "close_all":
-            new_status = "stopped"
-            await conn.execute(
-                "UPDATE trading_sessions SET status = 'stopped', final_status_reason = 'close_all_command', updated_at = NOW() WHERE id = $1",
-                session_id,
-            )
-        elif command == "continue" and current_status == "paused":
-            new_status = "armed"
-            await conn.execute(
-                "UPDATE trading_sessions SET status = 'armed', updated_at = NOW() WHERE id = $1",
-                session_id,
-            )
-
-        # Write execution event
-        await conn.execute(
-            """
-            INSERT INTO execution_events
-                (id, session_id, event_type, state_before, state_after, event_payload, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, NOW())
-            """,
-            event_id, session_id,
-            f"revision_{command}",
-            current_status, new_status,
-            json.dumps(revision_payload),
-        )
-
-    # Publish to Redis for live stream
-    try:
-        import redis.asyncio as redis_async
-        redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
-        r = redis_async.from_url(redis_url, decode_responses=True)
-        event_msg = json.dumps({
-            "id": event_id,
-            "session_id": session_id,
-            "event_type": f"revision_{command}",
-            "state_before": current_status,
-            "state_after": new_status,
-            "event_payload": revision_payload,
-            "created_at": now.isoformat(),
-        })
-        await r.publish("daily_session_events", event_msg)
-        await r.aclose()
-    except Exception as exc:
-        log.warning("Redis publish failed: %s", exc)
-
-    log.info("Revision applied: session=%s cmd=%s %s→%s",
-             session_id, command, current_status, new_status)
-
-    return {
-        "ok": True,
-        "session_id": session_id,
-        "executioncommand": command,
-        "accepted": True,
-        "applied_at": now.isoformat(),
-        "new_status": new_status,
-    }
+    # One control implementation for Telegram and WebUI; plan versions only change on publication.
+    import sys
+    from pathlib import Path
+    chatbot_path = str(Path(__file__).resolve().parents[1] / "chatbot")
+    if chatbot_path not in sys.path:
+        sys.path.insert(0, chatbot_path)
+    from services.session_manager import apply_revision_command
+    result = await apply_revision_command(session_id, command, source=source, pool_override=pool)
+    if "error" in result:
+        return JSONResponse(result, status_code=404 if result["error"] == "session_not_found" else 409)
+    return result
 
 
 @app.get("/api/daily-session/events")

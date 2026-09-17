@@ -7,12 +7,10 @@ Retry after lost response must not create second fill.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
-import hashlib
-from datetime import datetime, timezone
-from decimal import Decimal
-from uuid import uuid4, UUID
+from uuid import uuid4
 
 import asyncpg
 import pytest

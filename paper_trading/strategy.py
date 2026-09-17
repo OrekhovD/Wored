@@ -11,9 +11,10 @@ All monetary arithmetic uses Decimal.  Python 3.9 compatible.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -42,21 +43,21 @@ class EMA:
     first *period* closes.  Subsequent values are updated incrementally.
     """
 
-    __slots__ = ("period", "alpha", "_value", "_seed_buf", "_seeded")
+    __slots__ = ("_seed_buf", "_seeded", "_value", "alpha", "period")
 
     def __init__(self, period: int) -> None:
         if period < 1:
             raise ValueError("EMA period must be >= 1")
         self.period = period
         self.alpha = TWO / Decimal(period + 1)
-        self._value: Optional[Decimal] = None
-        self._seed_buf: List[Decimal] = []
+        self._value: Decimal | None = None
+        self._seed_buf: list[Decimal] = []
         self._seeded = False
 
     # -- public API --------------------------------------------------------
 
     @property
-    def value(self) -> Optional[Decimal]:
+    def value(self) -> Decimal | None:
         """Current EMA value, or ``None`` if not yet seeded."""
         return self._value
 
@@ -78,7 +79,10 @@ class EMA:
             self._seed_buf = []
             return self._value
         # EMA recurrence:  E = alpha*price + (1-alpha)*prev
-        self._value = self.alpha * price + (Decimal(1) - self.alpha) * self._value
+        previous = self._value
+        if previous is None:
+            raise RuntimeError("EMA seeded without a previous value")
+        self._value = self.alpha * price + (Decimal(1) - self.alpha) * previous
         return self._value
 
     def reset(self) -> None:
@@ -95,19 +99,19 @@ class ATR14:
         ATR = (ATR_prev * (N-1) + TR) / N
     """
 
-    __slots__ = ("period", "_value", "_tr_buf", "_prev_close", "_seeded")
+    __slots__ = ("_prev_close", "_seeded", "_tr_buf", "_value", "period")
 
     def __init__(self, period: int = 14) -> None:
         if period < 1:
             raise ValueError("ATR period must be >= 1")
         self.period = period
-        self._value: Optional[Decimal] = None
-        self._tr_buf: List[Decimal] = []
-        self._prev_close: Optional[Decimal] = None
+        self._value: Decimal | None = None
+        self._tr_buf: list[Decimal] = []
+        self._prev_close: Decimal | None = None
         self._seeded = False
 
     @property
-    def value(self) -> Optional[Decimal]:
+    def value(self) -> Decimal | None:
         return self._value
 
     @property
@@ -146,7 +150,10 @@ class ATR14:
             self._tr_buf = []
             return self._value
         n = Decimal(self.period)
-        self._value = (self._value * (n - Decimal(1)) + tr) / n
+        previous = self._value
+        if previous is None:
+            raise RuntimeError("ATR seeded without a previous value")
+        self._value = (previous * (n - Decimal(1)) + tr) / n
         self._prev_close = close
         return self._value
 
@@ -230,7 +237,7 @@ class BaselineV1Strategy:
 
     VERSION = "baseline_v1"
 
-    def __init__(self, config: Optional[BaselineV1Config] = None) -> None:
+    def __init__(self, config: BaselineV1Config | None = None) -> None:
         self.cfg = config or BaselineV1Config()
 
         # 1h indicators (regime)
@@ -246,8 +253,11 @@ class BaselineV1Strategy:
 
         # cooldown
         self._last_sl_epoch: float = 0.0
-        self._last_signal_bar_ts: Optional[str] = None
-        self._dedup_key: Optional[str] = None
+        self._last_signal_bar_ts: str | None = None
+        self._dedup_key: str | None = None
+        self._last_1h_bar_ts: str | None = None
+        self._last_15m_bar_ts: str | None = None
+        self._last_1m_bar_ts: str | None = None
 
     # -- public -----------------------------------------------------------
 
@@ -260,6 +270,9 @@ class BaselineV1Strategy:
         self._last_sl_epoch = 0.0
         self._last_signal_bar_ts = None
         self._dedup_key = None
+        self._last_1h_bar_ts = None
+        self._last_15m_bar_ts = None
+        self._last_1m_bar_ts = None
 
     def on_stop_loss_hit(self, epoch: float) -> None:
         """Record that SL was hit, starting the cooldown window."""
@@ -272,14 +285,34 @@ class BaselineV1Strategy:
 
     def warm_up(self, bars_1h: Sequence[Bar], bars_15m: Sequence[Bar], bars_1m: Sequence[Bar]) -> None:
         """Pre-seed all indicators from historical bars."""
+        self.update_higher_timeframes(bars_1h, bars_15m)
+        self._update_1m(bars_1m)
+
+    def update_higher_timeframes(
+        self,
+        bars_1h: Sequence[Bar],
+        bars_15m: Sequence[Bar],
+    ) -> None:
+        """Consume each closed higher-timeframe candle exactly once."""
         for b in bars_1h:
+            if self._last_1h_bar_ts is not None and b.timestamp <= self._last_1h_bar_ts:
+                continue
             self._ema20_1h.update(b.close)
             self._ema50_1h.update(b.close)
+            self._last_1h_bar_ts = b.timestamp
         for b in bars_15m:
+            if self._last_15m_bar_ts is not None and b.timestamp <= self._last_15m_bar_ts:
+                continue
             self._ema20_15m.update(b.close)
+            self._last_15m_bar_ts = b.timestamp
+
+    def _update_1m(self, bars_1m: Sequence[Bar]) -> None:
         for b in bars_1m:
+            if self._last_1m_bar_ts is not None and b.timestamp <= self._last_1m_bar_ts:
+                continue
             self._ema20_1m.update(b.close)
             self._atr14_1m.update(b.high, b.low, b.close)
+            self._last_1m_bar_ts = b.timestamp
 
     def regime_bullish(self) -> bool:
         """1h regime: EMA20 > EMA50 (both must be ready)."""
@@ -300,13 +333,13 @@ class BaselineV1Strategy:
         self,
         *,
         bars_1m: Sequence[Bar],
-        close_1h: Optional[Decimal] = None,
-        close_15m: Optional[Decimal] = None,
+        close_1h: Decimal | None = None,
+        close_15m: Decimal | None = None,
         now_epoch: float,
-        day_end_epoch: Optional[float] = None,
+        day_end_epoch: float | None = None,
         account_id: str = "default",
-        dedup_context: Optional[str] = None,
-    ) -> Optional[Signal]:
+        dedup_context: str | None = None,
+    ) -> Signal | None:
         """Evaluate the strategy on a freshly closed 1m bar.
 
         *bars_1m* must contain at least the last two closed 1m bars (prev and
@@ -317,17 +350,9 @@ class BaselineV1Strategy:
         if len(bars_1m) < 2:
             return None
 
-        # Update 1m indicators from all provided bars (idempotent if already up to date)
-        for b in bars_1m:
-            self._ema20_1m.update(b.close)
-            self._atr14_1m.update(b.high, b.low, b.close)
-
-        # Update higher TF indicators if raw closes are supplied
-        if close_1h is not None:
-            self._ema20_1h.update(close_1h)
-            self._ema50_1h.update(close_1h)
-        if close_15m is not None:
-            self._ema20_15m.update(close_15m)
+        # Overlapping history windows are normal in the live runner.  Consume
+        # only candles newer than the last processed timestamp.
+        self._update_1m(bars_1m)
 
         # Cooldown
         if self.in_cooldown(now_epoch):
@@ -413,8 +438,8 @@ class BaselineV1Strategy:
         bars_1m: Sequence[Bar],
         now_epoch: float,
         account_id: str,
-        dedup_context: Optional[str],
-    ) -> Optional[Signal]:
+        dedup_context: str | None,
+    ) -> Signal | None:
         cfg = self.cfg
         close_price = trigger_bar.close
         atr = atr_at_trigger

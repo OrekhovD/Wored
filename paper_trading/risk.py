@@ -12,9 +12,8 @@ HTX BTC-USDT USDT-margined isolated perpetual:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from decimal import Decimal
 
 from paper_trading.market import (
     DEFAULT_MAX_AGE_SECONDS,
@@ -25,24 +24,25 @@ from paper_trading.market import (
 )
 
 __all__ = [
-    "RiskSettings",
     "OrderRequest",
     "PositionInfo",
     "RiskCheckResult",
-    "check_order_risk",
-    "check_fill_risk",
-    "calculate_position_size",
+    "RiskSettings",
     "calculate_liquidation_price",
+    "calculate_position_size",
+    "check_fill_risk",
+    "check_order_risk",
     "check_reduce_only",
 ]
 
 FEE_RATE = Decimal("0.0006")  # 0.06% taker fee
+DEFAULT_MAINTENANCE_MARGIN_RATE = Decimal("0.0028")
 
 # Default risk settings (USDT)
-DEFAULT_MAX_RISK_PER_ORDER = Decimal("10")
-DEFAULT_MAX_DAILY_LOSS = Decimal("50")
+DEFAULT_MAX_RISK_PER_ORDER = Decimal(10)
+DEFAULT_MAX_DAILY_LOSS = Decimal(50)
 DEFAULT_MAX_LEVERAGE = 10
-DEFAULT_MAX_OPEN_RISK = Decimal("20")
+DEFAULT_MAX_OPEN_RISK = Decimal(20)
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +66,9 @@ class RiskSettings:
     snapshot_max_age: float = DEFAULT_MAX_AGE_SECONDS
     order_ttl_seconds: float = 30.0
     cooldown_seconds: float = 5.0
+    require_risk_tier: bool = False
+    risk_tier_max_age_seconds: float = 3600.0
+    taker_fee_rate: Decimal = FEE_RATE
 
 
 @dataclass
@@ -79,16 +82,17 @@ class OrderRequest:
     instrument: str
     direction: str  # "long" or "short"
     order_type: str = "market"
-    risk_amount: Decimal = Decimal("0")
-    stop_price: Decimal = Decimal("0")
-    take_profit: Optional[Decimal] = None
+    risk_amount: Decimal = Decimal(0)
+    stop_price: Decimal = Decimal(0)
+    take_profit: Decimal | None = None
     leverage: int = 10
     reduce_only: bool = False
-    quantity: Optional[Decimal] = None
-    created_at: Optional[datetime] = None
-    idempotency_key: Optional[str] = None
+    quantity: Decimal | None = None
+    created_at: datetime | None = None
+    idempotency_key: str | None = None
     is_authenticated: bool = True
     account_id: str = "proto-manual"
+    extra_margin: Decimal = Decimal(0)
 
 
 @dataclass
@@ -102,7 +106,7 @@ class PositionInfo:
     stop_price: Decimal
     leverage: int
     reserved_margin: Decimal
-    unrealized_pnl: Decimal = Decimal("0")
+    unrealized_pnl: Decimal = Decimal(0)
 
 
 @dataclass
@@ -110,13 +114,13 @@ class RiskCheckResult:
     """Result of a risk check: allowed/denied with reasons."""
 
     allowed: bool
-    reasons: List[str] = field(default_factory=list)
-    quantity: Optional[Decimal] = None
-    entry_price: Optional[Decimal] = None
-    reserved_margin: Optional[Decimal] = None
-    risk_to_sl: Optional[Decimal] = None
-    liquidation_price: Optional[Decimal] = None
-    net_rr: Optional[Decimal] = None
+    reasons: list[str] = field(default_factory=list)
+    quantity: Decimal | None = None
+    entry_price: Decimal | None = None
+    reserved_margin: Decimal | None = None
+    risk_to_sl: Decimal | None = None
+    liquidation_price: Decimal | None = None
+    net_rr: Decimal | None = None
 
     @property
     def denied(self) -> bool:
@@ -145,6 +149,17 @@ def _quantize_to_step(value: Decimal, step: Decimal) -> Decimal:
     return (value / step).to_integral_value(rounding="ROUND_DOWN") * step
 
 
+def _risk_tier_is_fresh(source_at: str, now: datetime, max_age_seconds: float) -> bool:
+    try:
+        parsed = datetime.fromisoformat(source_at.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    age = (now - parsed.astimezone(timezone.utc)).total_seconds()
+    return -2.0 <= age <= max_age_seconds
+
+
 # ---------------------------------------------------------------------------
 # Position size
 # ---------------------------------------------------------------------------
@@ -156,10 +171,11 @@ def calculate_position_size(
     stop_price: Decimal,
     *,
     quantity_step: Decimal = Decimal("0.001"),
+    contract_size: Decimal = Decimal(1),
 ) -> Decimal:
     """Calculate position quantity from risk amount and stop distance.
 
-    quantity = risk_amount / |entry - stop|
+    quantity_contracts = risk_amount / (|entry - stop| * contract_size)
 
     The result is rounded down to ``quantity_step``.
     """
@@ -171,8 +187,10 @@ def calculate_position_size(
         raise ValueError("stop_price: must be positive")
     if stop_price == entry_price:
         raise ValueError("stop_price: cannot equal entry_price")
+    if contract_size <= 0:
+        raise ValueError("contract_size: must be positive")
 
-    raw_qty = risk_amount / abs(entry_price - stop_price)
+    raw_qty = risk_amount / (abs(entry_price - stop_price) * contract_size)
     return _quantize_to_step(raw_qty, quantity_step)
 
 
@@ -186,33 +204,51 @@ def calculate_liquidation_price(
     leverage: int,
     direction: str,
     *,
-    maintenance_margin_rate: Decimal = Decimal("0.005"),
+    maintenance_margin_rate: Decimal = DEFAULT_MAINTENANCE_MARGIN_RATE,
+    taker_fee_rate: Decimal = FEE_RATE,
+    isolated_margin: Decimal | None = None,
+    extra_margin: Decimal = Decimal(0),
+    notional: Decimal | None = None,
 ) -> Decimal:
-    """Estimate the liquidation price for an isolated-margin position.
+    """Calculate V5 isolated-margin liquidation from the current risk tier.
 
-    For a long position:
-        liq = entry * (1 - 1/leverage + MMR)
-
-    For a short position:
-        liq = entry * (1 + 1/leverage - MMR)
-
-    where ``MMR`` is the maintenance margin rate (default 0.5%).
-
-    This is a simplified estimate; real exchanges compute liquidation using
-    the maintenance margin tier and funding, but this formula is sufficient
-    for paper-trading risk gates.
+    ``d_liq = (isolated_margin + extra_margin) / notional - MMR - taker``.
+    When ``notional`` is omitted, the leverage-implied value is used.  This
+    keeps the public helper convenient while ensuring all callers use the
+    same fee-aware formula.
     """
     if entry_price <= 0:
         raise ValueError("entry_price: must be positive")
     if leverage < 1:
         raise ValueError("leverage: must be >= 1")
+    if maintenance_margin_rate < 0 or taker_fee_rate < 0:
+        raise ValueError("margin and fee rates must be non-negative")
+    if extra_margin < 0:
+        raise ValueError("extra_margin: must be non-negative")
+
+    effective_notional = notional
+    if effective_notional is None:
+        effective_notional = entry_price
+    if effective_notional <= 0:
+        raise ValueError("notional: must be positive")
+    effective_margin = (
+        isolated_margin
+        if isolated_margin is not None
+        else effective_notional / Decimal(leverage)
+    )
+    if effective_margin <= 0:
+        raise ValueError("isolated_margin: must be positive")
+    distance = (
+        (effective_margin + extra_margin) / effective_notional
+        - maintenance_margin_rate
+        - taker_fee_rate
+    )
 
     d = direction.lower()
-    inv_lev = Decimal(1) / Decimal(leverage)
     if d == "long":
-        return entry_price * (Decimal(1) - inv_lev + maintenance_margin_rate)
+        return entry_price * (Decimal(1) - distance)
     if d == "short":
-        return entry_price * (Decimal(1) + inv_lev - maintenance_margin_rate)
+        return entry_price * (Decimal(1) + distance)
     raise ValueError(f"direction: expected 'long' or 'short', got {direction!r}")
 
 
@@ -223,7 +259,7 @@ def calculate_liquidation_price(
 
 def check_reduce_only(
     order: OrderRequest,
-    open_positions: List[PositionInfo],
+    open_positions: list[PositionInfo],
     *,
     instrument: str = "",
 ) -> bool:
@@ -257,14 +293,14 @@ def check_order_risk(
     snapshot: PerpetualSnapshot,
     settings: RiskSettings,
     *,
-    open_positions: Optional[List[PositionInfo]] = None,
-    daily_realized_loss: Decimal = Decimal("0"),
-    available_margin: Decimal = Decimal("0"),
-    now: Optional[datetime] = None,
+    open_positions: list[PositionInfo] | None = None,
+    daily_realized_loss: Decimal = Decimal(0),
+    available_margin: Decimal = Decimal(0),
+    now: datetime | None = None,
     is_paused: bool = False,
     is_day_active: bool = True,
-    existing_order_keys: Optional[List[str]] = None,
-    last_order_at: Optional[datetime] = None,
+    existing_order_keys: list[str] | None = None,
+    last_order_at: datetime | None = None,
 ) -> RiskCheckResult:
     """Run all pre-execution risk gates on an order.
 
@@ -288,7 +324,7 @@ def check_order_risk(
     Returns :class:`RiskCheckResult` with ``allowed=True`` and computed
     fields, or ``allowed=False`` with a list of failure reasons.
     """
-    reasons: List[str] = []
+    reasons: list[str] = []
     now = now or datetime.now(timezone.utc)
     open_positions = open_positions or []
     existing_order_keys = existing_order_keys or []
@@ -327,7 +363,17 @@ def check_order_risk(
 
     # 6. Margin & 7. Leverage
     leverage = order.leverage
-    if leverage < 1 or leverage > settings.max_leverage:
+    tier = snapshot.risk_tier
+    if settings.require_risk_tier and tier is None:
+        reasons.append("risk_tier_unavailable")
+    if tier is not None and not _risk_tier_is_fresh(
+        tier.source_at,
+        now,
+        settings.risk_tier_max_age_seconds,
+    ):
+        reasons.append("risk_tier_stale")
+    tier_max_leverage = tier.max_leverage if tier is not None else settings.max_leverage
+    if leverage < 1 or leverage > min(settings.max_leverage, tier_max_leverage):
         reasons.append("leverage_out_of_range")
 
     # Calculate quantity if not provided
@@ -338,6 +384,7 @@ def check_order_risk(
                 entry_price,
                 order.stop_price,
                 quantity_step=snapshot.quantity_step,
+                contract_size=snapshot.contract_size,
             )
         except ValueError:
             qty = None
@@ -345,27 +392,31 @@ def check_order_risk(
     reserved_margin = None
     notional = None
     if qty is not None and qty > 0 and leverage >= 1:
-        notional = qty * entry_price
+        notional = qty * snapshot.contract_size * entry_price
         reserved_margin = notional / Decimal(leverage)
-        if available_margin > 0 and reserved_margin > available_margin:
+        if reserved_margin > available_margin:
             reasons.append("insufficient_margin")
 
     # 8. Risk to stop
-    risk_to_sl: Optional[Decimal] = None
+    risk_to_sl: Decimal | None = None
     if (
         qty is not None
         and qty > 0
         and order.stop_price > 0
         and entry_price > 0
     ):
-        risk_to_sl = qty * abs(entry_price - order.stop_price)
+        risk_to_sl = qty * snapshot.contract_size * abs(entry_price - order.stop_price)
         if risk_to_sl > settings.max_risk_per_order:
             reasons.append("risk_per_order_exceeded")
 
     # 9. Total open risk
-    total_open_risk = Decimal("0")
+    total_open_risk = Decimal(0)
     for pos in open_positions:
-        pos_risk = pos.quantity * abs(pos.entry_price - pos.stop_price)
+        pos_risk = (
+            pos.quantity
+            * snapshot.contract_size
+            * abs(pos.entry_price - pos.stop_price)
+        )
         total_open_risk += pos_risk
     if risk_to_sl is not None:
         total_open_risk += risk_to_sl
@@ -374,16 +425,16 @@ def check_order_risk(
 
     # 10. Daily drawdown with unrealized
     unrealized_total = sum(
-        (pos.unrealized_pnl for pos in open_positions), Decimal("0")
+        (pos.unrealized_pnl for pos in open_positions), Decimal(0)
     )
     total_drawdown = daily_realized_loss + unrealized_total
     # Drawdown is negative PnL; compare abs of negative portion
-    drawdown_amount = max(-total_drawdown, Decimal("0"))
+    drawdown_amount = max(-total_drawdown, Decimal(0))
     if drawdown_amount > settings.max_daily_loss:
         reasons.append("daily_drawdown_exceeded")
 
     # 11. Net reward:risk >= min
-    net_rr: Optional[Decimal] = None
+    net_rr: Decimal | None = None
     if (
         risk_to_sl is not None
         and risk_to_sl > 0
@@ -392,22 +443,34 @@ def check_order_risk(
         and qty is not None
         and qty > 0
     ):
-        gross_reward = qty * abs(order.take_profit - entry_price)
-        entry_fee = notional * FEE_RATE if notional else Decimal("0")
-        exit_fee = qty * order.take_profit * FEE_RATE
+        gross_reward = qty * snapshot.contract_size * abs(order.take_profit - entry_price)
+        entry_fee = notional * FEE_RATE if notional else Decimal(0)
+        exit_fee = qty * snapshot.contract_size * order.take_profit * FEE_RATE
         net_reward = gross_reward - entry_fee - exit_fee
         net_rr = net_reward / risk_to_sl
         if net_rr < settings.min_net_rr:
             reasons.append("net_rr_below_minimum")
 
     # 12. Stop before liquidation
-    liq_price: Optional[Decimal] = None
+    liq_price: Decimal | None = None
     if leverage >= 1 and entry_price > 0 and d in ("long", "short"):
-        liq_price = calculate_liquidation_price(entry_price, leverage, d)
+        maintenance_margin_rate = (
+            tier.maintenance_margin_rate
+            if tier is not None
+            else DEFAULT_MAINTENANCE_MARGIN_RATE
+        )
+        liq_price = calculate_liquidation_price(
+            entry_price,
+            leverage,
+            d,
+            maintenance_margin_rate=maintenance_margin_rate,
+            taker_fee_rate=settings.taker_fee_rate,
+            isolated_margin=reserved_margin,
+            extra_margin=order.extra_margin,
+            notional=notional,
+        )
         if order.stop_price > 0:
-            if d == "long" and order.stop_price <= liq_price:
-                reasons.append("stop_after_liquidation")
-            elif d == "short" and order.stop_price >= liq_price:
+            if d == "long" and order.stop_price <= liq_price or d == "short" and order.stop_price >= liq_price:
                 reasons.append("stop_after_liquidation")
 
     # 13. Spread
@@ -451,10 +514,10 @@ def check_fill_risk(
     snapshot: PerpetualSnapshot,
     settings: RiskSettings,
     *,
-    reserved_quantity: Optional[Decimal] = None,
-    reserved_entry_price: Optional[Decimal] = None,
-    available_margin: Decimal = Decimal("0"),
-    now: Optional[datetime] = None,
+    reserved_quantity: Decimal | None = None,
+    reserved_entry_price: Decimal | None = None,
+    available_margin: Decimal = Decimal(0),
+    now: datetime | None = None,
 ) -> RiskCheckResult:
     """Re-check risk immediately before committing a fill.
 
@@ -465,7 +528,7 @@ def check_fill_risk(
       * Margin still sufficient
       * Price hasn't moved adversely beyond a tolerance
     """
-    reasons: List[str] = []
+    reasons: list[str] = []
     now = now or datetime.now(timezone.utc)
 
     if not is_fresh(snapshot, max_age=settings.snapshot_max_age):
@@ -473,6 +536,19 @@ def check_fill_risk(
 
     if not check_spread(snapshot, max_bps=settings.max_spread_bps):
         reasons.append("spread_too_wide_at_fill")
+
+    tier = snapshot.risk_tier
+    if settings.require_risk_tier and tier is None:
+        reasons.append("risk_tier_unavailable_at_fill")
+    if tier is not None and not _risk_tier_is_fresh(
+        tier.source_at,
+        now,
+        settings.risk_tier_max_age_seconds,
+    ):
+        reasons.append("risk_tier_stale_at_fill")
+    tier_max_leverage = tier.max_leverage if tier is not None else settings.max_leverage
+    if order.leverage < 1 or order.leverage > min(settings.max_leverage, tier_max_leverage):
+        reasons.append("leverage_out_of_range_at_fill")
 
     d = order.direction.lower()
     side = _side_from_direction(d) if d in ("long", "short") else "buy"
@@ -482,9 +558,7 @@ def check_fill_risk(
         # Allow up to 2% adverse movement
         tolerance = reserved_entry_price * Decimal("0.02")
         is_buy = side == "buy"
-        if is_buy and current_price > reserved_entry_price + tolerance:
-            reasons.append("price_adverse_at_fill")
-        elif not is_buy and current_price < reserved_entry_price - tolerance:
+        if is_buy and current_price > reserved_entry_price + tolerance or not is_buy and current_price < reserved_entry_price - tolerance:
             reasons.append("price_adverse_at_fill")
 
     if (
@@ -492,9 +566,9 @@ def check_fill_risk(
         and reserved_quantity > 0
         and current_price > 0
     ):
-        notional = reserved_quantity * current_price
+        notional = reserved_quantity * snapshot.contract_size * current_price
         margin_needed = notional / Decimal(order.leverage) if order.leverage >= 1 else notional
-        if available_margin > 0 and margin_needed > available_margin:
+        if margin_needed > available_margin:
             reasons.append("insufficient_margin_at_fill")
 
     allowed = len(reasons) == 0

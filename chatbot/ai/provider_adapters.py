@@ -273,8 +273,13 @@ class OpenAICompatibleAdapter:
         start = time.monotonic()
         async with httpx.AsyncClient(timeout=timeout_seconds) as client:
             try:
+                completions_url = (
+                    f"{self.base_url}/chat/completions"
+                    if self.base_url.endswith("/v1")
+                    else f"{self.base_url}/v1/chat/completions"
+                )
                 resp = await client.post(
-                    f"{self.base_url}/v1/chat/completions",
+                    completions_url,
                     json=payload,
                     headers=headers,
                 )

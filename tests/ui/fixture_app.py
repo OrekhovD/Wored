@@ -20,11 +20,12 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 # Make webui importable for ui_presenters
-WEBUI_DIR = Path(os.environ.get("WORED_WEBUI_DIR", "D:/WORED_UIUX_20260909/webui"))
+PROJECT_WEBUI_DIR = Path(__file__).resolve().parents[2] / "webui"
+WEBUI_DIR = Path(os.environ.get("WORED_WEBUI_DIR", str(PROJECT_WEBUI_DIR)))
 if str(WEBUI_DIR) not in sys.path:
     sys.path.insert(0, str(WEBUI_DIR))
 
-from ui_presenters import present_deck_ui, present_health, present_preview_ui  # noqa: E402
+from ui_presenters import present_deck_ui, present_preview_ui  # noqa: E402
 
 from tests.ui.fixture_data import (  # noqa: E402
     get_clock,
@@ -38,6 +39,7 @@ from tests.ui.fixture_data import (  # noqa: E402
 
 BASE_DIR = WEBUI_DIR
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+TEMPLATES.env.autoescape = True
 
 CHART_NOTICE = "TradingView Lightweight Charts. Copyright (c) 2025 TradingView, Inc."
 DEFAULT_WATCHLIST = ["btcusdt", "ethusdt"]
@@ -55,6 +57,7 @@ PAGE_ROUTES: list[tuple[str, str]] = [
     ("/model-management", "models.html"),
     ("/system", "system.html"),
     ("/daily-session", "daily_session.html"),
+    ("/trader", "trading_day.html"),
     ("/command-deck", "command_deck.html"),
     ("/login", "login.html"),
     ("/journal/0", "journal.html"),  # journal detail (uses entry_id=0)
@@ -180,7 +183,7 @@ def _register_routes(app: FastAPI) -> None:
         username: str = Form(...),
         password: str = Form(...),
         next: str = Form("/"),
-        csrf_token: str = Form(...),
+        csrf_token: str = Form(""),
     ):
         expected = request.session.get("csrf_token")
         if not expected or csrf_token != expected:
@@ -283,6 +286,9 @@ def _register_routes(app: FastAPI) -> None:
                 "base_price": 64250.5, "comparison_rows": [],
                 "points": fc.get("points", []),
                 "completed_models": 3, "failed_models": 0,
+                "models": [], "comparison_models": [], "top_model": None,
+                "avg_accuracy": None, "avg_failure": None,
+                "evaluated_points": 0, "total_points": 48,
             },
             model_statuses=[
                 {"key": "bull", "name": "Bull Model",
@@ -494,7 +500,7 @@ def _register_routes(app: FastAPI) -> None:
         auth = _require_api_auth(request)
         if auth:
             return auth
-        body = await request.json()
+        await request.json()
         return JSONResponse(
             {"request_id": 9001, "status": "queued",
              "execution_state": "queued"},

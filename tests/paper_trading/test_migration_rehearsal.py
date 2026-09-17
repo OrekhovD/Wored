@@ -75,7 +75,6 @@ class TestMigrationRehearsal:
             )
 
         # Migration: try to map unknown owner → should be blocked
-        unknown_owner_key = "unknown-owner"
         mapped = False  # Cannot map without identity
 
         assert mapped is False, "Unknown owner should not be silently mapped"

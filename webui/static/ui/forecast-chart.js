@@ -4,7 +4,7 @@
  * Uses Lightweight Charts 5.2.0 (loaded via CDN in base.html).
  * History: CandlestickSeries OHLC; Forecast: LineSeries predicted_price + dashed low/high.
  */
-import WORED from './core.js';
+import WORED from './core.js?v=20260910-1';
 
 // ── Chart factory ────────────────────────────────────────────────────────────────
 

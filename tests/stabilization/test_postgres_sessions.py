@@ -1,5 +1,6 @@
 """Session transaction regressions on a real, disposable PostgreSQL schema."""
 import asyncio
+import json
 import os
 import sys
 import unittest
@@ -34,7 +35,18 @@ class PostgresSessionTests(unittest.IsolatedAsyncioTestCase):
         self.entry = dict(await self.pool.fetchrow("INSERT INTO planned_entries(session_id,plan_version,side,"
             "entry_zone_from,entry_zone_to,invalidation_price,stop_loss,take_profit_json,"
             "recommended_leverage,budget_share_pct,confirmation_rule,reason_code) "
-            "VALUES($1,1,'long',99,101,90,95,'[110]',10,15,'any','qa') RETURNING *", self.sid))
+            "VALUES($1,1,'long',99,100,98,97,'[110]',10,15,'close_above_zone_on_1m_and_rsi_gt_50','qa') RETURNING *", self.sid))
+        from services.plan_contract import validate_plan
+        from datetime import datetime, timezone
+        session = dict(await self.pool.fetchrow("SELECT * FROM trading_sessions WHERE id=$1", self.sid))
+        raw_entry = {**self.entry, "take_profit": [110]}
+        for k in ("entry_zone_from", "entry_zone_to", "invalidation_price", "stop_loss", "budget_share_pct"):
+            raw_entry[k] = float(raw_entry[k])
+        checked = validate_plan({"market_regime": "trend_up", "thesis": "QA", "primary_scenario": "QA long",
+            "alternative_scenario": "none", "no_trade_condition": "No confirmation", "entries": [raw_entry]},
+            session, {"quality": "ready", "timestamp": datetime.now(timezone.utc).isoformat()})
+        await self.pool.execute("INSERT INTO session_plans(session_id,version,plan_json,created_by_role) VALUES($1,1,$2,'qa')",
+                               self.sid, json.dumps({**checked, "version": 1}))
 
     async def asyncTearDown(self):
         self.binding.stop()
@@ -45,7 +57,7 @@ class PostgresSessionTests(unittest.IsolatedAsyncioTestCase):
     async def open_trade(self):
         from services.session_manager import execute_entry
         return await execute_entry(str(self.sid), self.entry,
-            {"open": 100, "high": 101, "low": 99, "close": 100}, 100)
+            {"open": 100, "high": 101, "low": 99, "close": 100.1, "closed": True}, 100, {"rsi": 55})
 
     async def test_concurrent_entries_create_one_trade_and_event(self):
         results = await asyncio.gather(self.open_trade(), self.open_trade())

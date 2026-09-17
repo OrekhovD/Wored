@@ -6,11 +6,8 @@ benchmarks from ACCEPTANCE.md. They run without a database (pure Python).
 from __future__ import annotations
 
 import json
-import os
 from decimal import Decimal
 from pathlib import Path
-
-import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

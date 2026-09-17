@@ -7,7 +7,7 @@ If no signal — BLOCKED, not PASS (strategy conditions not met on this period).
 from __future__ import annotations
 
 import json
-import os
+import hashlib
 from decimal import Decimal
 from pathlib import Path
 
@@ -22,17 +22,17 @@ def load_recorded_dataset():
     if not manifest_path.exists():
         pytest.skip("Recorded dataset manifest not found")
     
-    with open(manifest_path, "r") as f:
+    with open(manifest_path, "r", encoding="utf-8") as f:
         manifest = json.load(f)
     
     data_path = FIXTURES / manifest["files"][0]["path"]
     if not data_path.exists():
         pytest.skip("Recorded dataset file not found")
     
-    with open(data_path, "r") as f:
+    with open(data_path, "r", encoding="utf-8") as f:
         data = json.load(f)
     
-    return manifest, data
+    return manifest, data_path, data
 
 
 def klines_to_bars(klines: list, timeframe: str = "1m"):
@@ -57,15 +57,17 @@ class TestRecordedReplay:
 
     def test_dataset_provenance(self):
         """Verify dataset is real (not synthetic) and has manifest."""
-        manifest, data = load_recorded_dataset()
+        manifest, data_path, _data = load_recorded_dataset()
         assert manifest["synthetic"] is False, "Dataset must be real, not synthetic"
         assert manifest["source"].startswith("HTX"), "Source must be HTX"
         assert len(manifest["files"]) > 0, "Must have at least one file"
-        assert manifest["files"][0]["sha256"], "Must have SHA-256 hash"
+        expected_hash = manifest["files"][0]["sha256"]
+        actual_hash = hashlib.sha256(data_path.read_bytes()).hexdigest()
+        assert actual_hash == expected_hash, "Dataset SHA-256 does not match manifest"
 
     def test_dataset_has_sufficient_data(self):
         """Dataset must have enough bars for warmup."""
-        manifest, data = load_recorded_dataset()
+        _manifest, _data_path, data = load_recorded_dataset()
         assert len(data["klines_1m"]) >= 100, "Need at least 100 1m bars for warmup"
         assert len(data["klines_15m"]) >= 100, "Need at least 100 15m bars for warmup"
         assert len(data["klines_1h"]) >= 100, "Need at least 100 1h bars for warmup"
@@ -74,7 +76,7 @@ class TestRecordedReplay:
         """Baseline v1 must warm up successfully on recorded data."""
         from paper_trading.strategy import BaselineV1Strategy
         
-        manifest, data = load_recorded_dataset()
+        _manifest, _data_path, data = load_recorded_dataset()
         bars_1m = klines_to_bars(data["klines_1m"], "1m")
         bars_15m = klines_to_bars(data["klines_15m"], "15m")
         bars_1h = klines_to_bars(data["klines_1h"], "1h")
@@ -89,7 +91,7 @@ class TestRecordedReplay:
         """Run strategy on recorded data — must evaluate (signal or no_trade)."""
         from paper_trading.strategy import BaselineV1Strategy
         
-        manifest, data = load_recorded_dataset()
+        _manifest, _data_path, data = load_recorded_dataset()
         bars_1m = klines_to_bars(data["klines_1m"], "1m")
         bars_15m = klines_to_bars(data["klines_15m"], "15m")
         bars_1h = klines_to_bars(data["klines_1h"], "1h")
@@ -110,21 +112,18 @@ class TestRecordedReplay:
             if signal is not None:
                 signals_found.append(signal)
         
-        # Must evaluate without error — signal or None is both valid
-        # If signal found, record it; if not, it's BLOCKED (not FAIL)
-        if signals_found:
-            print(f"Found {len(signals_found)} signals on recorded data")
-            for s in signals_found:
-                print(f"  side={s.side} close={s.close_price} SL={s.stop_loss} TP={s.take_profit}")
-        else:
-            print("No signals found on this recorded period — strategy conditions not met")
-            print("This is BLOCKED (awaiting period with signal), not FAIL")
+        sides = {signal.side for signal in signals_found}
+        if sides != {"long", "short"}:
+            pytest.xfail(
+                "AC-14 BLOCKED: recorded period does not contain both required "
+                "natural long and short signal lifecycles"
+            )
 
     def test_replay_reproducible(self):
         """Replay must be reproducible — same data, same result."""
         from paper_trading.strategy import BaselineV1Strategy
         
-        manifest, data = load_recorded_dataset()
+        _manifest, _data_path, data = load_recorded_dataset()
         bars_1m = klines_to_bars(data["klines_1m"], "1m")
         bars_15m = klines_to_bars(data["klines_15m"], "15m")
         bars_1h = klines_to_bars(data["klines_1h"], "1h")
@@ -132,7 +131,6 @@ class TestRecordedReplay:
         # Run 1
         strategy1 = BaselineV1Strategy()
         strategy1.warm_up(bars_1h, bars_15m, bars_1m[:-2])
-        import time
         signal1 = strategy1.evaluate(
             bars_1m=bars_1m, close_1h=bars_1h[-1].close,
             close_15m=bars_15m[-1].close, now_epoch=1000000.0,

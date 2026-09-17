@@ -67,6 +67,69 @@ def _book_price(value: Any, field: str) -> Decimal:
     return _decimal(value[0], field)
 
 
+def build_risk_tier(
+    *,
+    tier: int,
+    max_leverage: int,
+    maintenance_margin_rate: Any,
+    source_at: datetime | None = None,
+    source: str = "htx-risk-control",
+) -> dict[str, Any]:
+    """Build the versioned risk-tier payload carried by a market snapshot.
+
+    The public HTX market endpoints used by the current collector do not
+    provide a stable risk-tier response for every contract.  The publisher
+    therefore only attaches a tier supplied by a verified risk-control
+    adapter; it never invents a maintenance margin from a static default.
+    """
+    if tier < 1:
+        raise PerpetualFeedError("risk_tier.tier: must be >= 1")
+    if max_leverage < 1:
+        raise PerpetualFeedError("risk_tier.max_leverage: must be >= 1")
+    rate = _decimal(
+        maintenance_margin_rate,
+        "risk_tier.maintenance_margin_rate",
+        allow_zero=True,
+    )
+    timestamp = (source_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    return {
+        "tier": tier,
+        "max_leverage": max_leverage,
+        "maintenance_margin_rate": format(rate, "f"),
+        "source_at": timestamp.isoformat(),
+        "source": source,
+    }
+
+
+def _risk_tier_from_contract(contract: dict[str, Any], now: datetime) -> dict[str, Any] | None:
+    """Extract a tier only when HTX contract metadata supplies all inputs.
+
+    The field aliases keep the boundary resilient to the documented V5 field
+    naming transition while preserving the fail-closed rule: incomplete data
+    produces no tier and cannot be mistaken for a safe default.
+    """
+    raw = contract.get("risk_tier")
+    data = raw if isinstance(raw, dict) else contract
+    tier = data.get("tier", data.get("risk_tier_level", 1))
+    leverage = data.get("max_leverage", data.get("maxLeverage"))
+    rate = data.get(
+        "maintenance_margin_rate",
+        data.get("maintenance_margin_ratio", data.get("mmr")),
+    )
+    if leverage is None or rate is None:
+        return None
+    try:
+        return build_risk_tier(
+            tier=int(tier),
+            max_leverage=int(leverage),
+            maintenance_margin_rate=rate,
+            source_at=now,
+            source="htx-contract-info",
+        )
+    except (TypeError, ValueError, PerpetualFeedError) as exc:
+        raise PerpetualFeedError("risk_tier: invalid HTX contract metadata") from exc
+
+
 def build_snapshot(
     *,
     contract_code: str,
@@ -75,6 +138,7 @@ def build_snapshot(
     funding: dict[str, Any],
     contract: dict[str, Any],
     mark: dict[str, Any],
+    risk_tier: dict[str, Any] | None = None,
     received_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Normalize public HTX payloads into the WebUI execution contract."""
@@ -110,8 +174,10 @@ def build_snapshot(
     mark_source_at = datetime.fromtimestamp(mark_id, tz=timezone.utc).isoformat()
     now = (received_at or datetime.now(timezone.utc)).astimezone(timezone.utc)
     contract_size = _decimal(contract_data.get("contract_size"), "contract_size")
+    contract_risk_tier = _risk_tier_from_contract(contract_data, now)
+    snapshot_risk_tier = risk_tier or contract_risk_tier
 
-    return {
+    snapshot = {
         "schema_version": SCHEMA_VERSION,
         "venue": "htx",
         "market_type": "linear-swap",
@@ -143,6 +209,9 @@ def build_snapshot(
         "source": "htx-public-rest",
         "quality": "live",
     }
+    if snapshot_risk_tier is not None:
+        snapshot["risk_tier"] = dict(snapshot_risk_tier)
+    return snapshot
 
 
 @dataclass

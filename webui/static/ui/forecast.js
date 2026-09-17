@@ -3,7 +3,7 @@
  * Handles forecast form submission, idempotency, polling, and restore after reload.
  * Depends on: core.js (WORED), async-patterns.js (pollJobStatus)
  */
-import WORED from './core.js';
+import WORED from './core.js?v=20260910-1';
 import { pollJobStatus, showBlockError, clearBlockError } from './async-patterns.js';
 
 const STORAGE_KEY = 'wored.ui.forecast.v1';

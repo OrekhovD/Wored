@@ -18,18 +18,17 @@ Python 3.9 compatible.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Dict, List, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
 
 from paper_trading.contracts import (
+    ZERO,
     JournalBucket,
     JournalPosting,
     JournalSourceType,
-    Position,
     PositionSide,
-    ZERO,
     money,
 )
 
@@ -40,7 +39,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 #: Long → +1, Short → −1.  Used in gross P&L: gross = dir * qty * (exit-entry).
-_DIR_MULT: Dict[PositionSide, int] = {
+_DIR_MULT: dict[PositionSide, int] = {
     PositionSide.long: 1,
     PositionSide.short: -1,
 }
@@ -146,7 +145,7 @@ def allocate_partial_exit(
 
     # Proportion closed (full precision, quantise results).
     frac = close_qty / total_qty
-    remaining_frac = Decimal("1") - frac
+    remaining_frac = Decimal(1) - frac
 
     closed_entry_fee = money(total_entry_fee * frac)
     remaining_entry_fee = money(total_entry_fee * remaining_frac)
@@ -204,17 +203,18 @@ def make_posting(
     bucket: JournalBucket,
     amount: Decimal,
     source_type: JournalSourceType = JournalSourceType.fill,
-    source_ref: Optional[str] = None,
-    day_id: Optional[UUID] = None,
+    source_ref: str | None = None,
+    day_id: UUID | None = None,
     currency: str = "USDT",
-    occurred_at: Optional[object] = None,
+    occurred_at: object | None = None,
+    event_id: UUID | None = None,
 ) -> JournalPosting:
-    """Build a ``JournalPosting`` with a fresh ``event_id``."""
+    """Build a ``JournalPosting`` for one immutable financial event."""
     return JournalPosting(
         posting_id=uuid4(),
         account_id=account_id,
         day_id=day_id,
-        event_id=uuid4(),
+        event_id=event_id or uuid4(),
         source_type=source_type,
         source_ref=source_ref,
         currency=currency,
@@ -229,17 +229,16 @@ def make_posting(
 def post_entry(
     account_id: UUID,
     postings: Sequence[JournalPosting],
-) -> List[JournalPosting]:
-    """Validate and return a balanced journal entry (list of postings).
+) -> list[JournalPosting]:
+    """Validate and return one signed-cashflow journal event.
 
     This is the domain-level entry point.  The repository persists them
     inside a PostgreSQL transaction with ``SELECT ... FOR UPDATE`` on the
     account row, enforcing append-only and source uniqueness.
 
-    Validation rules:
-      - At least one posting.
-      - Every posting has the same ``account_id``.
-      - Sum of signed amounts must be zero (double-entry balance).
+    Validation rules: at least one posting; one account, event id and source
+    reference per event.  Amounts are signed cashflow components, so their sum
+    is the change in available balance and is not required to be zero.
 
     Raises ``ValueError`` on violation.
     """
@@ -247,19 +246,23 @@ def post_entry(
         raise ValueError("A journal entry requires at least one posting")
 
     acct = postings[0].account_id
-    total = ZERO
+    event_id = postings[0].event_id
+    source_type = postings[0].source_type
+    source_ref = postings[0].source_ref
+    seen_buckets: set[JournalBucket] = set()
     for p in postings:
         if p.account_id != acct:
             raise ValueError(
                 f"All postings must share account_id; got {p.account_id} "
                 f"vs {acct}"
             )
-        total += p.amount
-
-    if total != ZERO:
-        raise ValueError(
-            f"Journal entry not balanced: sum={total} (must be 0)"
-        )
+        if p.event_id != event_id:
+            raise ValueError("All postings in one entry must share event_id")
+        if p.source_type != source_type or p.source_ref != source_ref:
+            raise ValueError("All postings in one entry must share financial source")
+        if p.bucket in seen_buckets:
+            raise ValueError(f"Duplicate journal bucket in one event: {p.bucket.value}")
+        seen_buckets.add(p.bucket)
 
     return list(postings)
 
@@ -279,7 +282,7 @@ class ReconciliationResult:
     actual_cash: Decimal = field(default_factory=lambda: ZERO)
     expected_realized_pnl: Decimal = field(default_factory=lambda: ZERO)
     actual_realized_pnl: Decimal = field(default_factory=lambda: ZERO)
-    mismatches: List[str] = field(default_factory=list)
+    mismatches: list[str] = field(default_factory=list)
 
     @property
     def cash_diff(self) -> Decimal:
@@ -312,18 +315,12 @@ def reconcile(
     for p in journal_postings:
         if p.account_id != account_id:
             continue
-        if p.bucket == JournalBucket.cash:
+        if p.bucket == JournalBucket.cash or p.bucket == JournalBucket.deposit or p.bucket == JournalBucket.withdrawal:
             expected_cash_calc += p.amount
-        elif p.bucket == JournalBucket.deposit:
-            expected_cash_calc += p.amount
-        elif p.bucket == JournalBucket.withdrawal:
-            expected_cash_calc += p.amount
-        elif p.bucket == JournalBucket.realized_gross_pnl:
-            expected_pnl_calc += p.amount
-        elif p.bucket == JournalBucket.realized_net_pnl:
+        elif p.bucket == JournalBucket.realized_gross_pnl or p.bucket == JournalBucket.realized_net_pnl:
             expected_pnl_calc += p.amount
 
-    mismatches: List[str] = []
+    mismatches: list[str] = []
 
     cash_expected = money(expected_cash_calc + expected_cash)
     if cash_expected != money(actual_cash):
@@ -362,19 +359,15 @@ def get_account_balance(
 ) -> Decimal:
     """Compute the current cash balance from journal postings.
 
-    Sums cash + deposit - withdrawal + adjustments.  Margin reservations
-    are tracked separately (reserved_margin / released_margin).
+    Sums signed cashflow components.  A margin reservation reduces available
+    balance and a release restores it; neither changes closing equity after
+    the position is closed.
     """
     balance = ZERO
     for p in journal_postings:
         if p.account_id != account_id:
             continue
-        if p.bucket in (
-            JournalBucket.cash,
-            JournalBucket.deposit,
-            JournalBucket.withdrawal,
-            JournalBucket.adjustment,
-        ):
+        if p.bucket != JournalBucket.realized_net_pnl:
             balance += p.amount
     return money(balance)
 
@@ -401,56 +394,52 @@ def build_fill_postings(
     fee: Decimal,
     is_close: bool,
     side: PositionSide,
-    day_id: Optional[UUID] = None,
-    source_ref: Optional[str] = None,
+    day_id: UUID | None = None,
+    source_ref: str | None = None,
     realized_gross: Decimal = ZERO,
     realized_net: Decimal = ZERO,
-) -> List[JournalPosting]:
+    reserved_margin: Decimal = ZERO,
+    released_margin: Decimal = ZERO,
+) -> list[JournalPosting]:
     """Build the standard set of journal postings for a fill.
 
     For an **opening** fill:
-      - cash: −(price × qty)  [buy] or +(price × qty) [sell short]
-      - entry_fee: −fee
+      - reserved_margin: negative isolated margin reservation
+      - entry_fee: negative fee cashflow
 
     For a **closing** fill:
-      - cash: +(price × qty)  [closing long] or −(price × qty) [closing short]
+      - released_margin: positive isolated margin release
       - exit_fee: −fee
-      - realized_gross_pnl: gross
-      - realized_net_pnl: net (if non-zero, to avoid duplicate with gross)
+      - realized_gross_pnl: signed gross P&L
 
-    The postings balance to zero when unrealized PnL is realised on close.
-    For openings, the cash outflow is balanced by the reserved_margin
-    release/reduction handled separately by execution.py.
+    Net P&L remains a position/report projection; posting it in addition to
+    gross and fees would count the same result twice.
     """
-    postings: List[JournalPosting] = []
-    notional = money(fill_price * fill_qty)
+    postings: list[JournalPosting] = []
+    event_id = uuid4()
 
     if is_close:
-        # Closing: cash flows back, PnL realised.
-        if side == PositionSide.long:
-            # Long close: receive cash
-            cash_flow = notional
-        else:
-            # Short close: pay to buy back
-            cash_flow = -notional
-        postings.append(
-            make_posting(
-                account_id=account_id,
-                bucket=JournalBucket.cash,
-                amount=cash_flow,
-                source_type=JournalSourceType.fill,
-                source_ref=source_ref,
-                day_id=day_id,
+        if released_margin > ZERO:
+            postings.append(
+                make_posting(
+                    account_id=account_id,
+                    bucket=JournalBucket.released_margin,
+                    amount=released_margin,
+                    source_type=JournalSourceType.fill,
+                    source_ref=source_ref,
+                    day_id=day_id,
+                    event_id=event_id,
+                )
             )
-        )
         postings.append(
             make_posting(
                 account_id=account_id,
                 bucket=JournalBucket.exit_fee,
-                amount=-fee,
+                amount=-money(fee),
                 source_type=JournalSourceType.fill,
                 source_ref=source_ref,
                 day_id=day_id,
+                event_id=event_id,
             )
         )
         if realized_gross != ZERO:
@@ -462,43 +451,30 @@ def build_fill_postings(
                     source_type=JournalSourceType.fill,
                     source_ref=source_ref,
                     day_id=day_id,
-                )
-            )
-        if realized_net != ZERO:
-            postings.append(
-                make_posting(
-                    account_id=account_id,
-                    bucket=JournalBucket.realized_net_pnl,
-                    amount=realized_net,
-                    source_type=JournalSourceType.fill,
-                    source_ref=source_ref,
-                    day_id=day_id,
+                    event_id=event_id,
                 )
             )
     else:
-        # Opening: cash flows out (margin reservation), fee charged.
-        if side == PositionSide.long:
-            cash_flow = -notional
-        else:
-            cash_flow = notional
         postings.append(
             make_posting(
                 account_id=account_id,
                 bucket=JournalBucket.reserved_margin,
-                amount=cash_flow,
+                amount=-money(reserved_margin),
                 source_type=JournalSourceType.fill,
                 source_ref=source_ref,
                 day_id=day_id,
+                event_id=event_id,
             )
         )
         postings.append(
             make_posting(
                 account_id=account_id,
                 bucket=JournalBucket.entry_fee,
-                amount=-fee,
+                amount=-money(fee),
                 source_type=JournalSourceType.fill,
                 source_ref=source_ref,
                 day_id=day_id,
+                event_id=event_id,
             )
         )
 

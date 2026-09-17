@@ -28,6 +28,7 @@ __all__ = [
     "DEFAULT_SLIPPAGE_BPS",
     "DEFAULT_SPREAD_MAX_BPS",
     "PerpetualSnapshot",
+    "RiskTier",
     "apply_latency",
     "apply_slippage",
     "available_quantity",
@@ -102,6 +103,22 @@ def _parse_timestamp(value: Any, field_name: str) -> datetime:
 
 
 @dataclass(frozen=True)
+class RiskTier:
+    """Maintenance-margin parameters attached to a market snapshot.
+
+    The values are data, rather than a hard-coded exchange assumption.  A
+    consumer can require this object before permitting an entry, while older
+    snapshots remain readable during the rollout.
+    """
+
+    tier: int
+    max_leverage: int
+    maintenance_margin_rate: Decimal
+    source_at: str
+    source: str
+
+
+@dataclass(frozen=True)
 class PerpetualSnapshot:
     """A validated HTX USDT-margined perpetual market snapshot.
 
@@ -130,6 +147,7 @@ class PerpetualSnapshot:
     received_at: str
     source: str
     quality: str
+    risk_tier: RiskTier | None = None
 
     # --- convenience selectors (kept compatible with webui.paper_market) ---
 
@@ -143,10 +161,21 @@ class PerpetualSnapshot:
 
     def public_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-safe dict with Decimal fields as plain strings."""
-        return {
+        payload = {
             key: (format(value, "f") if isinstance(value, Decimal) else value)
             for key, value in asdict(self).items()
         }
+        if self.risk_tier is not None:
+            payload["risk_tier"] = {
+                "tier": self.risk_tier.tier,
+                "max_leverage": self.risk_tier.max_leverage,
+                "maintenance_margin_rate": format(
+                    self.risk_tier.maintenance_margin_rate, "f"
+                ),
+                "source_at": self.risk_tier.source_at,
+                "source": self.risk_tier.source,
+            }
+        return payload
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +209,16 @@ def validate_snapshot(
     if snapshot.funding_rate is not None:
         if not snapshot.funding_rate.is_finite():
             raise ValueError("funding_rate: invalid decimal")
+
+    if snapshot.risk_tier is not None:
+        tier = snapshot.risk_tier
+        if tier.tier < 1:
+            raise ValueError("risk_tier.tier: must be >= 1")
+        if tier.max_leverage < 1:
+            raise ValueError("risk_tier.max_leverage: must be >= 1")
+        if not Decimal(tier.maintenance_margin_rate).is_finite() or tier.maintenance_margin_rate < 0:
+            raise ValueError("risk_tier.maintenance_margin_rate: invalid decimal")
+        _parse_timestamp(tier.source_at, "risk_tier.source_at")
 
     if expected_contract is not None and snapshot.contract_code != expected_contract:
         raise ValueError(
@@ -338,6 +377,7 @@ def apply_latency(
         received_at=(received_dt - offset).isoformat(),
         source=snapshot.source,
         quality=snapshot.quality,
+        risk_tier=snapshot.risk_tier,
     )
 
 
@@ -449,6 +489,29 @@ def snapshot_from_dict(
     else:
         funding_rate = _to_decimal_signed(funding_raw, "funding_rate")
 
+    risk_tier_raw = payload.get("risk_tier")
+    risk_tier: RiskTier | None = None
+    if risk_tier_raw is not None:
+        if not isinstance(risk_tier_raw, dict):
+            raise ValueError("risk_tier: expected object")
+        try:
+            tier_raw = risk_tier_raw.get("tier")
+            max_leverage_raw = risk_tier_raw.get("max_leverage")
+            if tier_raw is None or max_leverage_raw is None:
+                raise ValueError("risk tier and max leverage are required")
+            risk_tier = RiskTier(
+                tier=int(tier_raw),
+                max_leverage=int(max_leverage_raw),
+                maintenance_margin_rate=_to_decimal_signed(
+                    risk_tier_raw.get("maintenance_margin_rate"),
+                    "risk_tier.maintenance_margin_rate",
+                ),
+                source_at=str(risk_tier_raw.get("source_at", "")),
+                source=str(risk_tier_raw.get("source", "")),
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("risk_tier: invalid") from exc
+
     snapshot = PerpetualSnapshot(
         schema_version=int(payload.get("schema_version", 1)),
         mode=str(mode or payload.get("mode", "live")),
@@ -470,6 +533,7 @@ def snapshot_from_dict(
         received_at=str(payload.get("received_at", "")),
         source=str(payload.get("source", "htx-public-api")),
         quality=str(payload.get("quality", "live")),
+        risk_tier=risk_tier,
     )
     return validate_snapshot(snapshot, expected_contract=expected_contract)
 

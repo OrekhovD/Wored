@@ -12,10 +12,10 @@ Responsibilities:
   * Long-running AI agent calls do NOT block SL/TP checks, funding, or manual
     close operations (they run in a separate task group).
   * Signal→order→fill→ledger chain: signal found → check_order_risk →
-    create_order in DB → get_execution_price → execute_market_order →
-    record_fill in DB → update_position in DB → post ledger entries.
-  * SL/TP: check_stop_trigger → execute_close → record_fill →
-    update_position → post ledger.  Remove from dict only after DB commit.
+    create_order → pre-fill recheck → execute_market_order → atomically commit
+    fill + position + ledger.
+  * SL/TP: check_stop_trigger → execute_close → atomically commit close fill,
+    position state and ledger.  Remove from dict only after DB commit.
   * close_position: use position_id (not account_id) to find position,
     verify ownership, execute close.
   * start_day: transition day state idle→running in DB, set
@@ -41,6 +41,8 @@ from uuid import UUID, uuid4
 
 from paper_trading.contracts import (
     ZERO,
+    Account,
+    AccountKind,
     Command,
     CommandType,
     DayState,
@@ -59,6 +61,7 @@ from paper_trading.contracts import (
 )
 from paper_trading.execution import (
     FillResult,
+    Position as ExecutionPosition,
     check_stop_trigger,
     execute_close,
     execute_market_order,
@@ -67,8 +70,10 @@ from paper_trading.ledger import build_fill_postings
 from paper_trading.market import PerpetualSnapshot
 from paper_trading.risk import (
     OrderRequest,
+    PositionInfo,
     RiskCheckResult,
     RiskSettings,
+    check_fill_risk,
     check_order_risk,
 )
 from paper_trading.strategy import Bar, BaselineV1Strategy
@@ -126,6 +131,9 @@ class RecoveryStore:
         return []
 
     async def load_open_positions(self) -> list[Position]:
+        return []
+
+    async def load_active_auto_accounts(self) -> list[Account]:
         return []
 
     async def reconcile_ledger(self, positions: list[Position]) -> dict[str, Any]:
@@ -223,6 +231,25 @@ class PgRecoveryStore(RecoveryStore):
             log.warning("load_open_positions failed: %s", exc)
             return []
 
+    async def load_active_auto_accounts(self) -> list[Account]:
+        """Load auto accounts whose owner currently has a running day."""
+        try:
+            async with self._repo.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT DISTINCT a.*
+                    FROM paper_v2_accounts AS a
+                    JOIN paper_v2_days AS d ON d.owner_id = a.owner_id
+                    WHERE a.kind = 'auto' AND d.state = 'running'
+                    ORDER BY a.created_at
+                    """
+                )
+            from paper_trading.repository import _row_to_account
+            return [_row_to_account(row) for row in rows]
+        except Exception as exc:
+            log.warning("load_active_auto_accounts failed: %s", exc)
+            return []
+
     async def reconcile_ledger(self, positions: list[Position]) -> dict[str, Any]:
         """Reconcile ledger postings against position state."""
         discrepancies: list[str] = []
@@ -295,31 +322,86 @@ class RedisMarketDataSource(MarketDataSource):
         self._redis = redis_client
         self._contract = contract_code
 
+    @staticmethod
+    def _aggregate_15m(bars_1m: list[Bar]) -> list[Bar]:
+        """Build complete 15-minute bars from closed one-minute bars.
+
+        HTX candle ``close_time`` values are UTC ISO timestamps.  Subtracting
+        one second before choosing the bucket keeps the candle closing at
+        ``00:15`` inside the ``00:00..00:15`` interval.  Incomplete buckets
+        are discarded so the strategy never evaluates a still-forming bar.
+        """
+        buckets: dict[int, list[Bar]] = {}
+        for bar in bars_1m:
+            try:
+                close_at = datetime.fromisoformat(bar.timestamp.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            bucket = (int(close_at.timestamp()) - 1) // (15 * 60)
+            buckets.setdefault(bucket, []).append(bar)
+
+        result: list[Bar] = []
+        for bucket_bars in buckets.values():
+            ordered = sorted(bucket_bars, key=lambda item: item.timestamp)
+            if len(ordered) != 15:
+                continue
+            result.append(
+                Bar(
+                    timestamp=ordered[-1].timestamp,
+                    open=ordered[0].open,
+                    high=max(item.high for item in ordered),
+                    low=min(item.low for item in ordered),
+                    close=ordered[-1].close,
+                    volume=sum((item.volume for item in ordered), ZERO),
+                )
+            )
+        return sorted(result, key=lambda item: item.timestamp)
+
     async def fetch_bars(self, timeframe: str, limit: int) -> list[Bar]:
         """Fetch bars from Redis.
 
-        For v1, we fetch the latest snapshot and synthesize a minimal bar
-        from the mark/last price.  A real implementation would fetch
-        OHLCV bars from a dedicated Redis key.
+        Closed candle history is published by ``collector.htx.history_loader``
+        under the same perpetual-market namespace as the execution snapshot.
+        A missing or incomplete history returns no bars.  It must not be
+        replaced by synthetic prices because that could create a false signal.
         """
         try:
-            from paper_trading.market import read_snapshot_from_redis
-            snap = await read_snapshot_from_redis(self._redis, self._contract)
-            # Synthesize a single bar from the snapshot
-            ts = snap.source_at
-            price = snap.last
-            bar = Bar(
-                timestamp=ts,
-                open=price,
-                high=price,
-                low=price,
-                close=price,
-                volume=Decimal(0),
+            import json
+
+            redis_timeframe = {
+                "1m": "1min",
+                "15m": "1min",
+                "1h": "60min",
+            }.get(timeframe)
+            if redis_timeframe is None:
+                raise ValueError(f"unsupported candle timeframe: {timeframe}")
+            raw = await self._redis.get(
+                f"market:perpetual:htx:candles:{self._contract}:{redis_timeframe}"
             )
-            return [bar]
+            if raw is not None:
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8")
+                rows = json.loads(raw)
+                if not isinstance(rows, list):
+                    raise ValueError("candle cache is not a list")
+                bars = [
+                    Bar(
+                        timestamp=str(item["close_time"]),
+                        open=Decimal(str(item["open"])),
+                        high=Decimal(str(item["high"])),
+                        low=Decimal(str(item["low"])),
+                        close=Decimal(str(item["close"])),
+                        volume=Decimal(str(item.get("volume", "0"))),
+                    )
+                    for item in rows
+                ]
+                if timeframe == "15m":
+                    bars = self._aggregate_15m(bars)
+                if len(bars) >= limit:
+                    return bars[-limit:]
         except Exception as exc:
             log.warning("fetch_bars from Redis failed: %s", exc)
-            return []
+        return []
 
     async def fetch_current_price(self) -> Decimal | None:
         """Fetch the latest mark price from Redis snapshot."""
@@ -381,7 +463,10 @@ class PaperTradingRunner:
         self.command_source = command_source
         self.market_data = market_data
         self.repository = repository
-        self.risk_settings = risk_settings or RiskSettings()
+        # Automatic entries are fail-closed when live HTX risk-tier metadata
+        # is absent or stale.  Callers may inject a different setting only
+        # for an explicit isolated test/replay.
+        self.risk_settings = risk_settings or RiskSettings(require_risk_tier=True)
         self.heartbeat_key = heartbeat_key
         self.poll_interval = poll_interval
         self.heartbeat_interval = heartbeat_interval
@@ -476,6 +561,8 @@ class PaperTradingRunner:
         self._last_poll: float = 0.0
         self._last_error: str | None = None
         self._last_decision: Decision | None = None
+        self._auto_account_id: UUID | None = None
+        self._auto_owner_id: UUID | None = None
         self._stop_event = asyncio.Event()
 
     # ── Fence token ──
@@ -544,13 +631,15 @@ class PaperTradingRunner:
             "positions_loaded": 0,
             "ledger_discrepancies": [],
             "intents_cancelled": 0,
+            "active_auto_accounts": 0,
         }
 
         if self.recovery_store is None:
-            log.info("recovery: no store configured — skipping (entries unblocked)")
+            log.warning("recovery: no store configured — entries remain blocked")
             self._recovered = True
-            self._entries_blocked = False
+            self._entries_blocked = True
             report["recovered"] = True
+            report["entries_blocked_reason"] = "recovery_store_unavailable"
             return report
 
         try:
@@ -570,6 +659,18 @@ class PaperTradingRunner:
             for pos in positions:
                 self._positions[pos.position_id] = pos
             report["positions_loaded"] = len(positions)
+
+            # Restore the auto-account scope.  This runner intentionally owns
+            # one personal auto account; zero or multiple candidates are
+            # ambiguous and must keep new entries blocked.
+            auto_accounts = await self.recovery_store.load_active_auto_accounts()
+            report["active_auto_accounts"] = len(auto_accounts)
+            if len(auto_accounts) == 1:
+                self._auto_account_id = auto_accounts[0].account_id
+                self._auto_owner_id = auto_accounts[0].owner_id
+            else:
+                self._auto_account_id = None
+                self._auto_owner_id = None
 
             # 4. Reconcile ledger
             ledger_result = await self.recovery_store.reconcile_ledger(
@@ -597,6 +698,19 @@ class PaperTradingRunner:
                 log.warning(
                     "recovery complete with %d discrepancies — entries BLOCKED: %s",
                     len(discrepancies), discrepancies[:3],
+                )
+            elif len(auto_accounts) != 1:
+                self._recovered = True
+                self._entries_blocked = True
+                report["recovered"] = True
+                report["entries_blocked_reason"] = (
+                    "no_active_auto_account"
+                    if not auto_accounts
+                    else "ambiguous_active_auto_accounts"
+                )
+                log.warning(
+                    "recovery complete but found %d active auto accounts — entries BLOCKED",
+                    len(auto_accounts),
                 )
             else:
                 self._recovered = True
@@ -688,11 +802,11 @@ class PaperTradingRunner:
         # Need a snapshot for execution
         snapshot = await self._fetch_snapshot()
         if snapshot is None:
-            # Fallback: simple price-based check without execution
-            current_price = await self._fetch_current_price()
-            if current_price is None:
-                return
-            await self._check_sl_tp_price_only(current_price, now)
+            self._last_decision = Decision(
+                reason_code=ReasonCode.waiting_data,
+                reason_detail="Protective exit deferred: validated bid/ask snapshot unavailable",
+                decided_at=datetime.now(timezone.utc),
+            )
             return
 
         to_close: list[tuple[UUID, str]] = []  # (position_id, exit_reason)
@@ -705,7 +819,7 @@ class PaperTradingRunner:
                 continue
 
             # Check stop trigger (SL)
-            trigger = check_stop_trigger(pos, snapshot)
+            trigger = check_stop_trigger(self._to_execution_position(pos), snapshot)
             if trigger.triggered:
                 to_close.append((pid, "stop_loss"))
                 log.info("SL hit: position %s @ %s (SL %s)", pid, trigger.trigger_price, sl)
@@ -725,57 +839,42 @@ class PaperTradingRunner:
 
         # Execute closes with DB persistence
         for pid, exit_reason in to_close:
-            pos = self._positions.get(pid)
-            if pos is None:
+            position_to_close = self._positions.get(pid)
+            if position_to_close is None:
                 continue
             try:
-                await self._execute_position_close(pos, snapshot, exit_reason)
+                await self._execute_position_close(position_to_close, snapshot, exit_reason)
             except Exception as exc:
                 self._last_error = str(exc)
                 log.warning("SL/TP close failed for position %s: %s", pid, exc)
 
     async def _check_sl_tp_price_only(self, current_price: Decimal, now: float) -> None:
-        """Fallback SL/TP check when no snapshot is available.
+        """Retained compatibility hook; exits require a validated snapshot."""
+        self._last_decision = Decision(
+            reason_code=ReasonCode.waiting_data,
+            reason_detail="Protective exit deferred: execution snapshot unavailable",
+            actual_metrics={"mark_price": str(current_price)},
+            decided_at=datetime.now(timezone.utc),
+        )
 
-        Only removes from dict; no execution or ledger posting.
-        Used when market_data has no fetch_snapshot method.
-        """
-        to_close: list[UUID] = []
-        for pid, pos in self._positions.items():
-            if pos.status != PositionStatus.open:
-                continue
-            sl = pos.stop_loss
-            tp = pos.take_profit
-            if sl is None or tp is None:
-                continue
-            if pos.side == PositionSide.long:
-                if current_price <= sl:
-                    to_close.append(pid)
-                    log.info("SL hit: position %s @ %s (SL %s)", pid, current_price, sl)
-                    self.strategy.on_stop_loss_hit(now)
-                elif current_price >= tp:
-                    to_close.append(pid)
-                    log.info("TP hit: position %s @ %s (TP %s)", pid, current_price, tp)
-            else:  # short
-                if current_price >= sl:
-                    to_close.append(pid)
-                    log.info("SL hit: position %s @ %s (SL %s)", pid, current_price, sl)
-                    self.strategy.on_stop_loss_hit(now)
-                elif current_price <= tp:
-                    to_close.append(pid)
-                    log.info("TP hit: position %s @ %s (TP %s)", pid, current_price, tp)
-
-        for pid in to_close:
-            pos = self._positions.pop(pid, None)
-            if pos is not None and self.repository is not None:
-                try:
-                    await self.repository.update_position(
-                        position_id=pid,
-                        status=PositionStatus.closed,
-                        close_price=current_price,
-                    )
-                except Exception as exc:
-                    log.warning("update_position (price-only SL/TP) failed: %s", exc)
+    @staticmethod
+    def _to_execution_position(pos: Position) -> ExecutionPosition:
+        """Translate the persisted position contract into execution input."""
+        return ExecutionPosition(
+            position_id=str(pos.position_id),
+            account_id=str(pos.account_id),
+            instrument=pos.instrument,
+            direction=pos.side.value,
+            entry_price=pos.avg_entry_price,
+            quantity=pos.qty,
+            leverage=LEVERAGE,
+            stop_price=pos.stop_loss or ZERO,
+            take_profit=pos.take_profit,
+            reserved_margin=pos.isolated_margin,
+            entry_fee=pos.entry_fee,
+            opened_at=pos.opened_at.isoformat() if pos.opened_at else "",
+            status=pos.status.value,
+        )
 
     async def _execute_position_close(
         self,
@@ -789,7 +888,7 @@ class PaperTradingRunner:
         Removes from _positions dict only after DB commit.
         """
         close_result = execute_close(
-            pos,
+            self._to_execution_position(pos),
             snapshot,
             close_quantity=pos.qty,
             exit_reason=exit_reason,
@@ -803,7 +902,8 @@ class PaperTradingRunner:
             self._positions.pop(pos.position_id, None)
             return
 
-        # 1. Record the closing fill in DB
+        # Build the closing fill and its signed cashflows, then commit the
+        # fill, position transition and ledger event in one transaction.
         fill = Fill(
             fill_id=uuid4(),
             order_id=pos.position_id,  # link to position's originating order
@@ -819,20 +919,6 @@ class PaperTradingRunner:
             receive_timestamp=datetime.now(timezone.utc),
             execute_timestamp=datetime.now(timezone.utc),
         )
-        await self.repository.record_fill(fill, pos.position_id)
-
-        # 2. Update position in DB
-        await self.repository.update_position(
-            position_id=pos.position_id,
-            qty=ZERO,
-            status=PositionStatus.closed,
-            close_price=money(close_result.close_price),
-            realized_gross_pnl=money(close_result.gross_pnl),
-            realized_net_pnl=money(close_result.realized_net),
-            exit_fee=money(close_result.close_fee),
-        )
-
-        # 3. Post ledger entries
         postings = build_fill_postings(
             account_id=pos.account_id,
             fill_price=close_result.close_price,
@@ -844,9 +930,17 @@ class PaperTradingRunner:
             source_ref=str(fill.fill_id),
             realized_gross=money(close_result.gross_pnl),
             realized_net=money(close_result.realized_net),
+            released_margin=money(pos.isolated_margin),
         )
-        if postings:
-            await self.repository.append_postings(postings)
+        await self.repository.commit_position_close(
+            position_id=pos.position_id,
+            fill=fill,
+            close_price=close_result.close_price,
+            realized_gross_pnl=close_result.gross_pnl,
+            realized_net_pnl=close_result.realized_net,
+            exit_fee=close_result.close_fee,
+            postings=postings,
+        )
 
         # 4. Remove from in-memory dict only after DB commit
         self._positions.pop(pos.position_id, None)
@@ -941,16 +1035,12 @@ class PaperTradingRunner:
                     self._last_error = str(exc)
                     log.warning("manual close failed for position %s: %s", position_id, exc)
             else:
-                # Fallback: no snapshot, just mark closed
-                self._positions.pop(position_id, None)
-                if self.repository is not None:
-                    try:
-                        await self.repository.update_position(
-                            position_id=position_id,
-                            status=PositionStatus.closed,
-                        )
-                    except Exception as exc:
-                        log.warning("update_position (manual close) failed: %s", exc)
+                self._last_decision = Decision(
+                    reason_code=ReasonCode.waiting_data,
+                    reason_detail="Close deferred: validated market snapshot unavailable",
+                    decided_at=datetime.now(timezone.utc),
+                )
+                return False
 
             log.info("manual close: position %s", position_id)
             return True
@@ -970,17 +1060,18 @@ class PaperTradingRunner:
                 ]
 
             snapshot = await self._fetch_snapshot()
+            if snapshot is None and to_close:
+                self._last_decision = Decision(
+                    reason_code=ReasonCode.waiting_data,
+                    reason_detail="Close-all deferred: validated market snapshot unavailable",
+                    decided_at=datetime.now(timezone.utc),
+                )
+                return False
+            if snapshot is None:
+                return True
             for pid, pos in to_close:
                 try:
-                    if snapshot is not None:
-                        await self._execute_position_close(pos, snapshot, "close_all")
-                    else:
-                        self._positions.pop(pid, None)
-                        if self.repository is not None:
-                            await self.repository.update_position(
-                                position_id=pid,
-                                status=PositionStatus.closed,
-                            )
+                    await self._execute_position_close(pos, snapshot, "close_all")
                 except Exception as exc:
                     log.warning("close_all: failed for position %s: %s", pid, exc)
 
@@ -1056,6 +1147,17 @@ class PaperTradingRunner:
             log.warning("start_day: no day_id in command")
             return True
 
+        account = None
+        if cmd.account_id is not None:
+            try:
+                account = await self.repository.get_account(cmd.account_id)
+            except Exception as exc:
+                log.warning("start_day: cannot resolve account %s: %s", cmd.account_id, exc)
+                return True
+        if account is None:
+            log.warning("start_day: account is required to determine manual/auto ownership")
+            return True
+
         try:
             # Transition day state: idle → running
             updated = await self.repository.update_day_state(
@@ -1071,9 +1173,13 @@ class PaperTradingRunner:
                 )
 
             if updated:
-                # Unblock entries for auto account
-                self._entries_blocked = False
-                log.info("start_day: day %s transitioned to running", cmd.day_id)
+                if account.kind == AccountKind.auto:
+                    self._auto_account_id = account.account_id
+                    self._auto_owner_id = account.owner_id
+                    self._entries_blocked = False
+                    log.info("start_day: auto account %s enabled for day %s", account.account_id, cmd.day_id)
+                else:
+                    log.info("start_day: manual account %s acknowledged for day %s", account.account_id, cmd.day_id)
             else:
                 log.warning("start_day: could not transition day %s to running", cmd.day_id)
         except Exception as exc:
@@ -1099,20 +1205,47 @@ class PaperTradingRunner:
         snapshot = await self._fetch_snapshot()
         positions_to_close = [
             (pid, pos) for pid, pos in self._positions.items()
-            if pos.status == PositionStatus.open
+            if pos.status == PositionStatus.open and pos.day_id == cmd.day_id
         ]
+        if snapshot is None and positions_to_close:
+            await self.repository.update_day_state(
+                cmd.day_id,
+                DayState.settlement_pending,
+            )
+            self._last_decision = Decision(
+                reason_code=ReasonCode.settlement_pending,
+                reason_detail="Finish-day deferred: execution snapshot unavailable",
+                day_id=cmd.day_id,
+                decided_at=datetime.now(timezone.utc),
+            )
+            return False
+
+        close_failed = False
         for pid, pos in positions_to_close:
             try:
-                if snapshot is not None:
-                    await self._execute_position_close(pos, snapshot, "day_close")
-                else:
-                    self._positions.pop(pid, None)
-                    await self.repository.update_position(
-                        position_id=pid,
-                        status=PositionStatus.closed,
-                    )
+                if snapshot is None:
+                    raise RuntimeError("execution snapshot unavailable")
+                await self._execute_position_close(pos, snapshot, "day_close")
             except Exception as exc:
+                close_failed = True
                 log.warning("finish_day: close position %s failed: %s", pid, exc)
+
+        remaining = any(
+            pos.status == PositionStatus.open and pos.day_id == cmd.day_id
+            for pos in self._positions.values()
+        )
+        if close_failed or remaining:
+            await self.repository.update_day_state(
+                cmd.day_id,
+                DayState.settlement_pending,
+            )
+            self._last_decision = Decision(
+                reason_code=ReasonCode.settlement_pending,
+                reason_detail="Finish-day deferred: one or more positions remain open",
+                day_id=cmd.day_id,
+                decided_at=datetime.now(timezone.utc),
+            )
+            return False
 
         # 3. Transition day state → closed
         try:
@@ -1136,9 +1269,8 @@ class PaperTradingRunner:
         """Evaluate the strategy on new 1m bar close.
 
         Signal→order→fill→ledger chain:
-        signal found → check_order_risk → create_order in DB →
-        get_execution_price → execute_market_order → record_fill in DB →
-        update_position in DB → post ledger entries.
+        signal found → order risk → create pending order → pre-fill risk →
+        execute at bid/ask → atomic fill + position + ledger commit.
         """
         if self.market_data is None:
             return
@@ -1158,16 +1290,18 @@ class PaperTradingRunner:
             return
         self._last_1m_bar_ts = last_bar.timestamp
 
-        # Fetch higher TF closes (latest)
+        # Fetch enough closed higher-TF bars to initialise EMA20/EMA50.  The
+        # strategy de-duplicates overlapping windows by candle timestamp.
         close_1h: Decimal | None = None
         close_15m: Decimal | None = None
         try:
-            bars_1h = await self.market_data.fetch_bars("1h", 1)
+            bars_1h = await self.market_data.fetch_bars("1h", self.strategy.cfg.warmup_bars_1h)
             if bars_1h:
                 close_1h = bars_1h[-1].close
-            bars_15m = await self.market_data.fetch_bars("15m", 1)
+            bars_15m = await self.market_data.fetch_bars("15m", self.strategy.cfg.warmup_bars_15m)
             if bars_15m:
                 close_15m = bars_15m[-1].close
+            self.strategy.update_higher_timeframes(bars_1h, bars_15m)
         except Exception as exc:
             log.warning("fetch higher TF bars failed: %s", exc)
 
@@ -1239,11 +1373,46 @@ class PaperTradingRunner:
             log.warning("signal→order chain: no auto account configured")
             return
 
-        # Get active day
-        day = await self.repository.get_active_day(account_id)
+        if self._auto_owner_id is None:
+            log.warning("signal→order chain: auto account owner is unknown")
+            return
+
+        # Get active day for the owner of the configured auto account.
+        day = await self.repository.get_active_day(self._auto_owner_id)
         if day is None:
             log.warning("signal→order chain: no active trading day")
             return
+
+        # A missing balance must never be interpreted as unlimited margin.
+        try:
+            available_margin = await self.repository.get_account_balance(account_id)
+            persisted_positions = await self.repository.get_open_positions(account_id)
+        except Exception as exc:
+            log.warning("signal→order chain: account risk state unavailable: %s", exc)
+            self._last_decision = Decision(
+                reason_code=ReasonCode.waiting_data,
+                reason_detail="Account balance or positions unavailable for risk check",
+                decided_at=datetime.now(timezone.utc),
+            )
+            return
+
+        if any(position.instrument == INSTRUMENT for position in persisted_positions):
+            log.info("signal→order chain: existing %s position blocks a second entry", INSTRUMENT)
+            return
+
+        open_positions = [
+            PositionInfo(
+                position_id=str(position.position_id),
+                direction=position.direction,
+                entry_price=position.avg_entry_price,
+                quantity=position.qty,
+                stop_price=position.stop_loss or ZERO,
+                leverage=LEVERAGE,
+                reserved_margin=position.isolated_margin,
+                unrealized_pnl=ZERO,
+            )
+            for position in persisted_positions
+        ]
 
         # 2. Build OrderRequest and check risk
         direction = signal.side  # "long" or "short"
@@ -1267,6 +1436,8 @@ class PaperTradingRunner:
             order_request,
             snapshot,
             self.risk_settings,
+            open_positions=open_positions,
+            available_margin=available_margin,
             is_day_active=(day.state == DayState.running),
         )
 
@@ -1292,12 +1463,26 @@ class PaperTradingRunner:
 
         # First, create the signal record in DB
         from paper_trading.contracts import Signal as ContractSignal
+        try:
+            closed_bar_time = datetime.fromisoformat(
+                signal.bar_timestamp.replace("Z", "+00:00")
+            )
+            if closed_bar_time.tzinfo is None:
+                closed_bar_time = closed_bar_time.replace(tzinfo=timezone.utc)
+        except ValueError:
+            self._last_decision = Decision(
+                reason_code=ReasonCode.engine_error,
+                reason_detail="Signal rejected: invalid closed-bar timestamp",
+                decided_at=datetime.now(timezone.utc),
+            )
+            return
+
         contract_signal = ContractSignal(
             signal_id=signal_id,
             account_id=account_id,
             strategy_version=self.strategy.VERSION,
             instrument=INSTRUMENT,
-            closed_bar_time=datetime.now(timezone.utc),
+            closed_bar_time=closed_bar_time,
             direction=PositionSide.long if direction == "long" else PositionSide.short,
             entry_ref_price=signal.close_price,
             stop_loss=stop_price,
@@ -1307,7 +1492,15 @@ class PaperTradingRunner:
         try:
             await self.repository.create_signal(contract_signal)
         except Exception as exc:
+            self._last_error = str(exc)
+            self._last_decision = Decision(
+                reason_code=ReasonCode.engine_error,
+                reason_detail="Signal persistence failed; order was not created",
+                error=str(exc),
+                decided_at=datetime.now(timezone.utc),
+            )
             log.warning("signal→order chain: create_signal failed: %s", exc)
+            return
 
         order = Order(
             order_id=order_id,
@@ -1327,9 +1520,37 @@ class PaperTradingRunner:
         await self.repository.create_order(order)
         log.info("signal→order chain: order %s created (qty=%s, side=%s)", order_id, qty, direction)
 
-        # 5. Execute market order
+        # 5. Refresh the snapshot and re-check mutable fill conditions.
+        fill_snapshot = await self._fetch_snapshot()
+        if fill_snapshot is None:
+            await self.repository.update_order_state(order_id, OrderState.rejected)
+            self._last_decision = Decision(
+                reason_code=ReasonCode.waiting_data,
+                reason_detail="Order rejected before fill: fresh snapshot unavailable",
+                decided_at=datetime.now(timezone.utc),
+            )
+            return
+        fill_risk = check_fill_risk(
+            order_request,
+            fill_snapshot,
+            self.risk_settings,
+            reserved_quantity=qty,
+            reserved_entry_price=risk_result.entry_price,
+            available_margin=available_margin,
+        )
+        if not fill_risk.allowed:
+            await self.repository.update_order_state(order_id, OrderState.rejected)
+            reasons = ", ".join(fill_risk.reasons)
+            self._last_decision = Decision(
+                reason_code=ReasonCode.risk_blocked,
+                reason_detail=f"Pre-fill risk check failed: {reasons}",
+                decided_at=datetime.now(timezone.utc),
+            )
+            return
+
+        # 6. Execute market order against the revalidated quote.
         fill_result: FillResult = execute_market_order(
-            snapshot=snapshot,
+            snapshot=fill_snapshot,
             direction=direction,
             requested_quantity=qty,
             leverage=LEVERAGE,
@@ -1349,12 +1570,7 @@ class PaperTradingRunner:
             )
             return
 
-        # 6. Update order state to filled
-        await self.repository.update_order_state(
-            order_id, OrderState.filled, filled_qty=fill_result.filled_quantity,
-        )
-
-        # 7. Record Fill in DB
+        # Build all persisted objects before the single financial commit.
         fill = Fill(
             fill_id=uuid4(),
             order_id=order_id,
@@ -1370,14 +1586,7 @@ class PaperTradingRunner:
             receive_timestamp=datetime.now(timezone.utc),
             execute_timestamp=datetime.now(timezone.utc),
         )
-        await self.repository.record_fill(fill, order_id)
-        log.info(
-            "signal→order chain: fill recorded (price=%s, qty=%s, fee=%s)",
-            fill_result.fill_price, fill_result.filled_quantity, fill_result.entry_fee,
-        )
-
-        # 8. Create Position in DB
-        position_id = uuid4()
+        position_id = order_id
         position = Position(
             position_id=position_id,
             account_id=account_id,
@@ -1393,47 +1602,6 @@ class PaperTradingRunner:
             entry_fee=money(fill_result.entry_fee),
         )
 
-        # Insert position into DB via a direct INSERT
-        # (repository doesn't have a create_position method, so we use
-        # the low-level pool)
-        try:
-            async with self.repository.pool.acquire() as conn:
-                async with conn.transaction():
-                    await conn.execute(
-                        """
-                        INSERT INTO paper_v2_positions
-                            (position_id, account_id, day_id, instrument, side,
-                             qty, avg_entry_price, isolated_margin, stop_loss,
-                             take_profit, status, owner_engine_version,
-                             opened_at, entry_fee, exit_fee, funding_cashflow,
-                             realized_gross_pnl, realized_net_pnl, created_at,
-                             updated_at, schema_version)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                                'open', '1', $11, $12, 0, 0, 0, 0, $11, $11, 2)
-                        """,
-                        str(position_id),
-                        str(account_id),
-                        str(day.day_id),
-                        INSTRUMENT,
-                        position.side.value,
-                        str(position.qty),
-                        str(position.avg_entry_price),
-                        str(position.isolated_margin),
-                        str(stop_price),
-                        str(take_profit),
-                        datetime.now(timezone.utc),
-                        str(fill_result.entry_fee),
-                    )
-        except Exception as exc:
-            log.warning("signal→order chain: insert position failed: %s", exc)
-            # Still track in memory
-        else:
-            log.info("signal→order chain: position %s created in DB", position_id)
-
-        # Track in memory
-        self._positions[position_id] = position
-
-        # 9. Post ledger entries for the opening fill
         postings = build_fill_postings(
             account_id=account_id,
             fill_price=fill_result.fill_price,
@@ -1443,10 +1611,31 @@ class PaperTradingRunner:
             side=PositionSide.long if direction == "long" else PositionSide.short,
             day_id=day.day_id,
             source_ref=str(fill.fill_id),
+            reserved_margin=money(fill_result.reserved_margin),
         )
-        if postings:
-            await self.repository.append_postings(postings)
-            log.info("signal→order chain: %d ledger postings created", len(postings))
+        try:
+            await self.repository.commit_open_fill(
+                order_id=order_id,
+                fill=fill,
+                position=position,
+                postings=postings,
+            )
+        except Exception as exc:
+            self._last_error = str(exc)
+            self._last_decision = Decision(
+                reason_code=ReasonCode.engine_error,
+                reason_detail="Financial commit failed; no partial fill was committed",
+                error=str(exc),
+                decided_at=datetime.now(timezone.utc),
+            )
+            log.exception("signal→order chain: atomic commit failed")
+            return
+
+        self._positions[position_id] = position
+        log.info(
+            "signal→order chain: atomic fill committed (price=%s, qty=%s, postings=%d)",
+            fill_result.fill_price, fill_result.filled_quantity, len(postings),
+        )
 
         self._last_decision = Decision(
             reason_code=ReasonCode.waiting_trigger,
@@ -1461,18 +1650,11 @@ class PaperTradingRunner:
     def _get_auto_account_id(self) -> UUID | None:
         """Get the auto account ID for signal execution.
 
-        For v1, we look for an open position's account_id, or return None
-        if no positions and no cached account.  The adapter is responsible
-        for setting this up via _wire_dependencies.
-
-        In production, this would query the repository for the auto account.
-        Here we return the account_id from the first open position if any,
-        or None (the caller handles that case).
+        The auto account is learned from its ``start_day`` command.  It is
+        deliberately not inferred from a manual position: the two accounts
+        have independent balances and ownership.
         """
-        for pos in self._positions.values():
-            if pos.status == PositionStatus.open:
-                return pos.account_id
-        return None
+        return self._auto_account_id
 
     # ── Heartbeat ──
 

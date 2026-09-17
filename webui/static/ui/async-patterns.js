@@ -3,7 +3,7 @@
  * Freshness tracking, data status states, error rendering, POST lifecycle.
  * Depends on: core.js (WORED.apiFetch, WORED.Poller, WORED.NA, WORED.fmtTime)
  */
-import WORED from './core.js';
+import WORED from './core.js?v=20260910-1';
 
 // ── Freshness tracker ───────────────────────────────────────────────────────────
 

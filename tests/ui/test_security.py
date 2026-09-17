@@ -32,6 +32,24 @@ PROTECTED_APIS = [
 ]
 
 
+async def _login(client) -> str:
+    """Authenticate the fixture client and return the submitted CSRF token."""
+    resp = await client.get("/login")
+    csrf = re.search(r'name="csrf_token"\s+value="([^"]+)"', resp.text)
+    token = csrf.group(1) if csrf else ""
+    await client.post(
+        "/login",
+        data={
+            "username": "fixture-admin",
+            "password": "test-password",
+            "next": "/",
+            "csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    return token
+
+
 @pytest.mark.asyncio
 class TestUnauthenticatedRedirect:
     async def test_protected_pages_redirect(self, client):
@@ -77,7 +95,7 @@ class TestCSRF:
         assert 'value="' in resp.text
 
     async def test_login_post_requires_csrf(self, client):
-        resp = await client.get("/login")
+        await client.get("/login")
         # Extract session cookie
         # POST without CSRF token
         resp2 = await client.post("/login", data={

@@ -10,8 +10,9 @@ Python 3.9 compatible.  All money Decimal → string.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any
 
 from paper_trading.contracts import (
     Position,
@@ -22,10 +23,9 @@ from paper_trading.contracts import (
 from paper_trading.runner import RunnerStatus
 from paper_trading.strategy import Signal as StrategySignal
 
-
 # ─── Helpers ───────────────────────────────────────────────────────────
 
-def _money(value: Optional[Decimal]) -> str:
+def _money(value: Decimal | None) -> str:
     """Format a Decimal as a clean money string."""
     if value is None:
         return "0"
@@ -44,7 +44,7 @@ def _dec_str(value: Any) -> str:
 
 # ─── format_status_dto ─────────────────────────────────────────────────
 
-def format_status_dto(status: RunnerStatus) -> Dict[str, Any]:
+def format_status_dto(status: RunnerStatus) -> dict[str, Any]:
     """Format a :class:`RunnerStatus` into a JSON-serializable DTO dict."""
     return {
         "running": status.running,
@@ -65,7 +65,7 @@ def format_status_dto(status: RunnerStatus) -> Dict[str, Any]:
     }
 
 
-def format_status_dto_from_contract(dto: StatusDTO) -> Dict[str, Any]:
+def format_status_dto_from_contract(dto: StatusDTO) -> dict[str, Any]:
     """Format a :class:`paper_trading.contracts.StatusDTO` into a dict."""
     return {
         "owner_id": str(dto.owner_id) if dto.owner_id else None,
@@ -92,7 +92,7 @@ def format_status_dto_from_contract(dto: StatusDTO) -> Dict[str, Any]:
     }
 
 
-def _signal_dto(signal: StrategySignal) -> Dict[str, Any]:
+def _signal_dto(signal: StrategySignal) -> dict[str, Any]:
     return {
         "side": signal.side,
         "close_price": _dec_str(signal.close_price),
@@ -109,7 +109,7 @@ def _signal_dto(signal: StrategySignal) -> Dict[str, Any]:
     }
 
 
-def _decision_dto(decision: Any) -> Dict[str, Any]:
+def _decision_dto(decision: Any) -> dict[str, Any]:
     """Format a Decision dataclass into a dict."""
     return {
         "reason_code": decision.reason_code.value if hasattr(decision.reason_code, "value") else str(decision.reason_code),
@@ -118,7 +118,7 @@ def _decision_dto(decision: Any) -> Dict[str, Any]:
     }
 
 
-def _position_dto(pos: Position) -> Dict[str, Any]:
+def _position_dto(pos: Position) -> dict[str, Any]:
     return {
         "position_id": str(pos.position_id),
         "account_id": str(pos.account_id),
@@ -142,13 +142,13 @@ def format_zero_positions_reason(
     status: RunnerStatus,
     *,
     now_epoch: float,
-    day_end_epoch: Optional[float] = None,
+    day_end_epoch: float | None = None,
 ) -> str:
     """Return a specific, actionable reason string when there are 0 positions.
 
     The text includes concrete numbers and the next action to take.
     """
-    reasons: List[str] = []
+    reasons: list[str] = []
 
     if not status.recovered:
         reasons.append(
@@ -249,7 +249,7 @@ def format_plan_summary(
     tp_rr: Decimal,
     min_net_rr: Decimal,
     cooldown_minutes: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Format a strategy plan summary as a DTO dict."""
     return {
         "strategy_version": strategy_version,
@@ -294,11 +294,11 @@ def format_plan_summary(
 def format_position_card(
     pos: Position,
     *,
-    current_price: Optional[Decimal] = None,
-    account_label: Optional[str] = None,
-) -> Dict[str, Any]:
+    current_price: Decimal | None = None,
+    account_label: str | None = None,
+) -> dict[str, Any]:
     """Format a single position as a card DTO."""
-    card: Dict[str, Any] = {
+    card: dict[str, Any] = {
         "position_id": str(pos.position_id),
         "account_id": str(pos.account_id),
         "account_label": account_label or str(pos.account_id),
@@ -336,7 +336,7 @@ def format_report(
     *,
     day_id: str,
     account_id: str,
-    account_label: Optional[str],
+    account_label: str | None,
     opening_capital: Decimal,
     realized_pnl: Decimal,
     total_fees: Decimal,
@@ -345,8 +345,8 @@ def format_report(
     losses: int,
     positions: Sequence[Position],
     strategy_version: str,
-    current_prices: Optional[Dict[str, Decimal]] = None,
-) -> Dict[str, Any]:
+    current_prices: dict[str, Decimal] | None = None,
+) -> dict[str, Any]:
     """Format an end-of-day or live report as a DTO dict.
 
     ``current_prices`` maps position_id (str) → current price Decimal for
@@ -358,7 +358,7 @@ def format_report(
 
     # Unrealized PnL from open positions
     unrealized_total = Decimal(0)
-    open_positions: List[Dict[str, Any]] = []
+    open_positions: list[dict[str, Any]] = []
     for pos in positions:
         card = format_position_card(pos, account_label=account_label)
         if current_prices and str(pos.position_id) in current_prices:

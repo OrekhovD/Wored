@@ -6,7 +6,6 @@ Protection of open positions preserved.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 from uuid import uuid4
 
@@ -97,6 +96,7 @@ class TestPlanRaces:
 
         assert pos["status"] == "open", "Position should remain open"
         assert pos["stop_loss"] is not None, "SL should be set"
+        assert entries_blocked, "New entries should remain blocked while AI is down"
         assert sl_tp_checked, "SL/TP must be checked even when AI is down"
 
     @pytest.mark.asyncio

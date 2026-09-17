@@ -254,11 +254,16 @@ def check_entry_trigger(
     rsi = float(indicators.get("rsi", 50)) if indicators else 50.0
 
     if "close_above_zone" in rule:
-        if close < entry_zone_to:
+        if close <= entry_zone_to:
             return False
         if "rsi_gt_50" in rule and rsi <= 50:
             return False
         return True
+
+    if rule == "close_below_zone_on_1m_and_rsi_lt_50":
+        return close < entry_zone_from and rsi < 50
+    if rule == "rsi_lt_50":
+        return rsi < 50
 
     if "rsi_gt" in rule:
         threshold = 50

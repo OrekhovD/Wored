@@ -7,6 +7,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from htx.websocket import ws_listen
 from htx.perpetual_market import publish_perpetual_markets
+from htx.history_loader import publish_closed_candles
 from indicators.calculator import calculate_indicators
 from indicators.snapshot import publish_market_contexts
 from journal.writer import write_entry
@@ -73,6 +74,7 @@ async def main():
     background_tasks = [
         asyncio.create_task(ws_listen(), name="htx-spot-websocket"),
         asyncio.create_task(publish_perpetual_markets(), name="htx-perpetual-market"),
+        asyncio.create_task(publish_closed_candles(), name="htx-perpetual-candles"),
     ]
 
     scheduler = AsyncIOScheduler()

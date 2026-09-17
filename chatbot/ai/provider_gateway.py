@@ -111,7 +111,9 @@ class CircuitBreakerRegistry:
 def load_registry(path: str | None = None) -> dict[str, ModelEntry]:
     """Load provider_registry.json and return {key: ModelEntry}."""
     if path is None:
-        path = os.path.join(os.path.dirname(__file__), "..", "config", "provider_registry.json")
+        path = os.getenv("LLM_REGISTRY_PATH") or os.path.join(
+            os.path.dirname(__file__), "..", "config", "provider_registry.json"
+        )
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)

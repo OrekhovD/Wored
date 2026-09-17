@@ -3,7 +3,7 @@
  * Long/Short position dialog with focus trap, preview debounce, confirm lifecycle.
  * Depends on: core.js (WORED.openDialog, WORED.closeDialog, WORED.apiFetch)
  */
-import WORED from './core.js';
+import WORED from './core.js?v=20260910-1';
 
 let _ticketState = {
   direction: 'long',

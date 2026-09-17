@@ -3124,6 +3124,39 @@ a:focus-visible {
    TD-02: Trading Day UI
    ═══════════════════════════════════════════════════════════════════════ */
 
+[hidden] { display: none !important; }
+
+.td-learning-review {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--line, #30343b);
+  border-radius: 8px;
+  background: rgba(15, 18, 22, 0.72);
+}
+
+.td-learning-item {
+  margin-top: 10px;
+  padding: 10px;
+  border-left: 3px solid var(--accent, #f59e0b);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.td-learning-item > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.td-learning-item p,
+.td-learning-gate {
+  margin: 6px 0 0;
+}
+
+.td-learning-status {
+  color: var(--muted, #9ca3af);
+  font-size: 12px;
+}
+
 .trading-day-page { max-width: var(--ui-content-max); margin: 0 auto; padding: var(--ui-space-4); }
 
 .td-section { display: flex; flex-direction: column; gap: var(--ui-space-4); }
@@ -3168,7 +3201,31 @@ a:focus-visible {
 
 .td-auto-controls { display: flex; gap: var(--ui-space-2); flex-wrap: wrap; }
 
-.td-chart-area { min-height: 280px; }
+.td-chart-area { min-height: 180px; }
+.td-chart-placeholder {
+  min-height: 180px; display: grid; place-items: center; text-align: center;
+  padding: var(--ui-space-4); border: 1px dashed var(--ui-border);
+  border-radius: var(--ui-radius); color: var(--ui-muted);
+}
+.td-prototype-notice {
+  padding: var(--ui-space-3); border: 1px solid var(--ui-accent);
+  border-radius: var(--ui-radius); background: rgba(249,115,22,0.08);
+}
+
+.td-market-quote {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle, #28313b);
+  color: var(--text-muted, #9ba7b4);
+  font-size: 12px;
+}
+
+.td-market-quote b { color: var(--text-primary, #e8edf2); }
+.td-live-chart { min-height: 280px; }
 .td-ticket-area { padding: var(--ui-space-3); background: var(--ui-surface-raised); border-radius: var(--ui-radius); border: 1px solid var(--ui-border); }
 .td-ticket-form { display: flex; gap: var(--ui-space-2); flex-wrap: wrap; }
 .td-ticket-dir-row { display: flex; gap: var(--ui-space-2); }

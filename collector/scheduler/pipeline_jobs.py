@@ -80,7 +80,7 @@ async def execution_watch_loop_job():
             sessions = await conn.fetch(
                 """
                 SELECT id FROM trading_sessions
-                WHERE status IN ('armed', 'in_position', 'cooldown', 'idle')
+                WHERE status IN ('armed', 'in_position', 'cooldown', 'idle', 'paused')
                 AND session_end > NOW()
                 """,
             )

@@ -14,7 +14,7 @@ import enum
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
 # ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ from uuid import UUID, uuid4
 SCHEMA_VERSION: int = 2
 
 #: Conventional zero-Decimal for comparisons without floating-point error.
-ZERO: Decimal = Decimal("0")
+ZERO: Decimal = Decimal(0)
 
 #: Decimal quantiser for all monetary values — 8 decimal places.
 MONEY_QUANT: Decimal = Decimal("0.00000001")
@@ -168,7 +168,7 @@ class ReasonCode(str, enum.Enum):
 
 
 class JournalBucket(str, enum.Enum):
-    """Double-entry-ish accounting buckets for the append-only journal."""
+    """Signed cashflow components in the append-only account journal."""
 
     cash = "cash"
     entry_fee = "entry_fee"
@@ -211,9 +211,9 @@ class Owner:
 
     owner_id: UUID
     display_name: str
-    telegram_id: Optional[int] = None
-    webui_identity: Optional[str] = None
-    created_at: Optional[datetime] = None
+    telegram_id: int | None = None
+    webui_identity: str | None = None
+    created_at: datetime | None = None
     schema_version: int = SCHEMA_VERSION
 
 
@@ -231,7 +231,7 @@ class Account:
     kind: AccountKind
     currency: str = "USDT"
     opening_deposit: Decimal = field(default_factory=lambda: money("1000"))
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
     schema_version: int = SCHEMA_VERSION
 
 
@@ -251,12 +251,12 @@ class TradingDay:
     day_id: UUID
     owner_id: UUID
     timezone: str = "Asia/Bangkok"
-    start_utc: Optional[datetime] = None
-    end_utc: Optional[datetime] = None
+    start_utc: datetime | None = None
+    end_utc: datetime | None = None
     state: DayState = DayState.idle
     strategy_version: str = "baseline_v1"
-    settings_snapshot: Dict[str, Any] = field(default_factory=dict)
-    created_at: Optional[datetime] = None
+    settings_snapshot: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime | None = None
     schema_version: int = SCHEMA_VERSION
 
 
@@ -280,17 +280,17 @@ class Command:
 
     command_id: UUID
     owner_id: UUID
-    account_id: Optional[UUID]
-    day_id: Optional[UUID]
+    account_id: UUID | None
+    day_id: UUID | None
     command_type: CommandType
     idempotency_key: str
     request_hash: str  # SHA-256 of canonical payload
-    expected_revision: Optional[int] = None
+    expected_revision: int | None = None
     status: CommandStatus = CommandStatus.accepted
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     schema_version: int = SCHEMA_VERSION
 
 
@@ -313,19 +313,19 @@ class Order:
     day_id: UUID
     origin: str  # "user" | "auto"
     actor: str  # "user" | "auto"
-    signal_id: Optional[UUID] = None
+    signal_id: UUID | None = None
     side: OrderSide = OrderSide.buy
     order_type: OrderType = OrderType.market
     instrument: str = "BTC-USDT"
     qty: Decimal = field(default_factory=lambda: ZERO)
-    price: Optional[Decimal] = None  # limit/stop reference, not fill guarantee
-    stop_loss: Optional[Decimal] = None
-    take_profit: Optional[Decimal] = None
+    price: Decimal | None = None  # limit/stop reference, not fill guarantee
+    stop_loss: Decimal | None = None
+    take_profit: Decimal | None = None
     state: OrderState = OrderState.pending
     filled_qty: Decimal = field(default_factory=lambda: ZERO)
     execution_engine_version: str = "1"
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
     schema_version: int = SCHEMA_VERSION
 
 
@@ -352,9 +352,9 @@ class Fill:
     fee_rate: Decimal = field(default_factory=lambda: money("0.0006"))
     slippage_bps: Decimal = field(default_factory=lambda: ZERO)
     is_close: bool = False  # True if this fill reduces/closes a position
-    source_timestamp: Optional[datetime] = None
-    receive_timestamp: Optional[datetime] = None
-    execute_timestamp: Optional[datetime] = None
+    source_timestamp: datetime | None = None
+    receive_timestamp: datetime | None = None
+    execute_timestamp: datetime | None = None
     schema_version: int = SCHEMA_VERSION
 
 
@@ -380,13 +380,13 @@ class Position:
     qty: Decimal = field(default_factory=lambda: ZERO)
     avg_entry_price: Decimal = field(default_factory=lambda: ZERO)
     isolated_margin: Decimal = field(default_factory=lambda: ZERO)
-    stop_loss: Optional[Decimal] = None
-    take_profit: Optional[Decimal] = None
+    stop_loss: Decimal | None = None
+    take_profit: Decimal | None = None
     status: PositionStatus = PositionStatus.open
     owner_engine_version: str = "1"
-    opened_at: Optional[datetime] = None
-    closed_at: Optional[datetime] = None
-    close_price: Optional[Decimal] = None
+    opened_at: datetime | None = None
+    closed_at: datetime | None = None
+    close_price: Decimal | None = None
     realized_gross_pnl: Decimal = field(default_factory=lambda: ZERO)
     realized_net_pnl: Decimal = field(default_factory=lambda: ZERO)
     entry_fee: Decimal = field(default_factory=lambda: ZERO)
@@ -425,15 +425,15 @@ class JournalPosting:
 
     posting_id: UUID
     account_id: UUID
-    day_id: Optional[UUID] = None
+    day_id: UUID | None = None
     event_id: UUID = field(default_factory=new_uuid)
     source_type: JournalSourceType = JournalSourceType.fill
-    source_ref: Optional[str] = None  # fill_id / funding_event_id / etc.
+    source_ref: str | None = None  # fill_id / funding_event_id / etc.
     currency: str = "USDT"
     bucket: JournalBucket = JournalBucket.cash
     amount: Decimal = field(default_factory=lambda: ZERO)  # signed
-    occurred_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
+    occurred_at: datetime | None = None
+    created_at: datetime | None = None
     schema_version: int = SCHEMA_VERSION
 
 
@@ -450,19 +450,19 @@ class Decision:
     """
 
     decision_id: UUID = field(default_factory=new_uuid)
-    run_id: Optional[str] = None
-    account_id: Optional[UUID] = None
-    day_id: Optional[UUID] = None
+    run_id: str | None = None
+    account_id: UUID | None = None
+    day_id: UUID | None = None
     reason_code: ReasonCode = ReasonCode.waiting_trigger
-    reason_detail: Optional[str] = None
-    required_metrics: Dict[str, Any] = field(default_factory=dict)
-    actual_metrics: Dict[str, Any] = field(default_factory=dict)
-    next_check: Optional[datetime] = None
-    next_transition: Optional[str] = None
+    reason_detail: str | None = None
+    required_metrics: dict[str, Any] = field(default_factory=dict)
+    actual_metrics: dict[str, Any] = field(default_factory=dict)
+    next_check: datetime | None = None
+    next_transition: str | None = None
     strategy_version: str = "baseline_v1"
     engine_version: str = "1"
-    error: Optional[str] = None
-    decided_at: Optional[datetime] = None
+    error: str | None = None
+    decided_at: datetime | None = None
     schema_version: int = SCHEMA_VERSION
 
 
@@ -476,14 +476,14 @@ class Heartbeat:
     run_id: str
     instance_id: str
     lease_token: str
-    account_id: Optional[UUID] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    last_success: Optional[datetime] = None
-    last_error: Optional[str] = None
+    account_id: UUID | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    last_success: datetime | None = None
+    last_error: str | None = None
     engine_version: str = "1"
     strategy_version: str = "baseline_v1"
-    data_freshness_seconds: Optional[float] = None
+    data_freshness_seconds: float | None = None
     processed_sequence: int = 0
     schema_version: int = SCHEMA_VERSION
 
@@ -502,18 +502,18 @@ class Signal:
     """
 
     signal_id: UUID = field(default_factory=new_uuid)
-    account_id: Optional[UUID] = None
+    account_id: UUID | None = None
     strategy_version: str = "baseline_v1"
     instrument: str = "BTC-USDT"
-    closed_bar_time: Optional[datetime] = None
+    closed_bar_time: datetime | None = None
     direction: PositionSide = PositionSide.long
     entry_ref_price: Decimal = field(default_factory=lambda: ZERO)
     stop_loss: Decimal = field(default_factory=lambda: ZERO)
     take_profit: Decimal = field(default_factory=lambda: ZERO)
     atr_value: Decimal = field(default_factory=lambda: ZERO)
-    valid_until: Optional[datetime] = None
-    rejected_reason: Optional[str] = None
-    created_at: Optional[datetime] = None
+    valid_until: datetime | None = None
+    rejected_reason: str | None = None
+    created_at: datetime | None = None
     schema_version: int = SCHEMA_VERSION
 
 
@@ -530,34 +530,34 @@ class StatusDTO:
     "Сегодня" card, explain zero positions, and show next action.
     """
 
-    owner_id: Optional[UUID] = None
-    day_id: Optional[UUID] = None
-    account_kind: Optional[AccountKind] = None
+    owner_id: UUID | None = None
+    day_id: UUID | None = None
+    account_kind: AccountKind | None = None
     mode: str = "baseline_auto"  # baseline_auto | ai_plan
     day_state: DayState = DayState.idle
     automation_state: AutomationState = AutomationState.initializing
     engine_status: str = "unknown"  # healthy | delayed | unconfirmed | unknown
-    engine_age_seconds: Optional[float] = None
+    engine_age_seconds: float | None = None
     feed_status: str = "unknown"  # fresh | stale | unknown
-    feed_age_seconds: Optional[float] = None
+    feed_age_seconds: float | None = None
     strategy_version: str = "baseline_v1"
-    plan_version: Optional[str] = None
-    plan_ttl_seconds: Optional[float] = None
+    plan_version: str | None = None
+    plan_ttl_seconds: float | None = None
     open_positions: int = 0
     pending_orders: int = 0
     closed_trades: int = 0
-    last_decision_code: Optional[ReasonCode] = None
-    last_decision_at: Optional[datetime] = None
-    last_decision_detail: Optional[str] = None
-    reason_code: Optional[ReasonCode] = None
-    actual_threshold: Optional[str] = None
-    required_threshold: Optional[str] = None
-    next_check: Optional[datetime] = None
-    next_transition: Optional[str] = None
-    equity: Optional[Decimal] = None
-    realized_pnl: Optional[Decimal] = None
-    unrealized_pnl: Optional[Decimal] = None
-    total_fees: Optional[Decimal] = None
+    last_decision_code: ReasonCode | None = None
+    last_decision_at: datetime | None = None
+    last_decision_detail: str | None = None
+    reason_code: ReasonCode | None = None
+    actual_threshold: str | None = None
+    required_threshold: str | None = None
+    next_check: datetime | None = None
+    next_transition: str | None = None
+    equity: Decimal | None = None
+    realized_pnl: Decimal | None = None
+    unrealized_pnl: Decimal | None = None
+    total_fees: Decimal | None = None
     schema_version: int = SCHEMA_VERSION
 
 
@@ -576,9 +576,9 @@ def jsonstr_to_decimal(s: str) -> Decimal:
     return Decimal(s).quantize(MONEY_QUANT)
 
 
-def uuid_to_str(u: Optional[UUID]) -> Optional[str]:
+def uuid_to_str(u: UUID | None) -> str | None:
     return str(u) if u is not None else None
 
 
-def str_to_uuid(s: Optional[str]) -> Optional[UUID]:
+def str_to_uuid(s: str | None) -> UUID | None:
     return UUID(s) if s else None

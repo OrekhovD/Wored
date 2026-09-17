@@ -14,13 +14,21 @@ const WORED = (() => {
 
   const NA = '\u2014'; // —
 
+  function finiteNumber(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value !== 'string' || value.trim() === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
   /**
    * Format USDT value. ≥1 → 2-8 decimals by source precision;
    * <1 → up to 8; rounds to zero → show '<0,00000001 USDT'.
    * null/undefined/NaN/Infinity → '—'.
    */
   function fmtUSDT(value, { minDecimals = 2, maxDecimals = 8 } = {}) {
-    if (value == null || !Number.isFinite(value)) return NA;
+    value = finiteNumber(value);
+    if (value == null) return NA;
     if (value === 0) return '0,00 USDT';
     const abs = Math.abs(value);
     if (abs > 0 && abs < 0.01) {
@@ -40,7 +48,8 @@ const WORED = (() => {
 
   /** Format a price — same as USDT but without suffix for internal use */
   function fmtPrice(value) {
-    if (value == null || !Number.isFinite(value)) return NA;
+    value = finiteNumber(value);
+    if (value == null) return NA;
     if (value === 0) return '0';
     const abs = Math.abs(value);
     if (abs >= 1) {
@@ -52,19 +61,22 @@ const WORED = (() => {
 
   /** Format percentage points (input already in %). E.g. 0.5 → '0,50 %' */
   function fmtPct(value) {
-    if (value == null || !Number.isFinite(value)) return NA;
+    value = finiteNumber(value);
+    if (value == null) return NA;
     return pctFmt.format(value) + ' %';
   }
 
   /** Format a fraction as percentage. E.g. 0.005 → '0,50 %' */
   function fmtFraction(value) {
-    if (value == null || !Number.isFinite(value)) return NA;
+    value = finiteNumber(value);
+    if (value == null) return NA;
     return pctFmt.format(value * 100) + ' %';
   }
 
   /** Format PnL with sign for positive. E.g. +1,25 USDT / -1,25 USDT / 0,00 USDT */
   function fmtPnL(value) {
-    if (value == null || !Number.isFinite(value)) return NA;
+    value = finiteNumber(value);
+    if (value == null) return NA;
     if (value === 0) return '0,00 USDT';
     const formatted = ruFmt.format(value) + ' USDT';
     return value > 0 ? '+' + formatted : formatted;
@@ -72,7 +84,8 @@ const WORED = (() => {
 
   /** Format quantity with asset suffix. E.g. 0,000155642023 BTC */
   function fmtQty(value, asset = 'BTC') {
-    if (value == null || !Number.isFinite(value)) return NA;
+    value = finiteNumber(value);
+    if (value == null) return NA;
     return ruFmt8.format(value) + ' ' + asset;
   }
 

@@ -28,7 +28,7 @@ import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from uuid import uuid4
 
 # Ensure project root is importable
@@ -36,13 +36,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from paper_trading.contracts import (  # noqa: E402
-    AccountKind,
-    Position,
-    PositionSide,
-    PositionStatus,
-)
-from paper_trading.strategy import ATR14, Bar, BaselineV1Strategy, EMA, Signal  # noqa: E402
+from paper_trading.contracts import Position, PositionSide, PositionStatus  # noqa: E402
+from paper_trading.strategy import ATR14, Bar, BaselineV1Strategy, EMA  # noqa: E402
 from paper_trading.runner import (  # noqa: E402
     PaperTradingRunner,
     RunnerStatus,
@@ -108,8 +103,8 @@ class TestATR14(unittest.TestCase):
             (Decimal("110"), Decimal("100"), Decimal("105")), # TR = max(10, 10, 5) = 10
             (Decimal("115"), Decimal("108"), Decimal("112")), # TR = max(7, 10, 8) = 10
         ]
-        for h, l, c in bars:
-            atr.update(h, l, c)
+        for high, low, close in bars:
+            atr.update(high, low, close)
         # ATR = (10+10+10)/3 = 10
         self.assertEqual(atr.value, Decimal("10"))
 
@@ -120,8 +115,8 @@ class TestATR14(unittest.TestCase):
             (Decimal("110"), Decimal("100"), Decimal("105")),
             (Decimal("115"), Decimal("108"), Decimal("112")),
         ]
-        for h, l, c in bars:
-            atr.update(h, l, c)
+        for high, low, close in bars:
+            atr.update(high, low, close)
         # Next TR: prev_close=112, high=120, low=110 -> TR = max(10, 8, 2) = 10
         atr.update(Decimal("120"), Decimal("110"), Decimal("115"))
         n = Decimal(3)
@@ -384,8 +379,6 @@ def _make_replay_bars() -> Dict[str, List[Bar]]:
         close=base - Decimal("0.2"),
         volume=Decimal("80"),
     ))
-    prev_high = base + Decimal("0.5")
-
     # Bar 52: breakout — close > EMA20 and close > prev high
     bars_1m.append(Bar(
         timestamp="2026-01-01T00:51:00Z",
@@ -445,7 +438,13 @@ async def _run_replay() -> Dict[str, Any]:
             strategy_version="baseline_v1",
         )
         result["report"] = report
-        result["passed"] = True
+        result["scenario_passed"] = True
+        result["passed"] = False
+        result["status"] = "BLOCKED"
+        result["note"] = (
+            "Synthetic strategy exercise completed, but AC-14 requires recorded "
+            "HTX quote/mark events and natural long and short signal-to-ledger cycles."
+        )
     else:
         result["passed"] = False
         result["status"] = "BLOCKED"
@@ -545,6 +544,10 @@ def main() -> int:
     output_json = json.dumps(report, indent=2, default=str, ensure_ascii=False)
 
     if args.output == "-":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except (AttributeError, OSError):
+            pass
         print(output_json)
     else:
         out_path = Path(args.output)

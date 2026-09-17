@@ -275,7 +275,7 @@ CREATE INDEX IF NOT EXISTS idx_positions_day
     ON paper_v2_positions (day_id, status);
 
 -- ---------------------------------------------------------------------------
--- Journal postings — append-only, double-entry balanced
+-- Journal postings — append-only signed cashflow components
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS paper_v2_postings (
     posting_id      UUID         NOT NULL PRIMARY KEY,

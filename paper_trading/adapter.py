@@ -220,7 +220,6 @@ def register_runner(scheduler: Any) -> bool:
         _runner_instance = runner
 
         # Wire real dependencies (async — use scheduler's event loop)
-        import asyncio
         async def _wire_and_recover():
             """Wire PostgreSQL + Redis dependencies, then recover."""
             try:

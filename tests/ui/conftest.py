@@ -4,8 +4,6 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Any
-
 import pytest
 import pytest_asyncio
 
@@ -47,7 +45,7 @@ def viewport_sizes() -> dict[str, dict[str, int]]:
     return {
         "mobile":  {"width": 390, "height": 844},
         "tablet":  {"width": 768, "height": 1024},
-        "desktop": {"width": 1280, "height": 800},
+        "desktop": {"width": 1440, "height": 900},
     }
 
 

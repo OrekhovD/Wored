@@ -72,8 +72,15 @@ CREATE TABLE IF NOT EXISTS strategy_rules (
     version INT NOT NULL,
     rules JSONB NOT NULL,
     source VARCHAR(30) DEFAULT 'strategy_learner',
+    status VARCHAR(20) NOT NULL DEFAULT 'candidate',
+    evidence JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE strategy_rules
+    ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'candidate';
+ALTER TABLE strategy_rules
+    ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS sim_evaluations (
     id SERIAL PRIMARY KEY,
@@ -180,29 +187,47 @@ async def get_usage_summary(user_id: int, period: str = "day") -> dict:
 
 # ─── strategy_rules CRUD ──────────────────────────────────────────────
 
-async def save_strategy_rules(rules: dict, version: int = 1, source: str = "strategy_learner") -> bool:
+async def save_strategy_rules(
+    rules: dict,
+    version: int = 1,
+    source: str = "strategy_learner",
+    *,
+    status: str = "candidate",
+    evidence: dict | None = None,
+) -> bool:
+    if status not in {"candidate", "validating", "approved", "active", "rejected"}:
+        raise ValueError("invalid strategy status")
     pool = await get_pool()
     if not pool:
         return False
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO strategy_rules (version, rules, source) VALUES ($1, $2, $3)",
-            version, json.dumps(rules), source,
+            """INSERT INTO strategy_rules (version, rules, source, status, evidence)
+               VALUES ($1, $2, $3, $4, $5)""",
+            version, json.dumps(rules), source, status, json.dumps(evidence or {}),
         )
     return True
 
 
-async def get_latest_strategy_rules() -> dict | None:
+async def get_latest_strategy_rules(*, status: str = "active") -> dict | None:
     pool = await get_pool()
     if not pool:
         return None
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT version, rules, created_at FROM strategy_rules ORDER BY id DESC LIMIT 1"
+            """SELECT version, rules, status, evidence, created_at
+               FROM strategy_rules WHERE status = $1 ORDER BY id DESC LIMIT 1""",
+            status,
         )
     if not row:
         return None
-    return {"version": row["version"], "rules": json.loads(row["rules"]) if isinstance(row["rules"], str) else row["rules"], "created_at": _serialize_dt(row["created_at"])}
+    return {
+        "version": row["version"],
+        "rules": json.loads(row["rules"]) if isinstance(row["rules"], str) else row["rules"],
+        "status": row["status"],
+        "evidence": json.loads(row["evidence"]) if isinstance(row["evidence"], str) else row["evidence"],
+        "created_at": _serialize_dt(row["created_at"]),
+    }
 
 
 # ─── sim_evaluations CRUD ─────────────────────────────────────────────
@@ -493,4 +518,3 @@ async def get_latest_prediction_request(symbol: str | None = None) -> dict | Non
     if not items:
         return None
     return await get_prediction_request_detail(items[0]["id"])
-

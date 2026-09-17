@@ -807,7 +807,7 @@ async def execute_entry(
     margin_used = pos["margin_used_usdt"]
 
     # Entry price with slippage
-    raw_entry = float(candle.get("close", entry_from))
+    raw_entry = float(candle.get("execution_price", candle.get("close", entry_from)))
     entry_price = apply_slippage(raw_entry, side, is_entry=True)
 
     from services.sim_math import validate_order
@@ -1015,6 +1015,22 @@ async def execute_exit(session_id: str, trade_id: str, exit_price: float,
 # ─── Execution Watch Loop (ТЗ 11) ──────────────────────────────────────
 
 async def execution_watch_loop(session_id: str) -> dict:
+    """Publish a heartbeat and decision for every check, including skips and failures."""
+    from services.execution_status import publish
+    from storage.redis_client import get_redis
+    try:
+        result = await _execution_watch_loop(session_id)
+    except Exception:
+        log.exception("Execution loop failed for session %s", session_id)
+        result = {"reason": "engine_error", "actions": []}
+    try:
+        await publish(get_redis(), session_id, result)
+    except Exception:
+        log.warning("Execution heartbeat unavailable for session %s", session_id)
+    return result
+
+
+async def _execution_watch_loop(session_id: str) -> dict:
     """
     ТЗ 11 (execution_watch_loop, каждые 10 сек) — проверить все planned entries
     и открытые позиции по текущей 1m свече.
@@ -1080,6 +1096,7 @@ async def execution_watch_loop(session_id: str) -> dict:
     except Exception:
         pass  # use ticker-based candle
 
+    candle["execution_price"] = current_price
     market_ctx = await build_market_context(symbol)
     indicators = market_ctx["timeframes"].get("1m") if market_ctx["quality"] == "ready" else None
 
@@ -1150,16 +1167,58 @@ async def execution_watch_loop(session_id: str) -> dict:
     except Exception as exc:
         log.debug("Breakout detector skipped: %s", exc)
 
-    # 2. Check entries (only if no open position — ТЗ 7.4)
+    # Resume only a completed cooldown, under lock; user pause always wins.
+    cooldown_until = None
+    if session["status"] == "cooldown" and not open_trades:
+        from services.execution_engine import get_risk_params
+        async with pool.acquire() as conn, conn.transaction():
+            locked = await conn.fetchrow("SELECT * FROM trading_sessions WHERE id=$1 FOR UPDATE", session_id)
+            last_stop = await conn.fetchval(
+                "SELECT MAX(closed_at) FROM executed_trades WHERE session_id=$1 AND close_reason='stop_loss'", session_id)
+            if last_stop:
+                cooldown_until = last_stop + timedelta(minutes=get_risk_params(session["risk_mode"])["cooldown_minutes"])
+            if locked and locked["status"] == "cooldown" and cooldown_until and _now_utc() >= cooldown_until:
+                p = await conn.fetchrow("SELECT plan_json FROM session_plans WHERE session_id=$1 AND version=$2",
+                                         session_id, locked["active_plan_version"])
+                if not plan_error(decode(p["plan_json"]) if p else None, dict(locked)):
+                    await conn.execute("UPDATE trading_sessions SET status='armed',updated_at=NOW() WHERE id=$1", session_id)
+                    await conn.execute(
+                        "INSERT INTO execution_events(id,session_id,event_type,state_before,state_after,event_payload) "
+                        "VALUES($1,$2,'cooldown_completed','cooldown','armed',$3)", _uuid(), session_id,
+                        json.dumps({"plan_version": locked["active_plan_version"], "cooldown_until": cooldown_until.isoformat()}))
+                    session = {**dict(locked), "status": "armed"}
+
+    async with pool.acquire() as conn:
+        active = await conn.fetchrow("SELECT plan_json FROM session_plans WHERE session_id=$1 AND version=$2",
+                                     session_id, session["active_plan_version"])
+    active_plan = decode(active["plan_json"]) if active else None
+    decision_reason = plan_error(active_plan, session)
+    if decision_reason == "plan_not_validated" and active_plan:
+        decision_reason = active_plan.get("validation_status", decision_reason)
+    if session["status"] in {"paused", "cooldown"}:
+        decision_reason = session["status"]
+    elif open_trades:
+        decision_reason = "position_open"
+    elif market_ctx["quality"] != "ready":
+        decision_reason = "market_data_unavailable"
+    elif not planned_entries and not decision_reason:
+        decision_reason = "no_pending_entries"
+
+    observations = []
     has_open = any(a.get("action") != "liquidation" for a in actions)
-    if not open_trades and not has_open and market_ctx["quality"] == "ready" and not session_error(session):
+    if not open_trades and not has_open and not decision_reason:
+        from services.execution_status import entry_observation
         for pe in planned_entries:
             entry_dict = dict(pe)
             entry_dict["id"] = str(pe["id"])
             result = await execute_entry(session_id, entry_dict, candle, budget, indicators)
+            observations.append(entry_observation(entry_dict, candle, result))
             if result.get("executed"):
                 actions.append({"action": "entry", "entry_id": str(pe["id"]), "result": result})
-                break  # ТЗ 7.4: only 1 position at a time
+                decision_reason = "entry_executed"
+                break
+        if not decision_reason and observations:
+            decision_reason = observations[0]["reason"]
 
     # 2.5 §4 — Fast timeout: close positions exceeding max_trade_duration_minutes
     from services.execution_engine import enforce_trade_horizon_timeout
@@ -1183,7 +1242,16 @@ async def execution_watch_loop(session_id: str) -> dict:
         await update_session_status(session_id, "completed", "session_window_completed")
         actions.append({"action": "session_completed"})
 
-    return {"actions": actions}
+    closed_ids = {a["trade_id"] for a in actions if a.get("trade_id") and a.get("result")
+                  and "error" not in a["result"]}
+    opened_count = sum(1 for a in actions if a.get("action") == "entry" and a.get("result", {}).get("executed"))
+    current_open_count = max(0, len(open_trades) - len(closed_ids)) + opened_count
+    if closed_ids and not current_open_count:
+        decision_reason = "position_closed"
+    return {"actions": actions, "reason": decision_reason, "entries": observations,
+            "open_count": current_open_count, "pending_count": max(0, len(planned_entries) - opened_count),
+            "plan_version": session["active_plan_version"],
+            "cooldown_until": cooldown_until.isoformat() if cooldown_until else None}
 
 
 # ─── Mini App API helpers (ТЗ backend_contract v1) ────────────────────

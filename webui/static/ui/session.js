@@ -3,8 +3,7 @@
  * Readiness banner, session info, plan, execution controls.
  * Depends on: core.js (WORED), async-patterns.js (Poller)
  */
-import WORED from './core.js';
-import { Poller } from './async-patterns.js';
+import WORED from './core.js?v=20260910-1';
 
 let _sessionPoller = null;
 
@@ -212,7 +211,7 @@ function initSession() {
   if (!page) return;
 
   loadSession();
-  _sessionPoller = new Poller(loadSession, 15000);
+  _sessionPoller = new WORED.Poller(loadSession, 15000);
   _sessionPoller.start();
 }
 

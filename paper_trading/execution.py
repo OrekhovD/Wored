@@ -330,9 +330,10 @@ def execute_close(
     accordingly, and the unallocated entry fee stays with the remaining
     position for allocation on the next close.
 
-    PnL calculation:
-        gross_pnl = ± qty * (close_price - entry_price)
-        close_fee = qty * close_price * FEE_RATE
+    PnL calculation for contract quantity:
+        base_qty   = qty * contract_size
+        gross_pnl = ± base_qty * (close_price - entry_price)
+        close_fee = base_qty * close_price * FEE_RATE
         net_pnl   = gross_pnl - close_fee - allocated_entry_fee
         realized_net = net_pnl - already_paid_entry_fee_at_open
 
@@ -379,8 +380,10 @@ def execute_close(
     close_price = apply_slippage(raw_close, position.direction, "close", bps=slippage_bps)
 
     sign = Decimal(1) if position.direction == "long" else Decimal(-1)
-    gross_pnl = sign * close_qty * (close_price - position.entry_price)
-    close_fee = close_qty * close_price * FEE_RATE
+    contract_size = snapshot.contract_size
+    base_qty = close_qty * contract_size
+    gross_pnl = sign * base_qty * (close_price - position.entry_price)
+    close_fee = base_qty * close_price * FEE_RATE
 
     # Proportional allocation of entry fee
     if position.quantity > 0:
@@ -455,11 +458,12 @@ def apply_funding(
     position: Position,
     funding_rate: Decimal,
     mark_price: Decimal,
+    contract_size: Decimal = Decimal(1),
 ) -> FundingResult:
     """Apply a funding payment to a position.
 
     Funding is calculated as:
-        funding = quantity * mark_price * funding_rate
+        funding = quantity * contract_size * mark_price * funding_rate
 
     For a positive funding rate:
       * longs pay  → funding_amount is negative
@@ -479,7 +483,9 @@ def apply_funding(
             quantity=position.quantity,
         )
 
-    base_funding = position.quantity * mark_price * funding_rate
+    if contract_size <= 0:
+        raise ValueError("contract_size: must be positive")
+    base_funding = position.quantity * contract_size * mark_price * funding_rate
     if position.direction == "long":
         # Long pays positive rate (negative cash flow)
         funding_amount = -base_funding
@@ -503,6 +509,7 @@ def apply_funding(
 def calculate_unrealized(
     position: Position,
     mark_price: Decimal,
+    contract_size: Decimal = Decimal(1),
 ) -> Decimal:
     """Calculate unrealized PnL based on the current mark price.
 
@@ -514,9 +521,9 @@ def calculate_unrealized(
     This is the gross unrealized PnL (before fees and funding).
     """
     if position.direction == "long":
-        return position.quantity * (mark_price - position.entry_price)
+        return position.quantity * contract_size * (mark_price - position.entry_price)
     elif position.direction == "short":
-        return position.quantity * (position.entry_price - mark_price)
+        return position.quantity * contract_size * (position.entry_price - mark_price)
     raise ValueError(f"direction: expected 'long' or 'short', got {position.direction!r}")
 
 
