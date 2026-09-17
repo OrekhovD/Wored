@@ -1,0 +1,318 @@
+{% extends "base.html" %}
+{% block head_extra %}
+<title>{{ page_title or "Trader Deck — WORED" }}</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="page trader-deck-page" id="traderDeckPage">
+
+  {# ── Top bar: contract, price, 24h change, funding, badges ── #}
+  <header class="tr-topbar" aria-label="Состояние рынка">
+    <div class="tr-brand"><span class="tr-mark" aria-hidden="true"></span>WORED · Trader</div>
+    <div class="tr-contract">BTC-USDT <small>Perpetual · Isolated</small></div>
+    <div class="tr-stat"><span class="tr-k">Last</span><span class="tr-v tr-num tr-price" id="trLast">—</span></div>
+    <div class="tr-stat"><span class="tr-k">Bid / Ask</span><span class="tr-v tr-num" id="trBook">—</span></div>
+    <div class="tr-stat"><span class="tr-k">24ч</span><span class="tr-v tr-num" id="tr24">—</span></div>
+    <div class="tr-stat"><span class="tr-k">24ч high / low</span><span class="tr-v tr-num" id="trHL">—</span></div>
+    <div class="tr-stat"><span class="tr-k">Funding · до расчёта</span><span class="tr-v tr-num" id="trFund">—</span></div>
+    <div class="tr-badges">
+      <span class="tr-pill tr-live"><span class="tr-dot"></span><span id="trLiveBadge">LIVE</span></span>
+      <span class="tr-pill tr-paper">PAPER</span>
+      <span class="tr-pill tr-demo">МАКЕТ</span>
+    </div>
+  </header>
+
+  {# ── Main grid: chart (left) + side column (right) ── #}
+  <section class="tr-main">
+    {# ── Chart panel ── #}
+    <div class="tr-panel tr-chart-panel">
+      <div class="tr-panel-h">
+        <h2>График</h2>
+        <div class="tr-seg" role="group" aria-label="Таймфрейм">
+          <button disabled>1m</button>
+          <button disabled>15m</button>
+          <button aria-pressed="true">1H</button>
+          <button disabled>4H</button>
+        </div>
+        <div class="tr-toggles" id="trOverlayToggles" role="group" aria-label="Индикаторы на графике"></div>
+        <span class="tr-spacer"></span>
+        <div class="tr-toggles">
+          <button class="tr-tg" id="trTgCompare" aria-pressed="false"><i style="color:var(--ui-accent)"></i>Прогноз vs факт</button>
+          <button class="tr-tg" id="trTgNow" aria-pressed="false">↦ Сейчас</button>
+        </div>
+      </div>
+      <div class="tr-chart-wrap" id="trChartWrap">
+        <div id="trChart"></div>
+        <div class="tr-fc-zone" id="trFcZone"></div>
+        <div class="tr-now-line" id="trNowLine"><b>NOW</b></div>
+        <div class="tr-zone-labels" aria-hidden="true">
+          <span class="tr-zl" id="trZlHist">История</span>
+          <span class="tr-zl" id="trZlNow">Сейчас</span>
+          <span class="tr-zl" id="trZlFc" style="color:var(--ui-accent)">Прогноз</span>
+        </div>
+        <div class="tr-legend" id="trLegend"></div>
+        <div class="tr-pane-tag" id="trTagVol">VOL · BTC</div>
+        <div class="tr-pane-tag" id="trTagMacd">MACD 12 26 9</div>
+        <div class="tr-pane-tag" id="trTagKdj">KDJ 9 3 3</div>
+      </div>
+      <div class="tr-ind-strip" id="trIndStrip" aria-label="Индикаторы"></div>
+    </div>
+
+    {# ── Side column ── #}
+    <aside class="tr-side">
+      {# Forecast card #}
+      <section class="tr-panel tr-card">
+        <div class="tr-card-t"><h3>Прогноз t+1</h3><span class="tr-pill tr-demo">демо-модель</span></div>
+        <div class="tr-prob"><span class="tr-big tr-num" id="trPUp">—</span><div class="tr-prob-bar"><i id="trPUpMark"></i></div></div>
+        <dl class="tr-kv" id="trFcKv"></dl>
+      </section>
+
+      {# Plan card #}
+      <section class="tr-panel tr-card">
+        <div class="tr-card-t"><h3>План часа</h3><span class="tr-pill tr-neutral tr-num" id="trPlanValid">—</span></div>
+        <dl class="tr-kv" id="trPlanKv"></dl>
+      </section>
+
+      {# Agent / mode card #}
+      <section class="tr-panel tr-card">
+        <div class="tr-card-t"><h3>Агент-трейдер</h3><span class="tr-pill tr-live" id="trModePill"><span class="tr-dot"></span>TRADE</span></div>
+        <div class="tr-agent-row">
+          <div class="tr-avatar">GLM</div>
+          <div class="tr-who"><b>Trader-Supervisor</b><span id="trAgentRuntime">Hermes · wored-trader · glm-5.2</span></div>
+        </div>
+        <div class="tr-subs" id="trSubs"></div>
+        <div class="tr-reason" id="trReason"></div>
+        <div class="tr-act">
+          <button class="tr-btn tr-warn" id="trBtnReduce" aria-pressed="false">Только закрытие</button>
+          <button class="tr-btn tr-danger" id="trBtnPause" aria-pressed="false">Пауза</button>
+        </div>
+      </section>
+
+      {# Positions summary #}
+      <section class="tr-panel tr-card">
+        <div class="tr-card-t"><h3>Позиции</h3><span class="tr-pill tr-neutral tr-num" id="trPosSummary">0</span></div>
+        <div class="tr-dist" id="trPosDist"></div>
+      </section>
+
+      {# Budget gauge #}
+      <section class="tr-panel tr-card">
+        <div class="tr-card-t"><h3>Бюджет LLM</h3><span class="tr-pill tr-neutral">Ollama Pro</span></div>
+        <div class="tr-dist" id="trBudget"></div>
+      </section>
+    </aside>
+  </section>
+
+  {# ── Bottom: positions table with tabs + filters ── #}
+  <section class="tr-bottom">
+    <div class="tr-panel">
+      <div class="tr-panel-h">
+        <div class="tr-tabs" role="tablist" id="trPosTabs"></div>
+        <span class="tr-spacer"></span>
+        <label class="tr-faint" for="trFAcc" style="font-size:11px">Счёт</label>
+        <select id="trFAcc">
+          <option value="all">все auto</option>
+          <option value="P0">auto_p0</option>
+          <option value="P1">auto_p1</option>
+          <option value="P2">auto_p2</option>
+          <option value="P3">auto_p3</option>
+        </select>
+        <label class="tr-faint" for="trFSide" style="font-size:11px">Сторона</label>
+        <select id="trFSide">
+          <option value="all">все</option>
+          <option value="long">Long</option>
+          <option value="short">Short</option>
+        </select>
+        <label class="tr-faint" for="trFRes" style="font-size:11px">Итог</label>
+        <select id="trFRes">
+          <option value="all">все</option>
+          <option value="win">прибыль</option>
+          <option value="loss">убыток</option>
+        </select>
+      </div>
+      <div class="tr-tbl-wrap">
+        <table>
+          <thead><tr>
+            <th class="l">Открыта</th><th class="l">Счёт</th><th class="l">Сторона</th>
+            <th>Плечо</th><th>Маржа</th><th>Размер</th><th>Вход</th>
+            <th>Mark / выход</th><th>Ликв.</th><th>TP / SL</th>
+            <th>PnL</th><th>Комиссии</th><th>Net</th>
+            <th class="l">Статус</th><th>Длит.</th>
+          </tr></thead>
+          <tbody id="trPosBody"></tbody>
+        </table>
+      </div>
+      <div class="tr-pcards" id="trPosCards"></div>
+      <div class="tr-summary" id="trPosSummaryBar"></div>
+    </div>
+
+    {# Activity feed #}
+    <div class="tr-panel">
+      <div class="tr-panel-h"><h2>Лента решений</h2><span class="tr-spacer"></span><span class="tr-pill tr-neutral">UTC</span></div>
+      <ul class="tr-feed" id="trFeed"></ul>
+    </div>
+  </section>
+
+  <p class="tr-note"><b>Макет.</b> Данные демонстрационные при отсутствии подключения к Redis/Postgres. Не является инвестиционной рекомендацией.</p>
+</div>
+
+<style>
+/* ── Trader Deck scoped styles — uses CSS tokens from tokens.css ── */
+.trader-deck-page { display:flex; flex-direction:column; gap:var(--ui-space-3); max-width:1600px; margin:0 auto; }
+
+/* top bar */
+.tr-topbar { display:flex; flex-wrap:wrap; align-items:center; gap:var(--ui-space-2) 22px; padding:10px 14px; background:var(--ui-surface); border:1px solid var(--ui-border); border-radius:var(--ui-radius); position:sticky; top:0; z-index:5; }
+.tr-brand { display:flex; align-items:center; gap:10px; font-weight:600; letter-spacing:.02em; }
+.tr-mark { width:10px; height:10px; border-radius:2px; background:var(--ui-accent); box-shadow:0 0 0 3px rgba(249,115,22,.14); }
+.tr-contract { font-size:var(--ui-text-lg); font-weight:600; }
+.tr-contract small { font-weight:400; color:var(--ui-muted); margin-left:6px; font-size:var(--ui-text-sm); }
+.tr-price { font-size:24px; font-weight:600; color:var(--ui-info); }
+.tr-stat { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.tr-stat .tr-k { font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ui-muted); }
+.tr-stat .tr-v { font-size:13px; }
+.tr-num { font-family:var(--ui-mono); font-variant-numeric:tabular-nums; }
+.tr-badges { margin-left:auto; display:flex; gap:6px; flex-wrap:wrap; }
+.tr-pill { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border-radius:999px; font-size:11.5px; font-weight:600; letter-spacing:.04em; border:1px solid transparent; white-space:nowrap; }
+.tr-pill .tr-dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
+.tr-pill.tr-live { color:var(--ui-success); background:rgba(34,197,94,.14); }
+.tr-pill.tr-paper { color:var(--ui-accent); background:rgba(249,115,22,.14); }
+.tr-pill.tr-demo { color:#eab308; background:rgba(234,179,8,.14); }
+.tr-pill.tr-risk { color:var(--ui-danger); background:rgba(239,68,68,.14); }
+.tr-pill.tr-info { color:var(--ui-info); background:rgba(59,130,246,.14); }
+.tr-pill.tr-neutral { color:var(--ui-muted); background:var(--ui-surface-raised); border-color:var(--ui-border); }
+
+/* main grid */
+.tr-main { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:var(--ui-space-3); align-items:start; }
+.tr-panel { background:var(--ui-surface); border:1px solid var(--ui-border); border-radius:var(--ui-radius); min-width:0; }
+.tr-panel-h { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:9px 12px; border-bottom:1px solid var(--ui-border); }
+.tr-panel-h h2 { font-size:var(--ui-text-sm); font-weight:600; text-transform:uppercase; letter-spacing:.09em; color:var(--ui-muted); margin:0; }
+.tr-seg { display:inline-flex; background:var(--ui-bg); border:1px solid var(--ui-border); border-radius:8px; padding:2px; gap:2px; }
+.tr-seg button { background:none; border:0; border-radius:6px; padding:4px 9px; font-size:var(--ui-text-sm); color:var(--ui-muted); cursor:pointer; min-height:28px; }
+.tr-seg button[aria-pressed="true"] { background:var(--ui-surface-raised); color:var(--ui-text); box-shadow:inset 0 0 0 1px var(--ui-border); }
+.tr-seg button:disabled { opacity:.35; cursor:not-allowed; }
+.tr-toggles { display:flex; flex-wrap:wrap; gap:4px; }
+.tr-tg { background:var(--ui-bg); border:1px solid var(--ui-border); border-radius:6px; padding:3px 8px; font-size:11.5px; cursor:pointer; color:var(--ui-muted); min-height:26px; display:inline-flex; align-items:center; gap:6px; }
+.tr-tg i { width:10px; height:2px; border-radius:1px; background:currentColor; display:inline-block; }
+.tr-tg[aria-pressed="true"] { color:var(--ui-text); border-color:var(--ui-border); }
+.tr-spacer { flex:1; }
+
+/* chart */
+.tr-chart-wrap { position:relative; height:680px; }
+#trChart { position:absolute; inset:0; }
+.tr-zone-labels { position:absolute; top:8px; left:0; right:0; height:0; pointer-events:none; z-index:3; }
+.tr-zl { position:absolute; top:0; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ui-muted); white-space:nowrap; }
+.tr-now-line { position:absolute; top:0; width:0; border-left:1px dashed var(--ui-accent); pointer-events:none; z-index:3; }
+.tr-now-line b { position:absolute; top:26px; left:-18px; background:var(--ui-accent); color:var(--ui-bg); font-size:10px; font-weight:700; padding:1px 5px; border-radius:3px; letter-spacing:.06em; }
+.tr-fc-zone { position:absolute; top:0; pointer-events:none; z-index:2; background:repeating-linear-gradient(135deg,rgba(249,115,22,.05) 0 6px,transparent 6px 12px); border-left:1px solid rgba(249,115,22,.25); }
+.tr-legend { position:absolute; left:10px; top:30px; z-index:4; font-size:11.5px; display:flex; flex-wrap:wrap; gap:4px 12px; max-width:calc(100% - 80px); pointer-events:none; background:rgba(10,10,10,.6); padding:4px 8px; border-radius:6px; }
+.tr-pane-tag { position:absolute; left:10px; z-index:4; font-size:10.5px; color:var(--ui-muted); letter-spacing:.08em; text-transform:uppercase; pointer-events:none; }
+
+/* indicator strip */
+.tr-ind-strip { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:1px; background:var(--ui-border); border-top:1px solid var(--ui-border); border-radius:0 0 var(--ui-radius) var(--ui-radius); overflow:hidden; }
+.tr-ind { background:var(--ui-surface); padding:9px 10px; display:flex; flex-direction:column; gap:3px; min-width:0; position:relative; }
+.tr-ind::before { content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--ui-border); }
+.tr-ind .n { font-size:11px; font-weight:600; letter-spacing:.06em; color:var(--ui-muted); display:flex; justify-content:space-between; gap:6px; }
+.tr-ind .n em { font-style:normal; font-weight:400; color:var(--ui-muted); }
+.tr-ind .now { font-size:var(--ui-text-base); }
+.tr-ind .fc { font-size:var(--ui-text-sm); display:flex; gap:6px; align-items:baseline; flex-wrap:wrap; }
+.tr-ind .fc .lbl { font-size:10px; color:var(--ui-muted); letter-spacing:.06em; }
+.tr-ind .rg { font-size:10.5px; color:var(--ui-muted); }
+
+/* side column */
+.tr-side { display:flex; flex-direction:column; gap:var(--ui-space-3); min-width:0; }
+.tr-card { padding:12px; display:flex; flex-direction:column; gap:10px; }
+.tr-card-t { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.tr-card-t h3 { margin:0; font-size:var(--ui-text-sm); font-weight:600; text-transform:uppercase; letter-spacing:.09em; color:var(--ui-muted); }
+.tr-kv { display:grid; grid-template-columns:auto 1fr; gap:5px 12px; font-size:12.5px; margin:0; }
+.tr-kv dt { color:var(--ui-muted); } .tr-kv dd { margin:0; text-align:right; }
+.tr-agent-row { display:flex; gap:10px; align-items:center; }
+.tr-avatar { width:34px; height:34px; border-radius:8px; background:var(--ui-surface-raised); border:1px solid var(--ui-border); display:grid; place-items:center; font-family:var(--ui-mono); font-size:11px; color:var(--ui-accent); flex:none; }
+.tr-agent-row .tr-who { display:flex; flex-direction:column; min-width:0; }
+.tr-agent-row .tr-who b { font-size:13px; }
+.tr-agent-row .tr-who span { font-size:11.5px; color:var(--ui-muted); }
+.tr-subs { display:grid; grid-template-columns:1fr auto auto; gap:4px 10px; font-size:11.5px; align-items:center; }
+.tr-subs .st { width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:6px; }
+.tr-reason { font-size:var(--ui-text-sm); background:var(--ui-bg); border:1px solid var(--ui-border); border-radius:8px; padding:8px 10px; color:var(--ui-muted); }
+.tr-reason b { color:var(--ui-text); font-weight:600; }
+.tr-act { display:flex; gap:8px; flex-wrap:wrap; }
+.tr-btn { background:var(--ui-surface-raised); border:1px solid var(--ui-border); border-radius:8px; padding:0 12px; min-height:36px; font-size:12.5px; font-weight:600; cursor:pointer; color:var(--ui-text); }
+.tr-btn.tr-warn { color:#eab308; }
+.tr-btn.tr-danger { color:var(--ui-danger); }
+.tr-btn[aria-pressed="true"] { background:rgba(249,115,22,.14); border-color:var(--ui-accent); color:var(--ui-accent); }
+.tr-dist { display:flex; flex-direction:column; gap:6px; }
+.tr-dist .row { display:flex; justify-content:space-between; font-size:11.5px; color:var(--ui-muted); }
+.tr-prob { display:flex; align-items:center; gap:10px; }
+.tr-prob .tr-big { font-size:26px; font-weight:600; }
+.tr-prob-bar { flex:1; height:10px; border-radius:5px; background:linear-gradient(90deg,var(--ui-danger) 0 50%,var(--ui-success) 50% 100%); opacity:.25; position:relative; }
+.tr-prob-bar i { position:absolute; top:-4px; width:2px; height:18px; background:var(--ui-text); border-radius:1px; }
+.tr-gauge { height:8px; border-radius:4px; background:var(--ui-bg); border:1px solid var(--ui-border); position:relative; overflow:hidden; }
+.tr-gauge > i { position:absolute; top:0; bottom:0; left:0; border-radius:4px; }
+
+/* bottom */
+.tr-bottom { display:grid; grid-template-columns:minmax(0,1fr); gap:var(--ui-space-3); align-items:start; }
+@media (min-width:1700px) { .tr-bottom { grid-template-columns:minmax(0,1fr) 360px; } }
+.tr-tabs { display:flex; gap:2px; flex-wrap:wrap; }
+.tr-tab { background:none; border:0; border-bottom:2px solid transparent; padding:6px 10px; font-size:13px; color:var(--ui-muted); cursor:pointer; min-height:34px; display:inline-flex; gap:6px; align-items:center; }
+.tr-tab .c { font-family:var(--ui-mono); font-size:11px; background:var(--ui-surface-raised); border-radius:999px; padding:0 6px; color:var(--ui-muted); }
+.tr-tab[aria-selected="true"] { color:var(--ui-text); border-bottom-color:var(--ui-accent); }
+.tr-tab[aria-selected="true"] .c { color:var(--ui-accent); }
+.tr-faint { color:var(--ui-muted); }
+select { background:var(--ui-bg); color:var(--ui-text); border:1px solid var(--ui-border); border-radius:6px; padding:4px 8px; font-size:var(--ui-text-sm); min-height:30px; }
+.tr-tbl-wrap { overflow-x:auto; }
+table { border-collapse:collapse; width:100%; font-size:12.5px; }
+th { font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.07em; color:var(--ui-muted); text-align:right; padding:8px; border-bottom:1px solid var(--ui-border); white-space:nowrap; position:sticky; top:0; background:var(--ui-surface); }
+td { padding:7px 8px; border-bottom:1px solid var(--ui-border); text-align:right; white-space:nowrap; }
+th:first-child,td:first-child,th.l,td.l { text-align:left; }
+tbody tr:hover { background:var(--ui-surface-raised); }
+tr.liq td { background:rgba(239,68,68,.05); }
+.tr-side-tag { font-weight:700; font-size:11.5px; padding:1px 6px; border-radius:4px; }
+.tr-side-tag.long { color:var(--ui-success); background:rgba(34,197,94,.14); }
+.tr-side-tag.short { color:var(--ui-danger); background:rgba(239,68,68,.14); }
+.tr-st-tag { font-size:11px; font-weight:600; padding:1px 7px; border-radius:4px; border:1px solid var(--ui-border); color:var(--ui-muted); }
+.tr-st-tag.open { color:var(--ui-info); border-color:rgba(59,130,246,.4); }
+.tr-st-tag.tp { color:var(--ui-success); border-color:rgba(34,197,94,.4); }
+.tr-st-tag.sl { color:var(--ui-danger); border-color:rgba(239,68,68,.35); }
+.tr-st-tag.liq { color:var(--ui-bg); background:var(--ui-danger); border-color:var(--ui-danger); }
+.tr-prof { font-family:var(--ui-mono); font-size:11px; color:var(--ui-muted); }
+.tr-prof.p3 { color:var(--ui-danger); }
+.tr-summary { display:flex; flex-wrap:wrap; gap:6px 22px; padding:10px 12px; border-top:1px solid var(--ui-border); font-size:12.5px; }
+.tr-summary b { font-weight:600; }
+.tr-pcards { display:none; flex-direction:column; gap:8px; padding:10px; }
+.tr-pcard { border:1px solid var(--ui-border); border-radius:8px; padding:10px; display:grid; grid-template-columns:1fr auto; gap:4px 10px; font-size:12.5px; background:var(--ui-bg); }
+.tr-pcard .top { grid-column:1/-1; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.tr-feed { list-style:none; margin:0; padding:6px 0; max-height:360px; overflow:auto; }
+.tr-feed li { display:grid; grid-template-columns:44px 1fr; gap:8px; padding:7px 12px; border-bottom:1px solid var(--ui-border); font-size:var(--ui-text-sm); }
+.tr-feed time { font-family:var(--ui-mono); color:var(--ui-muted); font-size:11px; padding-top:1px; }
+.tr-feed .who { font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; font-weight:600; }
+.tr-feed p { margin:2px 0 0; color:var(--ui-muted); }
+.tr-note { font-size:11.5px; color:var(--ui-muted); padding:0 2px; }
+.tr-note b { color:#eab308; font-weight:600; }
+.tr-up { color:var(--ui-success); } .tr-down { color:var(--ui-danger); } .tr-muted { color:var(--ui-muted); }
+
+/* responsive */
+@media (max-width:1180px) {
+  .tr-main, .tr-bottom { grid-template-columns:minmax(0,1fr); }
+  .tr-side { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }
+  .tr-ind-strip { grid-template-columns:repeat(4,minmax(0,1fr)); }
+}
+@media (max-width:640px) {
+  .tr-topbar { position:static; }
+  .tr-badges { margin-left:0; }
+  .tr-chart-wrap { height:min(62vh,520px); }
+  .tr-ind-strip { display:flex; overflow-x:auto; scroll-snap-type:x mandatory; }
+  .tr-ind { min-width:150px; scroll-snap-align:start; }
+  .tr-tbl-wrap { display:none; }
+  .tr-pcards { display:flex; }
+  .tr-legend { display:none; }
+  .tr-side { grid-template-columns:minmax(0,1fr); }
+  .tr-btn { min-height:44px; }  /* touch-safe ≥44px */
+  .tr-tab { min-height:44px; }
+  select { min-height:44px; }
+}
+@media (prefers-reduced-motion:reduce) { * { transition:none!important; animation:none!important; } }
+</style>
+
+<script type="module" src="/static/ui/trader-chart.js?v=20260918-1"></script>
+<script type="module" src="/static/ui/trader-positions.js?v=20260918-1"></script>
+<script type="module" src="/static/ui/trader-mode.js?v=20260918-1"></script>
+{% endblock %}

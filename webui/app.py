@@ -61,6 +61,7 @@ from prediction_timeframes import period_to_minutes, STEP_MINUTES_MAP
 from ui_presenters import present_deck_ui, present_preview_ui
 from paper_api import router as paper_router
 from paper_store import PAPER_TABLES_SQL
+from trader_api import router as trader_router
 
 
 log = logging.getLogger("webui")
@@ -1857,12 +1858,16 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.include_router(paper_router)
+app.include_router(trader_router)
 
 
-@app.get("/trader", include_in_schema=False)
-async def trader_page_alias():
-    """Canonical Trader entrypoint; the page is served by Trading Day."""
-    return RedirectResponse(url="/trading-day", status_code=307)
+@app.get("/trader", response_class=HTMLResponse)
+async def trader_page(request: Request):
+    """Trader Deck — WORED Trader V0.1 Phase 5."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(request, "trader.html", page_title="Trader Deck")
 
 
 @app.get("/trading-day", response_class=HTMLResponse)
