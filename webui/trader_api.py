@@ -144,13 +144,17 @@ def _mock_forecast() -> dict[str, Any]:
 
 
 def _mock_state() -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    plan_valid = now.replace(minute=0, second=0, microsecond=0)
+    from datetime import timedelta
+    plan_valid_until = (plan_valid + timedelta(hours=1)).isoformat()
     return {
         "mode": _current_mode,
         "reason": _mode_reason,
         "profile": "P1",
         "leverage": 100,
         "plan_status": "active",
-        "plan_valid_until": None,
+        "plan_valid_until": plan_valid_until,
         "plan_version": "v3",
         "sides": ["long", "short"],
         "p_entry_min": 0.65,
@@ -181,27 +185,35 @@ def _mock_state() -> dict[str, Any]:
 def _mock_positions() -> list[dict[str, Any]]:
     """Generate mock positions matching the Trader Deck table structure."""
     candles = _mock_candles(200)
-    base_ts = candles[0]["time"]
+    first_ts = candles[0]["time"]
+    last_ts = candles[-1]["time"]
+    span = last_ts - first_ts
+    # Distribute positions evenly across the visible candle range
     profiles = {
         "P0": {"L": 50, "tp": 0.006, "sl": 0.006},
         "P1": {"L": 100, "tp": 0.006, "sl": 0.006},
         "P2": {"L": 150, "tp": 0.0025, "sl": 0.0025},
         "P3": {"L": 200, "tp": 0.001512, "sl": 0.0012},
     }
+    # 8 positions spread across 15%-85% of the candle range
+    offsets = [0.15, 0.24, 0.33, 0.42, 0.51, 0.60, 0.70, 0.80]
     plan = [
-        (base_ts + 616 * 3600, "long", "P1", "tp"),
-        (base_ts + 632 * 3600, "long", "P2", "sl"),
-        (base_ts + 640 * 3600, "short", "P2", "tp"),
-        (base_ts + 648 * 3600, "short", "P1", "timeout"),
-        (base_ts + 660 * 3600, "short", "P3", "liq"),
-        (base_ts + 672 * 3600, "long", "P3", "tp"),
-        (base_ts + 690 * 3600, "long", "P0", "sl"),
-        (base_ts + 700 * 3600, "long", "P1", "open"),
+        ("long", "P1", "tp"),
+        ("long", "P2", "sl"),
+        ("short", "P2", "tp"),
+        ("short", "P1", "timeout"),
+        ("short", "P3", "liq"),
+        ("long", "P3", "tp"),
+        ("long", "P0", "sl"),
+        ("long", "P1", "open"),
     ]
     positions: list[dict[str, Any]] = []
-    for idx, (t, side, prof, status) in enumerate(plan):
+    for idx, (side, prof, status) in enumerate(plan):
+        t = int(first_ts + span * offsets[idx])
         p = profiles[prof]
-        entry = 75000 + idx * 50
+        # Use actual candle close at that time as entry price
+        nearest = min(candles, key=lambda c: abs(c["time"] - t))
+        entry = nearest["close"]
         dir_val = 1 if side == "long" else -1
         tp = entry * (1 + dir_val * p["tp"])
         sl = entry * (1 - dir_val * p["sl"])
