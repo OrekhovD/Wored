@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% block head_extra %}
 <title>{{ page_title or "Trader Deck — WORED" }}</title>
-<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -312,7 +311,7 @@ tr.liq td { background:rgba(239,68,68,.05); }
 @media (prefers-reduced-motion:reduce) { * { transition:none!important; animation:none!important; } }
 </style>
 
-<script type="module" src="/static/ui/trader-chart.js?v=20260918-1"></script>
-<script type="module" src="/static/ui/trader-positions.js?v=20260918-1"></script>
-<script type="module" src="/static/ui/trader-mode.js?v=20260918-1"></script>
+<script type="module" src="/static/ui/trader-chart.js?v=20260918-2"></script>
+<script type="module" src="/static/ui/trader-positions.js?v=20260918-2"></script>
+<script type="module" src="/static/ui/trader-mode.js?v=20260918-2"></script>
 {% endblock %}

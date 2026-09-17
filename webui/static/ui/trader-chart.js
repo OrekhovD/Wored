@@ -145,27 +145,27 @@
       localization: { priceFormatter: function (p) { return p.toLocaleString('ru-RU', { maximumFractionDigits: 1 }); } }
     });
 
-    // Pane 0: Candlesticks
-    candles = chart.addCandlestickSeries({
+    // Pane 0: Candlesticks (LWC v5 API)
+    candles = chart.addSeries(LWC.CandlestickSeries, {
       upColor: UP, downColor: DOWN, borderVisible: false,
       wickUpColor: UP, wickDownColor: DOWN, priceLineColor: INFO
     });
 
     // Pane 1: Volume histogram
-    volSeries = chart.addHistogramSeries({ priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false }, 1);
+    volSeries = chart.addSeries(LWC.HistogramSeries, { priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false }, 1);
 
     // Pane 2: MACD
-    macdHist = chart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false }, 2);
-    macdDif = chart.addLineSeries({ color: '#e5e5e5', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 2);
-    macdDea = chart.addLineSeries({ color: ACCENT, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 2);
+    macdHist = chart.addSeries(LWC.HistogramSeries, { priceLineVisible: false, lastValueVisible: false }, 2);
+    macdDif = chart.addSeries(LWC.LineSeries, { color: '#e5e5e5', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 2);
+    macdDea = chart.addSeries(LWC.LineSeries, { color: ACCENT, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 2);
 
     // Pane 3: KDJ
-    kSeries = chart.addLineSeries({ color: '#e5e5e5', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 3);
-    dSeries = chart.addLineSeries({ color: WARN, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 3);
-    jSeries = chart.addLineSeries({ color: '#c084fc', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 3);
+    kSeries = chart.addSeries(LWC.LineSeries, { color: '#e5e5e5', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 3);
+    dSeries = chart.addSeries(LWC.LineSeries, { color: WARN, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 3);
+    jSeries = chart.addSeries(LWC.LineSeries, { color: '#c084fc', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, 3);
 
     // Forecast overlay (semi-transparent candles)
-    fcSeries = chart.addCandlestickSeries({
+    fcSeries = chart.addSeries(LWC.CandlestickSeries, {
       upColor: 'rgba(34,197,94,0.22)', downColor: 'rgba(239,68,68,0.22)',
       borderVisible: true, borderUpColor: 'rgba(34,197,94,0.9)', borderDownColor: 'rgba(239,68,68,0.9)',
       wickUpColor: 'rgba(34,197,94,0.75)', wickDownColor: 'rgba(239,68,68,0.75)',
@@ -174,8 +174,8 @@
 
     // q90/q10 quantile bands (dashed lines)
     var bandOpt = { color: 'rgba(249,115,22,0.75)', lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false };
-    q90Series = chart.addLineSeries(bandOpt);
-    q10Series = chart.addLineSeries(bandOpt);
+    q90Series = chart.addSeries(LWC.LineSeries, bandOpt);
+    q10Series = chart.addSeries(LWC.LineSeries, bandOpt);
 
     // Crosshair tooltip
     chart.subscribeCrosshairMove(function (p) {
@@ -235,7 +235,7 @@
 
   function line(arr, color, opts) {
     opts = opts || {};
-    var s = chart.addLineSeries(Object.assign({ color: color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, opts));
+    var s = chart.addSeries(LWC.LineSeries, Object.assign({ color: color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false }, opts));
     s.setData(arr.map(function (v, i) {
       return v == null ? { time: chartData.extBars[i].time } : { time: chartData.extBars[i].time, value: v };
     }));
