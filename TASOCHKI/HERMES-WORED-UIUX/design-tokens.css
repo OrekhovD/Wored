@@ -1,0 +1,26 @@
+/* UI specification contract. Apply incrementally to the existing WORED shell. */
+:root {
+  --ui-bg: #0a0a0a;
+  --ui-surface: #141414;
+  --ui-surface-raised: #1c1c1c;
+  --ui-border: #404040;
+  --ui-text: #e5e5e5;
+  --ui-muted: #a3a3a3;
+  --ui-accent: #f97316;
+  --ui-success: #22c55e;
+  --ui-danger: #ef4444;
+  --ui-info: #3b82f6;
+  --ui-danger-text: #fca5a5;
+  --ui-info-text: #93c5fd;
+  --ui-on-color: #0a0a0a;
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-6: 24px;
+  --ui-radius: 12px;
+  --ui-control-min: 44px;
+  --ui-content-max: 1440px;
+  --ui-font: 'Segoe UI', system-ui, sans-serif;
+  --ui-mono: 'Cascadia Code', Consolas, monospace;
+}

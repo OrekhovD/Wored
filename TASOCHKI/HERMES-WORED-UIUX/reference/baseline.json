@@ -1,0 +1,67 @@
+{
+  "captured_at": "2026-09-08T18:21:38.553034+00:00",
+  "repo": "D:\\WORED",
+  "head": "11d279c0a42e13d4666d12dd9dc3b3830b5988c5",
+  "source_snapshot": "git committed tree; reference only; never overwrite newer implementation",
+  "live_browser_observed": [
+    "GET / redirected to /login?next=/; mixed RU/EN labels"
+  ],
+  "authenticated_visual_review_this_task": false,
+  "p4_passed": "reported by owner and root status file; not independently rerun",
+  "status_discrepancy": "root P4 PASSED vs docs P4 IN PROGRESS; R10/R11 names differ; reconcile final Hermes report",
+  "source_files": [
+    {
+      "path": "webui/static/app.js",
+      "sha256": "25a4fa3131e9fe7a25bdb93688a98506a0deda1ff81670e6fd2a26d3aca83da3"
+    },
+    {
+      "path": "webui/static/styles.css",
+      "sha256": "e87de8571ae6d2ae36c0d23826a7e8bc8f4cadde16c1e836dff3db6083e26c03"
+    },
+    {
+      "path": "webui/templates/alerts.html",
+      "sha256": "463ea7839c74522245cb7ca97b00d2b1c68e7fb91b7b6c469979e75c4b9a42e9"
+    },
+    {
+      "path": "webui/templates/base.html",
+      "sha256": "5c4a6198d2542c14113ab7a2d576febf642afaab7f509aa12ecdda4d7a1da5e5"
+    },
+    {
+      "path": "webui/templates/command_deck.html",
+      "sha256": "836ce10ec253bc6f2070dddcc3a4783e8c2364bca9caf0cf1f2419f666c1604b"
+    },
+    {
+      "path": "webui/templates/daily_session.html",
+      "sha256": "650e5992f10239f3bbb483315a8b8b60ea055dfcd4fd86181c740e21934f20a4"
+    },
+    {
+      "path": "webui/templates/futures_lab.html",
+      "sha256": "c8a719b397e005ed234114e6c1d28d687b529fde517a88b45e7cd62f6d254523"
+    },
+    {
+      "path": "webui/templates/index.html",
+      "sha256": "ed35dfa0bbea1f0a44be8992d61db0d99b87309fc9925dc0e7a04043f5d960e8"
+    },
+    {
+      "path": "webui/templates/journal.html",
+      "sha256": "8a5d5b710966911c8489b1fcbb2d5cbc42ae594698bb0f0ef92b24a6a1982806"
+    },
+    {
+      "path": "webui/templates/login.html",
+      "sha256": "fe9ec1a798a0fe12deb7e7b89f9d656e50f2ba968866b24c45fd065ff6f445d9"
+    },
+    {
+      "path": "webui/templates/models.html",
+      "sha256": "597f54cdcbe8b309d18791cb8b9eded52d24a1f00596142368fe482c11b703ca"
+    },
+    {
+      "path": "webui/templates/predictions.html",
+      "sha256": "bc7c39daa64c43465b4a292df1d961514b5d4e7b35c03400eb94bb9369cbb1bb"
+    },
+    {
+      "path": "webui/templates/strategy.html",
+      "sha256": "af688f6a778a5981540bdf3ffb3a8c0ec29c97602f66d068667a7519f8c93f8a"
+    }
+  ],
+  "production_mutated": false
+}

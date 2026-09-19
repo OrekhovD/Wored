@@ -1,0 +1,390 @@
+{
+  "schema_version": 1,
+  "task": "WORED trading day two accounts",
+  "status": "not_started",
+  "source_spec_version": "1.0",
+  "baseline_commit": null,
+  "worktree": null,
+  "updated_at": null,
+  "stages": [
+    {
+      "id": "TD-00",
+      "name": "Baseline и изоляция",
+      "status": "not_started",
+      "commit": null,
+      "changed_files": [],
+      "commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "TD-01",
+      "name": "Архитектура и контракты",
+      "status": "not_started",
+      "commit": null,
+      "changed_files": [],
+      "commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "TD-02",
+      "name": "Интерактивный UX и приёмка",
+      "status": "not_started",
+      "commit": null,
+      "changed_files": [],
+      "commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "TD-03",
+      "name": "Счета, ledger, migrations",
+      "status": "not_started",
+      "commit": null,
+      "changed_files": [],
+      "commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "TD-04",
+      "name": "Общий движок исполнения",
+      "status": "not_started",
+      "commit": null,
+      "changed_files": [],
+      "commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "TD-05",
+      "name": "День, автомат, восстановление",
+      "status": "not_started",
+      "commit": null,
+      "changed_files": [],
+      "commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "TD-06",
+      "name": "Рабочий UI и Telegram",
+      "status": "not_started",
+      "commit": null,
+      "changed_files": [],
+      "commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "TD-07",
+      "name": "Вечерний отчёт",
+      "status": "not_started",
+      "commit": null,
+      "changed_files": [],
+      "commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "TD-08",
+      "name": "Проверяемое обучение",
+      "status": "not_started",
+      "commit": null,
+      "changed_files": [],
+      "commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "TD-09",
+      "name": "Полная приёмка",
+      "status": "not_started",
+      "commit": null,
+      "changed_files": [],
+      "commands": [],
+      "evidence": [],
+      "blockers": []
+    },
+    {
+      "id": "TD-10",
+      "name": "Внедрение и final evidence",
+      "status": "not_started",
+      "commit": null,
+      "changed_files": [],
+      "commands": [],
+      "evidence": [],
+      "blockers": []
+    }
+  ],
+  "acceptance": {
+    "A01": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A02": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A03": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A04": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A05": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A06": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A07": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A08": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A09": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A10": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A11": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A12": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A13": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A14": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A15": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A16": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A17": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A18": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A19": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A20": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A21": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A22": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A23": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A24": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A25": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A26": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A27": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A28": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A29": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A30": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A31": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A32": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A33": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A34": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A35": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A36": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A37": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A38": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A39": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A40": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A41": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A42": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A43": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    },
+    "A44": {
+      "status": "not_run",
+      "test_ids": [],
+      "evidence": [],
+      "verified_at": null
+    }
+  },
+  "owner_decisions": [],
+  "residual_risks": [],
+  "next_action": "TD-00: read specification, record fresh baseline, isolate checkout"
+}

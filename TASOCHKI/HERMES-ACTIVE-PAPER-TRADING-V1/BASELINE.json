@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-09-14T23:10:21.969171+07:00",
+  "timezone": "Asia/Bangkok",
+  "workspace": "D:\\WORED",
+  "git_head": "4a438bee2cd5183fedf43fc33baed87e5fdd5a99",
+  "kind": "working_tree_metadata_only",
+  "runtime_verified_during_packaging": false,
+  "contains_source_backup": false,
+  "status_excludes_this_package": true,
+  "working_tree_status": [
+    " M .env.example",
+    " M chatbot/ai/provider_adapters.py",
+    " M chatbot/ai/provider_gateway.py",
+    " M chatbot/ai/strategy_learner.py",
+    " M chatbot/handlers/pipeline.py",
+    " M chatbot/services/execution_engine.py",
+    " M chatbot/services/session_manager.py",
+    " M chatbot/storage/postgres_client.py",
+    " M collector/main.py",
+    " M collector/scheduler/pipeline_jobs.py",
+    " M config/provider_registry.json",
+    " M docker-compose.yml",
+    " M docs/04-configuration.md",
+    " M docs/ENV-REGISTRY.md",
+    " M tests/stabilization/test_postgres_sessions.py",
+    " M tests/ui/fixture_app.py",
+    " M webui/app.py",
+    " M webui/paper_api.py",
+    " M webui/static/styles.css",
+    " M webui/static/ui/async-patterns.js",
+    " M webui/static/ui/core.js",
+    " M webui/static/ui/forecast-chart.js",
+    " M webui/static/ui/forecast.js",
+    " M webui/static/ui/session.js",
+    " M webui/static/ui/ticket.js",
+    " M webui/static/ui/trading-day.js",
+    " M webui/templates/base.html",
+    " M webui/templates/trading_day.html",
+    "?? .codex/",
+    "?? .env.example.bak.20260816_144953",
+    "?? AGENTS.md.bak.20260816_144953",
+    "?? README.md.bak.20260816_144953",
+    "?? TASOCHKI/HERMES-WORED-TRADING-DAY/",
+    "?? TASOCHKI/HERMES-WORED-UIUX/",
+    "?? TASOCHKI/HERMES-WORED/",
+    "?? UIUX-REVIEW-REPORT.md",
+    "?? chatbot/services/execution_status.py",
+    "?? chatbot/services/plan_presenter.py",
+    "?? chatbot/services/plan_store.py",
+    "?? docs/CODEX-TRADING-UI-AGENT.md",
+    "?? docs/HERMES-EXECUTION-REVIEW-20260914.md",
+    "?? docs/SESSION-PLAN-V2.md",
+    "?? docs/STABILIZATION-STATUS.json",
+    "?? docs/TRADING-DAY-PIPELINE-RFC.md",
+    "?? docs/TRADING-SIMULATOR-AGENT-CONTRACT.md",
+    "?? scratch/test_analyst_ollama.py",
+    "?? scratch/test_session.py",
+    "?? tests/paper_fixture_app.py",
+    "?? tests/test_collector_perpetual_market.py",
+    "?? tests/test_execution_status.py",
+    "?? tests/test_paper_agents.py",
+    "?? tests/test_paper_api.py",
+    "?? tests/test_paper_learning.py",
+    "?? tests/test_paper_market.py",
+    "?? tests/test_session_plan_contract.py",
+    "?? tests/test_session_plan_web.py",
+    "?? tests/test_strategy_learner_gateway.py",
+    "?? webui/paper_agents.py",
+    "?? webui/paper_learning.py",
+    "?? webui/paper_market.py",
+    "?? webui/paper_store.py"
+  ],
+  "selected_file_hashes": [
+    {
+      "path": "chatbot/services/session_manager.py",
+      "sha256": "3f7a751b167a1fa04c1ee56da5fc232fb8ef278d2ef981f76d842365b409c355"
+    },
+    {
+      "path": "chatbot/services/execution_engine.py",
+      "sha256": "282971a9b1af1d63b1c1aff7ae01fad256b46db2d717065179d6749469324822"
+    },
+    {
+      "path": "chatbot/services/execution_status.py",
+      "sha256": "b013c35cd5e40e8ef7fc8cd87f9a2509e1aba396294003b3357c5f48fb3ded45"
+    },
+    {
+      "path": "chatbot/services/plan_contract.py",
+      "sha256": "281820c68362a853fd2c6d50201c85bcf8d0f80d8af843ae66a9f354c91bb439"
+    },
+    {
+      "path": "chatbot/services/plan_store.py",
+      "sha256": "b5cb02edb2c4c78ed80f146c9228224981d3decd23e42a04adc51a1734655058"
+    },
+    {
+      "path": "chatbot/services/plan_presenter.py",
+      "sha256": "889ec29426e23d99060ed68a0cd6e8292fa7c8100c1aa09d776391b9a1471c64"
+    },
+    {
+      "path": "chatbot/handlers/pipeline.py",
+      "sha256": "2d802b60352804e22ec4c23215484e1f6efe94026838031443389c7bb3f84077"
+    },
+    {
+      "path": "collector/main.py",
+      "sha256": "a2b8a4989eba575ad61c4737628cf36756644e509de9aa71347bbfac686aad33"
+    },
+    {
+      "path": "collector/scheduler/pipeline_jobs.py",
+      "sha256": "ea841cbbd989a73c2d29ee324cddc625b3f930e1fcccb597ceb36059350c548c"
+    },
+    {
+      "path": "collector/htx/perpetual_market.py",
+      "sha256": "3205ef7f97c4fa8dcdb4b045ebc248fc625750c97e6f246550773c6b529d2fae"
+    },
+    {
+      "path": "webui/paper_api.py",
+      "sha256": "eef9543017317cbd981c6b2d8498201ee4863c147bc9adb745de47ddaabf20dd"
+    },
+    {
+      "path": "webui/paper_store.py",
+      "sha256": "ad8eb92dd7601c2668be92cde39577e24de3fd7c6c35876f21394b489586f842"
+    },
+    {
+      "path": "webui/paper_market.py",
+      "sha256": "615b2c075cd3c2cbdbdde0e158241501c12ffa94025beffe8147110a00fa1c5c"
+    },
+    {
+      "path": "webui/paper_agents.py",
+      "sha256": "b7d1573467fb0d69feefd82f63430aa461d49cc6a00dac3b1c553a0900833d20"
+    },
+    {
+      "path": "webui/paper_learning.py",
+      "sha256": "3f4f3ff19810d692c0817792597957e137f2b799bd41ee4a68dd7914bb8378eb"
+    },
+    {
+      "path": "docker-compose.qa.yml",
+      "sha256": "06511c25e9ec0db70a3ef91eeca38fbd5fda10c23f92f5b9a11aea77382ee6ac"
+    },
+    {
+      "path": "docs/HERMES-EXECUTION-REVIEW-20260914.md",
+      "sha256": "b6549edf057d528af231e2fe1cfcc4184560c7a6c3caaf0f2f62c7470c1b5b97"
+    }
+  ]
+}

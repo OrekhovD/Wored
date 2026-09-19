@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "data_kind": "synthetic_not_live_exchange_tariffs",
+  "currency": "USDT",
+  "quantity_unit": "base_asset",
+  "arithmetic": "Decimal exact; round only at documented instrument settlement boundary",
+  "funding_sign": "positive received, negative paid",
+  "cases": [
+    {
+      "id": "F01", "name": "long_with_paid_funding", "side": "long", "opening_cash": "1000",
+      "entry_price": "100000", "entry_quantity": "0.01", "entry_fee_rate": "0.0006",
+      "exits": [{"price": "101000", "quantity": "0.01", "fee_rate": "0.0006"}],
+      "funding_cashflows": ["-0.2"],
+      "expected": {"gross": "10", "entry_fee": "0.6", "exit_fees": "0.606", "funding": "-0.2", "net": "8.594", "closing_cash": "1008.594"}
+    },
+    {
+      "id": "F02", "name": "short_with_received_funding", "side": "short", "opening_cash": "1000",
+      "entry_price": "50000", "entry_quantity": "0.02", "entry_fee_rate": "0.0006",
+      "exits": [{"price": "49000", "quantity": "0.02", "fee_rate": "0.0006"}],
+      "funding_cashflows": ["0.15"],
+      "expected": {"gross": "20", "entry_fee": "0.6", "exit_fees": "0.588", "funding": "0.15", "net": "18.962", "closing_cash": "1018.962"}
+    },
+    {
+      "id": "F03", "name": "two_partial_exits", "side": "long", "opening_cash": "1000",
+      "entry_price": "100", "entry_quantity": "2", "entry_fee_rate": "0.0006",
+      "exits": [{"price": "110", "quantity": "0.5", "fee_rate": "0.0006"}, {"price": "90", "quantity": "1.5", "fee_rate": "0.0006"}],
+      "funding_cashflows": ["-0.03"],
+      "expected": {"gross": "-10", "entry_fee": "0.12", "exit_fees": "0.114", "funding": "-0.03", "net": "-10.264", "closing_cash": "989.736"}
+    },
+    {
+      "id": "F04", "name": "flat_price_is_net_loss_after_fees", "side": "long", "opening_cash": "1000",
+      "entry_price": "100", "entry_quantity": "1", "entry_fee_rate": "0.0006",
+      "exits": [{"price": "100", "quantity": "1", "fee_rate": "0.0006"}],
+      "funding_cashflows": [],
+      "expected": {"gross": "0", "entry_fee": "0.06", "exit_fees": "0.06", "funding": "0", "net": "-0.12", "closing_cash": "999.88"}
+    },
+    {
+      "id": "F05", "name": "slippage_already_in_fill_prices", "side": "long", "opening_cash": "1000",
+      "entry_reference_price": "100", "exit_reference_price": "110", "expected_slippage_impact": "0.42",
+      "entry_price": "100.02", "entry_quantity": "10", "entry_fee_rate": "0.0006",
+      "exits": [{"price": "109.978", "quantity": "10", "fee_rate": "0.0006"}],
+      "funding_cashflows": [],
+      "expected": {"gross": "99.58", "entry_fee": "0.60012", "exit_fees": "0.659868", "funding": "0", "net": "98.320012", "closing_cash": "1098.320012"}
+    }
+  ]
+}

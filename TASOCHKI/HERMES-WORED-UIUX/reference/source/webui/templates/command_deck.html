@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0a0a">
+<title>WORED Command Deck</title>
+<style>
+:root {
+  --bg:#0a0a0a; --card:#141414; --border:#222; --fg:#e5e5e5; --muted:#777;
+  --accent:#f97316; --green:#22c55e; --red:#ef4444; --blue:#3b82f6;
+  --overlay:rgba(0,0,0,.7);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.35;overflow-x:hidden;padding-bottom:16px}
+.mono{font-variant-numeric:tabular-nums;font-family:'SF Mono',Monaco,monospace}
+
+/* HEADER */
+.hd{position:sticky;top:0;z-index:100;background:var(--bg);border-bottom:1px solid var(--border);padding:8px 14px;display:flex;align-items:center;gap:8px}
+.hd-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}}
+.hd-t{font-size:14px;font-weight:700;letter-spacing:.5px}
+.hd-time{margin-left:auto;font-size:11px;color:var(--muted)}
+
+/* CARD */
+.card{background:var(--card);margin:8px 14px;border-radius:10px;border:1px solid var(--border);overflow:hidden}
+.card-t{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);padding:8px 14px 2px}
+.card-b{padding:2px 14px 10px}
+
+/* PRICE HERO */
+.price-hero{padding:12px 14px;text-align:center}
+.price-sym{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.price-val{font-size:32px;font-weight:800;margin:2px 0}
+.price-chg{font-size:15px;font-weight:700}
+.price-chg.up{color:var(--green)}
+.price-chg.dn{color:var(--red)}
+.price-meta{font-size:11px;color:var(--muted);margin-top:2px}
+
+/* FORECAST CANDLES */
+.fc-area{position:relative;height:160px;margin:4px 0;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+.fc-grid{display:flex;align-items:flex-end;justify-content:center;gap:2px;height:100%;padding:0 4px;min-width:100%}
+.fc-col{display:flex;flex-direction:column;align-items:center;flex:1;min-width:28px;max-width:44px;position:relative;height:100%;justify-content:flex-end}
+.fc-label{font-size:8px;color:var(--muted);margin-top:2px;white-space:nowrap}
+.fc-price{font-size:8px;font-weight:600;color:var(--muted);position:absolute;top:-12px;left:50%;transform:translateX(-50%);white-space:nowrap}
+.fc-candle{width:16px;border-radius:2px;position:relative;min-height:2px}
+.fc-candle.hist-bull{background:linear-gradient(180deg,rgba(34,197,94,.7),rgba(34,197,94,.2))}
+.fc-candle.hist-bear{background:linear-gradient(180deg,rgba(239,68,68,.7),rgba(239,68,68,.2))}
+.fc-candle.fc-bull{background:linear-gradient(180deg,var(--green),rgba(34,197,94,.4));border:1px solid var(--green)}
+.fc-candle.fc-bear{background:linear-gradient(180deg,var(--red),rgba(239,68,68,.4));border:1px solid var(--red)}
+.fc-wick{width:2px;background:var(--muted);position:absolute;left:50%;transform:translateX(-50%);bottom:0;opacity:.5}
+.fc-divider{width:1px;height:100%;background:var(--border);margin:0 4px;flex-shrink:0}
+.fc-verdict{text-align:center;padding:6px 0 2px}
+.fc-verdict-badge{display:inline-block;font-size:13px;font-weight:700;padding:3px 12px;border-radius:6px;text-transform:uppercase}
+.fc-verdict-badge.bullish{background:rgba(34,197,94,.15);color:var(--green)}
+.fc-verdict-badge.bearish{background:rgba(239,68,68,.15);color:var(--red)}
+.fc-verdict-badge.neutral{background:rgba(136,136,136,.15);color:var(--muted)}
+.fc-verdict-sub{font-size:11px;color:var(--muted);margin-top:3px}
+
+/* POSITIONS */
+.pos{padding:8px 0;border-bottom:1px solid var(--border)}
+.pos:last-child{border-bottom:none}
+.pos-r1{display:flex;align-items:center;justify-content:space-between}
+.pos-id{font-size:11px;color:var(--muted)}
+.pos-dir{font-size:12px;font-weight:700;padding:2px 8px;border-radius:4px}
+.pos-dir.long{background:rgba(34,197,94,.15);color:var(--green)}
+.pos-dir.short{background:rgba(239,68,68,.15);color:var(--red)}
+.pos-pnl{font-size:16px;font-weight:700}
+.pos-r2{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:3px}
+.pos-close{margin-top:5px;padding:5px;font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--fg);width:100%}
+
+/* ACTIONS */
+.act-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:6px 0}
+.act-btn{padding:12px 4px;font-size:13px;font-weight:700;text-align:center;background:var(--bg);border:1px solid var(--border);border-radius:10px;color:var(--fg);cursor:pointer;transition:all .15s}
+.act-btn:active{transform:scale(.97);border-color:var(--accent)}
+.act-btn.long{border-color:rgba(34,197,94,.4);color:var(--green)}
+.act-btn.short{border-color:rgba(239,68,68,.4);color:var(--red)}
+.act-btn.fc{border-color:rgba(59,130,246,.3);color:var(--blue);grid-column:1/-1}
+
+/* ACCURACY */
+.acc-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.acc-c{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center}
+.acc-n{font-size:10px;font-weight:600;text-transform:capitalize;color:var(--muted)}
+.acc-v{font-size:22px;font-weight:800;margin:2px 0}
+.acc-d{font-size:9px;color:var(--muted)}
+
+/* HEALTH */
+.hp{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:600;padding:3px 8px;border-radius:4px}
+.hp.ok{background:rgba(34,197,94,.1);color:var(--green)}
+.hp.bad{background:rgba(239,68,68,.1);color:var(--red)}
+.hbar{height:2px;background:var(--border);margin-top:8px;overflow:hidden;border-radius:1px}
+.hbar-f{height:100%;background:var(--accent);width:0%;transition:width 30s linear}
+
+/* MODAL */
+.modal{position:fixed;inset:0;z-index:200;display:none;align-items:flex-end;justify-content:center;background:var(--overlay)}
+.modal.show{display:flex}
+.modal-card{background:var(--card);border:1px solid var(--border);border-radius:14px 14px 0 0;width:100%;max-width:420px;padding:16px;max-height:85vh;overflow-y:auto}
+.modal-t{font-size:16px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.modal-close{margin-left:auto;font-size:20px;color:var(--muted);cursor:pointer;padding:0 4px}
+.modal-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px}
+.modal-row .l{color:var(--muted)}
+.modal-row .v{font-weight:600}
+.modal-warn{font-size:12px;color:var(--red);padding:8px 0}
+.modal-section{font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin:12px 0 4px}
+.slider-row{margin:8px 0}
+.slider-lbl{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px}
+.slider-lbl .v{font-weight:700;color:var(--accent)}
+input[type=range]{width:100%;-webkit-appearance:none;height:6px;border-radius:3px;background:var(--border)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;border-radius:50%;background:var(--accent);cursor:pointer}
+.modal-scen{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:8px 0}
+.modal-scen-c{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px;text-align:center}
+.modal-scen-c .pl{font-size:10px;color:var(--muted)}
+.modal-scen-c .pv{font-size:14px;font-weight:700}
+.modal-confirm{width:100%;padding:14px;font-size:15px;font-weight:700;border:none;border-radius:10px;cursor:pointer;margin-top:12px}
+.modal-confirm.long{background:var(--green);color:#000}
+.modal-confirm.short{background:var(--red);color:#fff}
+.modal-confirm:active{transform:scale(.98)}
+
+/* TOAST */
+.toast{position:fixed;bottom:16px;left:14px;right:14px;z-index:300;background:var(--card);border:1px solid var(--accent);border-radius:10px;padding:12px 14px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;max-width:400px;margin:0 auto}
+.toast.show{opacity:1}
+
+.empty{color:var(--muted);font-size:12px;padding:6px 0}
+</style>
+</head>
+<body>
+
+<div class="hd">
+  <span class="hd-dot" id="pulse"></span>
+  <span class="hd-t">⚡ COMMAND DECK</span>
+  <span class="hd-time mono" id="time">—</span>
+</div>
+
+<!-- PRICE HERO -->
+<div class="card">
+  <div class="price-hero">
+    <div class="price-sym" id="sym">BTCUSDT</div>
+    <div class="price-val mono" id="price">—</div>
+    <div class="price-chg" id="chg">—</div>
+    <div class="price-meta" id="meta">Vol —</div>
+  </div>
+</div>
+
+<!-- FORECAST CANDLES -->
+<div class="card">
+  <div class="card-t">🔮 Прогноз · часовые свечи</div>
+  <div class="card-b">
+    <div class="fc-verdict" id="fcVerdict"></div>
+    <div class="fc-area" id="fcArea"><div class="empty" style="text-align:center;padding:40px 0">Нет активного прогноза<br>Нажми «Новый прогноз»</div></div>
+  </div>
+</div>
+
+<!-- QUICK ACTIONS -->
+<div class="card">
+  <div class="card-b">
+    <div class="act-grid">
+      <button class="act-btn fc" onclick="actForecast()">🔮 Новый прогноз</button>
+      <button class="act-btn long" onclick="openTicket('long')">📈 Long</button>
+      <button class="act-btn short" onclick="openTicket('short')">📉 Short</button>
+    </div>
+    <div id="result" style="font-size:12px;color:var(--muted);min-height:16px;margin-top:4px"></div>
+  </div>
+</div>
+
+<!-- POSITIONS -->
+<div class="card">
+  <div class="card-t">🤖 Позиции</div>
+  <div class="card-b" id="positions"><div class="empty">Загрузка...</div></div>
+</div>
+
+<!-- SESSION -->
+<div class="card">
+  <div class="card-t">🎯 Сессия</div>
+  <div class="card-b" id="session"><div class="empty">Загрузка...</div></div>
+</div>
+
+<!-- ACCURACY -->
+<div class="card">
+  <div class="card-t">📊 Точность моделей</div>
+  <div class="card-b" id="accuracy"><div class="empty">Загрузка...</div></div>
+</div>
+
+<!-- HEALTH -->
+<div class="card">
+  <div class="card-t">🩺 Система</div>
+  <div class="card-b">
+    <div id="health"></div>
+    <div class="hbar"><div class="hbar-f" id="hbar"></div></div>
+  </div>
+</div>
+
+<!-- ORDER TICKET MODAL -->
+<div class="modal" id="ticket">
+  <div class="modal-card">
+    <div class="modal-t">
+      <span id="ticketDir">📈 LONG</span>
+      <span class="modal-close" onclick="closeTicket()">✕</span>
+    </div>
+
+    <div class="modal-row"><span class="l">Символ</span><span class="v" id="tSym">BTCUSDT</span></div>
+    <div class="modal-row"><span class="l">Цена входа</span><span class="v mono" id="tEntry">—</span></div>
+
+    <div class="slider-row">
+      <div class="slider-lbl"><span>Плечо</span><span class="v" id="tLevVal">100x</span></div>
+      <input type="range" id="tLev" min="10" max="100" value="100" step="10" oninput="updateTicket()">
+    </div>
+    <div class="slider-row">
+      <div class="slider-lbl"><span>Маржа (USDT)</span><span class="v" id="tMarVal">10</span></div>
+      <input type="range" id="tMar" min="1" max="100" value="10" step="1" oninput="updateTicket()">
+    </div>
+
+    <div class="modal-section">Параметры сделки</div>
+    <div class="modal-row"><span class="l">Номинал</span><span class="v mono" id="tNotional">—</span></div>
+    <div class="modal-row"><span class="l">Размер позиции</span><span class="v mono" id="tSize">—</span></div>
+    <div class="modal-row"><span class="l">Комиссия (taker)</span><span class="v mono" id="tFee">—</span></div>
+    <div class="modal-row"><span class="l">Цена ликвидации</span><span class="v mono" id="tLiq" style="color:var(--red)">—</span></div>
+    <div class="modal-row"><span class="l">До ликвидации</span><span class="v mono" id="tLiqDist">—</span></div>
+
+    <div class="modal-section">Сценарии PnL</div>
+    <div class="modal-scen" id="tScen"></div>
+
+    <button class="modal-confirm" id="tConfirm" onclick="confirmTicket()">Открыть LONG</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const REFRESH=30000; let timer=null;
+let tDir='long';
+
+function fp(p){if(!p)return'—';const n=Number(p);if(n>=1000)return'$'+n.toLocaleString('en-US',{maximumFractionDigits:0});return'$'+n.toFixed(2)}
+function fpct(p){if(p===null||p===undefined)return'—';return(p>=0?'+':'')+Number(p).toFixed(2)+'%'}
+function fpc(p){if(p===null||p===undefined)return'—';return Number(p).toFixed(2)+'%'}
+function clr(p){const v=Number(p||0);if(v>0.01)return'var(--green)';if(v<-0.01)return'var(--red)';return'var(--muted)'}
+function toast(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),3e3)}
+
+async function fetchDeck(){
+  try{const r=await fetch('/api/command-deck');if(r.status===401){location.href='/login?next=/command-deck';return;}if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();render(d);
+  const b=document.getElementById('hbar');b.style.transition='none';b.style.width='0%';
+  requestAnimationFrame(()=>{b.style.transition='width 30s linear';b.style.width='100%'});
+  }catch(e){document.getElementById('time').textContent='Данные не обновлены';toast('Ошибка обновления: '+e.message);}
+}
+
+function render(d){
+  document.getElementById('time').textContent=new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+  // PRICE
+  if(d.market&&d.market.length){
+    const m=d.market[0];const c=m.change_pct||0;
+    document.getElementById('sym').textContent=m.symbol.toUpperCase();
+    document.getElementById('price').textContent=fp(m.price);
+    const ce=document.getElementById('chg');ce.textContent=fpct(c);ce.className='price-chg '+(c>0?'up':'dn');
+    document.getElementById('meta').textContent='Vol $'+(m.volume/1e6).toFixed(1)+'M';
+  }
+  // FORECAST CANDLES
+  renderCandles(d.consensus);
+  // POSITIONS
+  let ph='';if(d.positions&&d.positions.length){d.positions.forEach(p=>{
+    const pc=p.pnl>=0?'var(--green)':'var(--red)';
+    ph+='<div class="pos"><div class="pos-r1">'
+    +'<span class="pos-id">#'+p.id+'</span>'
+    +'<span class="pos-dir '+p.direction+'">'+p.direction.toUpperCase()+' x'+p.leverage+'</span>'
+    +'<span class="pos-pnl mono" style="color:'+pc+'">'+(p.pnl>=0?'+':'')+'$'+p.pnl.toFixed(2)+'</span>'
+    +'</div><div class="pos-r2"><span>Вход '+fp(p.entry_price)+'</span><span>Тек '+fp(p.live_price)+'</span><span>'+(p.roi>=0?'+':'')+p.roi+'%</span></div>'
+    +'<button class="pos-close" onclick="closePos('+p.id+')">🔒 Закрыть #'+p.id+'</button></div>';
+  });}else{ph='<div class="empty">Нет открытых позиций</div>';}
+  document.getElementById('positions').innerHTML=ph;
+  // SESSION
+  let sh='';if(d.session&&d.session.id){
+    const s=d.session;
+    sh+='<div class="modal-row" style="border:none;padding:2px 0"><span style="color:var(--muted)">Статус</span><span style="font-weight:600">'+s.status.toUpperCase()+'</span></div>';
+    sh+='<div class="modal-row" style="border:none;padding:2px 0"><span style="color:var(--muted)">Режим</span><span style="font-weight:600">'+s.risk_mode+'</span></div>';
+    if(s.plan_regime)sh+='<div class="modal-row" style="border:none;padding:2px 0"><span style="color:var(--muted)">Регион</span><span style="font-weight:600">'+s.plan_regime+'</span></div>';
+  }else{sh='<div class="empty">Нет активной сессии</div>';}
+  document.getElementById('session').innerHTML=sh;
+  // ACCURACY
+  let ah='';if(d.accuracy&&Object.keys(d.accuracy).length){
+    ah='<div class="acc-grid">';
+    for(const[k,a]of Object.entries(d.accuracy)){
+      const rc=a.direction_rate>=60?'var(--green)':a.direction_rate>=45?'var(--accent)':'var(--red)';
+      ah+='<div class="acc-c"><div class="acc-n">'+k+'</div><div class="acc-v" style="color:'+rc+'">'+a.direction_rate+'%</div><div class="acc-d">'+a.direction_correct+'/'+a.total+'</div></div>';
+    }
+    ah+='</div>';
+  }else{ah='<div class="empty">Нет данных</div>';}
+  document.getElementById('accuracy').innerHTML=ah;
+  // HEALTH
+  let hh='';if(d.health){
+    const h=d.health;
+    hh+='<span class="hp '+(h.redis?'ok':'bad')+'">● Redis</span> ';
+    hh+='<span class="hp '+(h.postgres?'ok':'bad')+'">● PG</span> ';
+    hh+='<span class="hp '+(h.collector_feed?'ok':'bad')+'">● Feed</span>';
+    if(h.last_journal_age_minutes!=null)hh+=' <span class="hp" style="background:rgba(136,136,136,.1);color:var(--muted)">'+h.last_journal_age_minutes+'m</span>';
+  }
+  document.getElementById('health').innerHTML=hh;
+}
+
+// FORECAST CANDLES — 5 historical + up to 12 forecast
+function renderCandles(c){
+  const va=document.getElementById('fcVerdict');
+  const aa=document.getElementById('fcArea');
+  if(!c){va.innerHTML='';aa.innerHTML='<div class="empty" style="text-align:center;padding:60px 0">Загрузка...</div>';return;}
+  
+  const hist=c.history||[];
+  const fc=c.candles||[];
+  const base=c.base_price||0;
+  const sym=c.symbol||'btcusdt';
+  
+  if(!hist.length&&!fc.length){
+    va.innerHTML='';
+    aa.innerHTML='<div class="empty" style="text-align:center;padding:60px 0">Нет данных.<br>Нажми «Новый прогноз»</div>';
+    return;
+  }
+  
+  // Verdict
+  if(c.verdict){
+    va.innerHTML='<span class="fc-verdict-badge '+c.verdict+'">'+c.verdict+'</span>'
+      +'<div class="fc-verdict-sub">Согласие '+c.agreement+' · Base '+fp(base)+'</div>';
+  } else {
+    va.innerHTML='<div class="fc-verdict-sub">'+sym.toUpperCase()+' · часовые свечи</div>';
+  }
+  
+  // Group forecast by step
+  const steps={};
+  fc.forEach(cd=>{if(!steps[cd.step])steps[cd.step]=[];steps[cd.step].push(cd);});
+  const stepKeys=Object.keys(steps).sort((a,b)=>a-b);
+  
+  // Price range — all highs and lows
+  let allPrices=[],allLows=[],allHighs=[];
+  hist.forEach(h=>{allPrices.push(h.open,h.close);allLows.push(h.low);allHighs.push(h.high);});
+  if(base>0)allPrices.push(base);
+  fc.forEach(cd=>{allPrices.push(cd.price);if(cd.low>0)allLows.push(cd.low);if(cd.high>0)allHighs.push(cd.high);});
+  let minP=Math.min(...allPrices,...allLows),maxP=Math.max(...allPrices,...allHighs);
+  let range=maxP-minP||1;let pad=range*0.1;
+  minP-=pad;maxP+=pad;range=maxP-minP;
+  
+  let html='<div class="fc-grid">';
+  
+  // Historical candles (5 real HTX candles)
+  hist.forEach(h=>{
+    const dir=h.close>=h.open?'hist-bull':'hist-bear';
+    const bh=(Math.min(h.open,h.close)-minP)/range*100;
+    const ch=Math.abs(h.close-h.open)/range*100;
+    const wh=(h.high-h.low)/range*100;
+    const wt=(h.low-minP)/range*100;
+    const t=new Date(h.time*1000).toLocaleTimeString('ru-RU',{hour:'2-digit'});
+    html+='<div class="fc-col"><div class="fc-price mono">'+fp(h.close)+'</div>';
+    html+='<div class="fc-wick" style="height:'+wh+'%;bottom:'+wt+'%"></div>';
+    html+='<div class="fc-candle '+dir+'" style="height:'+Math.max(ch,.5)+'%;bottom:'+bh+'%"></div>';
+    html+='<div class="fc-label">'+t+'</div></div>';
+  });
+  
+  // Divider
+  html+='<div class="fc-divider"></div>';
+  
+  // Forecast candles (up to 12)
+  stepKeys.forEach(sk=>{
+    const cds=steps[sk];
+    const avg=cds.reduce((s,x)=>s+x.price,0)/cds.length;
+    const avgLow=cds.reduce((s,x)=>s+(x.low||x.price),0)/cds.length;
+    const avgHigh=cds.reduce((s,x)=>s+(x.high||x.price),0)/cds.length;
+    const dir=avg>=(base||avg)?'fc-bull':'fc-bear';
+    const h=Math.abs(avg-base)/range*100;
+    const bottom=(Math.min(avg,base)-minP)/range*100;
+    const wh=(avgHigh-avgLow)/range*100;
+    const wt=(avgLow-minP)/range*100;
+    const tt=cds[0].target_time?new Date(cds[0].target_time).toLocaleTimeString('ru-RU',{hour:'2-digit'})+'':'+'+sk+'h';
+    html+='<div class="fc-col"><div class="fc-price mono">'+fp(avg)+'</div>';
+    html+='<div class="fc-wick" style="height:'+wh+'%;bottom:'+wt+'%"></div>';
+    html+='<div class="fc-candle '+dir+'" style="height:'+Math.max(h,.5)+'%;bottom:'+bottom+'%"></div>';
+    html+='<div class="fc-label">'+tt+'</div></div>';
+  });
+  
+  html+='</div>';
+  aa.innerHTML=html;
+}
+
+// ACTIONS
+let forecastPending = false;
+async function pollForecast(id){
+  const result=document.getElementById('result');
+  try{
+    const r=await fetch('/api/forecast/'+id+'/status');
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    if(d.status==='pending'){
+      result.textContent='Прогноз #'+id+': в очереди или выполняется';
+      setTimeout(()=>pollForecast(id),5000);return;
+    }
+    forecastPending=false;sessionStorage.removeItem('wored.forecast');sessionStorage.removeItem('wored.forecastKey');
+    result.textContent=d.status==='active'?'Прогноз #'+id+' готов':'Прогноз #'+id+' завершился ошибкой: '+(d.error_code||'нет результата');
+    if(d.status==='active')fetchDeck();
+  }catch(e){
+    result.textContent='Не удалось проверить прогноз #'+id+': '+e.message;
+    setTimeout(()=>pollForecast(id),15000);
+  }
+}
+async function actForecast(){
+  if(forecastPending){toast('Прогноз уже ожидает завершения');return;}
+  forecastPending=true;
+  const result=document.getElementById('result');result.textContent='Сохраняю задание...';
+  try{
+    let key=sessionStorage.getItem('wored.forecastKey');
+    if(!key){key=crypto.randomUUID();sessionStorage.setItem('wored.forecastKey',key);}
+    const r=await fetch('/api/forecast/quick',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':key},body:JSON.stringify({symbol:'btcusdt',horizon_steps:4})});
+    const d=await r.json();if(!r.ok||!d.ok)throw new Error(d.detail||'HTTP '+r.status);
+    sessionStorage.setItem('wored.forecast',String(d.request_id));
+    pollForecast(d.request_id);
+  }catch(e){forecastPending=false;result.textContent='Не удалось поставить прогноз в очередь: '+e.message;}
+}
+
+// ORDER TICKET
+async function openTicket(dir){
+  tDir=dir;
+  document.getElementById('ticketDir').textContent=dir==='long'?'📈 LONG':'📉 SHORT';
+  document.getElementById('ticketDir').style.color=dir==='long'?'var(--green)':'var(--red)';
+  const cb=document.getElementById('tConfirm');cb.className='modal-confirm '+dir;cb.textContent='Открыть '+dir.toUpperCase();
+  document.getElementById('tSym').textContent='BTCUSDT';
+  await updateTicket();
+  document.getElementById('ticket').classList.add('show');
+}
+function closeTicket(){document.getElementById('ticket').classList.remove('show');}
+
+async function updateTicket(){
+  const lev=parseInt(document.getElementById('tLev').value);
+  const mar=parseFloat(document.getElementById('tMar').value);
+  document.getElementById('tLevVal').textContent=lev+'x';
+  document.getElementById('tMarVal').textContent=mar+' USDT';
+  try{
+    const r=await fetch('/api/trade/preview?direction='+tDir+'&leverage='+lev+'&margin='+mar+'&symbol=btcusdt');
+    const d=await r.json();
+    document.getElementById('tEntry').textContent=fp(d.entry_price);
+    document.getElementById('tNotional').textContent='$'+d.notional.toLocaleString('en-US',{maximumFractionDigits:0});
+    document.getElementById('tSize').textContent=d.size.toFixed(6)+' BTC';
+    document.getElementById('tFee').textContent='$'+d.taker_fee.toFixed(4);
+    document.getElementById('tLiq').textContent=fp(d.liquidation_price);
+    document.getElementById('tLiqDist').textContent=fpc(d.liq_distance_pct)+'%';
+    // Scenarios
+    let sh='';for(const[k,v]of Object.entries(d.scenarios)){
+      const c=v>=0?'var(--green)':'var(--red)';
+      sh+='<div class="modal-scen-c"><div class="pl">BTC '+k+'</div><div class="pv mono" style="color:'+c+'">'+(v>=0?'+':'')+'$'+v.toFixed(2)+'</div></div>';
+    }
+    document.getElementById('tScen').innerHTML=sh;
+  }catch(e){document.getElementById('result').textContent='Preview error: '+e.message;}
+}
+
+async function confirmTicket(){
+  const lev=parseInt(document.getElementById('tLev').value);
+  const mar=parseFloat(document.getElementById('tMar').value);
+  document.getElementById('result').textContent='Открываю '+tDir+'...';
+  try{
+    const r=await fetch('/api/positions/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:'btcusdt',direction:tDir,leverage:lev,margin:mar,simulation:true})});
+    const d=await r.json();
+    if(d.ok){document.getElementById('result').innerHTML='<span style="color:var(--green)">✅ #'+d.id+' '+d.direction.toUpperCase()+' @ '+fp(d.entry_price)+'</span>';toast('Позиция открыта');closeTicket();setTimeout(fetchDeck,2e3);}
+    else{document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+(d.detail||'Ошибка')+'</span>';}
+  }catch(e){document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+e.message+'</span>';}
+}
+
+async function closePos(id){
+  document.getElementById('result').textContent='Закрываю #'+id+'...';
+  try{const r=await fetch('/api/positions/'+id+'/close',{method:'POST'});
+  const d=await r.json();
+  if(d.ok){document.getElementById('result').innerHTML='<span style="color:var(--green)">✅ #'+id+' PnL $'+d.realized_pnl+'</span>';toast('Позиция закрыта');setTimeout(fetchDeck,1e3);}
+  else{document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+(d.detail||'Ошибка')+'</span>';}
+  }catch(e){document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+e.message+'</span>';}
+}
+
+fetchDeck();timer=setInterval(fetchDeck,REFRESH);
+const savedForecast=sessionStorage.getItem('wored.forecast');
+if(savedForecast && /^\d+$/.test(savedForecast)){forecastPending=true;pollForecast(savedForecast);}
+</script>
+</body>
+</html>

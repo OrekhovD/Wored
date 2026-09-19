@@ -1,0 +1,435 @@
+{
+  "version": 1,
+  "status": "specification_not_executed",
+  "viewports": [
+    [
+      390,
+      844
+    ],
+    [
+      844,
+      390
+    ],
+    [
+      1280,
+      800
+    ],
+    [
+      320,
+      800
+    ]
+  ],
+  "routes": [
+    "/",
+    "/command-deck",
+    "/daily-session",
+    "/predictions",
+    "/predictions/9001",
+    "/alerts",
+    "/journal",
+    "/journal/9001",
+    "/futures-lab",
+    "/strategy",
+    "/model-management",
+    "/system",
+    "/login"
+  ],
+  "manual_required": [
+    "A50",
+    "A54"
+  ],
+  "mandatory_zero": [
+    "failed",
+    "required_skipped",
+    "unhandled_js_errors",
+    "unexpected_external_requests",
+    "production_mutations"
+  ],
+  "tests": [
+    {
+      "id": "A01",
+      "requirement": "UI-00",
+      "scenario": "baseline",
+      "expected": "Сверить final commit и оба статуса; ни один backend partial не заменён UI passed.",
+      "status": "not_run"
+    },
+    {
+      "id": "A02",
+      "requirement": "UI-01",
+      "scenario": "null_zero",
+      "expected": "Null/NaN → —, PnL/RSI 0 остаются 0; 0.5 percent points → один 0,50 %.",
+      "status": "not_run"
+    },
+    {
+      "id": "A03",
+      "requirement": "UI-01",
+      "scenario": "long_model",
+      "expected": "Длинный model ID и комиссия0.00001234 читаемы; no overflow и no false zero.",
+      "status": "not_run"
+    },
+    {
+      "id": "A04",
+      "requirement": "UI-01",
+      "scenario": "ready",
+      "expected": "Контраст всех text/background/hover/error пар ≥4.5; controls≥44px; focus visible.",
+      "status": "not_run"
+    },
+    {
+      "id": "A05",
+      "requirement": "UI-02",
+      "scenario": "ready",
+      "expected": "Все13 URLs доступны; четыре группы и вторичная навигация; active link корректен.",
+      "status": "not_run"
+    },
+    {
+      "id": "A06",
+      "requirement": "UI-02",
+      "scenario": "ready",
+      "expected": "Рынок сохраняет price/volume/RSI/MACD; admin controls доступны в system с прежним CSRF.",
+      "status": "not_run"
+    },
+    {
+      "id": "A07",
+      "requirement": "UI-03",
+      "scenario": "stale",
+      "expected": "HTTP200 со старым as_of остаётся stale; новый вход заблокирован, zero не подставлен.",
+      "status": "not_run"
+    },
+    {
+      "id": "A08",
+      "requirement": "UI-03",
+      "scenario": "network_error",
+      "expected": "При ошибке сохранены прошлые значения с age/error; пустой список не подставлен.",
+      "status": "not_run"
+    },
+    {
+      "id": "A09",
+      "requirement": "UI-03",
+      "scenario": "running",
+      "expected": "Один request/timer на resource; hidden pause, visible refresh; нет overlap.",
+      "status": "not_run"
+    },
+    {
+      "id": "A10",
+      "requirement": "UI-03",
+      "scenario": "late_response",
+      "expected": "Поздний ответ старого symbol/preview не меняет новый экран.",
+      "status": "not_run"
+    },
+    {
+      "id": "A11",
+      "requirement": "UI-03",
+      "scenario": "deadline_unknown",
+      "expected": "После deadline один финальный GET; нет самовольного DB failed и POST retry.",
+      "status": "not_run"
+    },
+    {
+      "id": "A12",
+      "requirement": "UI-03",
+      "scenario": "http_errors",
+      "expected": "400/401/403/409/422/429/503 дают разные понятные состояния без raw stack.",
+      "status": "not_run"
+    },
+    {
+      "id": "A13",
+      "requirement": "UI-04",
+      "scenario": "backend_gap",
+      "expected": "Missing actual/net/policy/N показывается unavailable; не подставляется alias/gross/points.",
+      "status": "not_run"
+    },
+    {
+      "id": "A14",
+      "requirement": "UI-04",
+      "scenario": "ready",
+      "expected": "Новые additive UI fields проходят реальный HTTP contract test; legacy response fields сохранены.",
+      "status": "not_run"
+    },
+    {
+      "id": "A15",
+      "requirement": "UI-05",
+      "scenario": "ready",
+      "expected": "Deck показывает SIM, source age, реальные роли; арбитр не дополнительный голос.",
+      "status": "not_run"
+    },
+    {
+      "id": "A16",
+      "requirement": "UI-05",
+      "scenario": "partial",
+      "expected": "Без арбитра показано отсутствие итога и успешные роли; нет среднего направления.",
+      "status": "not_run"
+    },
+    {
+      "id": "A17",
+      "requirement": "UI-05",
+      "scenario": "expired",
+      "expected": "Истёкший forecast доступен как архив; нет действующего bullish/bearish вывода.",
+      "status": "not_run"
+    },
+    {
+      "id": "A18",
+      "requirement": "UI-05",
+      "scenario": "ready",
+      "expected": "OHLC история и line/range forecast, единый symbol/timeframe; нет forecast candles.",
+      "status": "not_run"
+    },
+    {
+      "id": "A19",
+      "requirement": "UI-05",
+      "scenario": "steps_48",
+      "expected": "48 targets15min, включая дату после полуночи, сохранены; дата/UTC/now, нет часового округления.",
+      "status": "not_run"
+    },
+    {
+      "id": "A20",
+      "requirement": "UI-05",
+      "scenario": "invalid_range",
+      "expected": "low>high/duplicate/nonfinite не рисуются; null range не превращается в свечу/уверенность.",
+      "status": "not_run"
+    },
+    {
+      "id": "A21",
+      "requirement": "UI-05",
+      "scenario": "chart_unavailable",
+      "expected": "Без chart library остаются error и доступная таблица; не вечный loading.",
+      "status": "not_run"
+    },
+    {
+      "id": "A22",
+      "requirement": "UI-06",
+      "scenario": "ready",
+      "expected": "Одна форма; wire enum7timeframes, horizon1..48, depth1..10; итог длительности верный.",
+      "status": "not_run"
+    },
+    {
+      "id": "A23",
+      "requirement": "UI-06",
+      "scenario": "queued",
+      "expected": "Двойной click даёт один POST; 202 → queued, не completed; request ID доступен.",
+      "status": "not_run"
+    },
+    {
+      "id": "A24",
+      "requirement": "UI-06",
+      "scenario": "running",
+      "expected": "Reload восстанавливает тот же request/key; polling каждые3s, не новый POST.",
+      "status": "not_run"
+    },
+    {
+      "id": "A25",
+      "requirement": "UI-06",
+      "scenario": "partial",
+      "expected": "Terminal partial сохраняет результат и failure roles; retry создаёт отдельный запрос.",
+      "status": "not_run"
+    },
+    {
+      "id": "A26",
+      "requirement": "UI-06",
+      "scenario": "failed",
+      "expected": "Ошибка сохранена на странице; повтор новый key только явным действием.",
+      "status": "not_run"
+    },
+    {
+      "id": "A27",
+      "requirement": "UI-06",
+      "scenario": "post_unknown",
+      "expected": "Timeout POST сохраняет key; явный повтор тот же key/payload, сервер возвращает тот же ID.",
+      "status": "not_run"
+    },
+    {
+      "id": "A28",
+      "requirement": "UI-06",
+      "scenario": "ready",
+      "expected": "История открывает конкретный /predictions/9001; result раньше новой формы на mobile.",
+      "status": "not_run"
+    },
+    {
+      "id": "A29",
+      "requirement": "UI-06",
+      "scenario": "storage_denied",
+      "expected": "При отказе storage работает текущая сессия/URL, показывается ограничение восстановления.",
+      "status": "not_run"
+    },
+    {
+      "id": "A30",
+      "requirement": "UI-07",
+      "scenario": "preview_valid",
+      "expected": "Modal semantics, focus trap/reverse Tab/Escape/restore, background inert, scroll lock.",
+      "status": "not_run"
+    },
+    {
+      "id": "A31",
+      "requirement": "UI-07",
+      "scenario": "preview_invalid",
+      "expected": "Invalid/missing/stale preview запрещает confirm и объясняет причину; нет cross/limit.",
+      "status": "not_run"
+    },
+    {
+      "id": "A32",
+      "requirement": "UI-07",
+      "scenario": "late_response",
+      "expected": "Ответ первого leverage не разрешает confirm второго; изменение немедленно invalidates.",
+      "status": "not_run"
+    },
+    {
+      "id": "A33",
+      "requirement": "UI-07",
+      "scenario": "preview_valid",
+      "expected": "Цена/version/fees/net/liquidation видны; процент ровно один; scenario liquidation подписан.",
+      "status": "not_run"
+    },
+    {
+      "id": "A34",
+      "requirement": "UI-07",
+      "scenario": "post_unknown",
+      "expected": "Один open POST; закрытие modal не отменяет POST; неизвестный исход не вызывает дубль.",
+      "status": "not_run"
+    },
+    {
+      "id": "A35",
+      "requirement": "UI-07",
+      "scenario": "stale_indicators",
+      "expected": "Stale indicators запрещают новый вход, но разрешённое сервером close со свежей ценой доступно.",
+      "status": "not_run"
+    },
+    {
+      "id": "A36",
+      "requirement": "UI-08",
+      "scenario": "no_trade",
+      "expected": "Первым ожидание/причина/следующее событие; ARMED не означает готовность входа.",
+      "status": "not_run"
+    },
+    {
+      "id": "A37",
+      "requirement": "UI-08",
+      "scenario": "conditional_no_trade",
+      "expected": "Непустое описание no_trade_condition при valid entries не создаёт ложный active запрет.",
+      "status": "not_run"
+    },
+    {
+      "id": "A38",
+      "requirement": "UI-08",
+      "scenario": "paused",
+      "expected": "Pause/continue/close_all согласно allowed; массовое закрытие требует одного явного confirm.",
+      "status": "not_run"
+    },
+    {
+      "id": "A39",
+      "requirement": "UI-08",
+      "scenario": "ready",
+      "expected": "SSE updates не сбрасывают форму/tab/focus; fallback один и снимается после reconnect.",
+      "status": "not_run"
+    },
+    {
+      "id": "A40",
+      "requirement": "UI-09",
+      "scenario": "low_sample",
+      "expected": "N=11requests/44points показывает11/30 и отсутствие рейтинга; points не становятся N.",
+      "status": "not_run"
+    },
+    {
+      "id": "A41",
+      "requirement": "UI-09",
+      "scenario": "ready",
+      "expected": "Разные actual models/metrics versions не агрегируются; configured не означает available.",
+      "status": "not_run"
+    },
+    {
+      "id": "A42",
+      "requirement": "UI-09",
+      "scenario": "empty",
+      "expected": "Empty и API error различны на alerts/journal/positions; фильтры/детали доступны.",
+      "status": "not_run"
+    },
+    {
+      "id": "A43",
+      "requirement": "UI-09",
+      "scenario": "ready",
+      "expected": "Модельный probe/evaluate/admin mutation не запускаются автоматически при загрузке.",
+      "status": "not_run"
+    },
+    {
+      "id": "A44",
+      "requirement": "UI-10",
+      "scenario": "auth",
+      "expected": "Login русский, label/autocomplete/Enter/error; нет внутренних API polling до входа.",
+      "status": "not_run"
+    },
+    {
+      "id": "A45",
+      "requirement": "UI-10",
+      "scenario": "auth",
+      "expected": "Реальные тестовые handlers: auth/CSRF/allowlist не ослаблены, включая /system.",
+      "status": "not_run"
+    },
+    {
+      "id": "A46",
+      "requirement": "UI-10",
+      "scenario": "xss",
+      "expected": "Model/error/журнал HTML строка видна как текст; скрипт не выполняется.",
+      "status": "not_run"
+    },
+    {
+      "id": "A47",
+      "requirement": "UI-10",
+      "scenario": "telegram",
+      "expected": "SDK mock без initData → login; valid/invalid initData идут через server; нет секретов в storage/log.",
+      "status": "not_run"
+    },
+    {
+      "id": "A48",
+      "requirement": "UI-10",
+      "scenario": "ready",
+      "expected": "Все viewports без обрезки/overflow; safe area/клавиатура не закрывают controls.",
+      "status": "not_run"
+    },
+    {
+      "id": "A49",
+      "requirement": "UI-10",
+      "scenario": "reduced_motion",
+      "expected": "Reduced motion выключает pulse; aria-live не читает каждую цену; keyboard logical order.",
+      "status": "not_run"
+    },
+    {
+      "id": "A50",
+      "requirement": "UI-10",
+      "scenario": "zoom",
+      "expected": "Ручной200% browser zoom и автоматическийreflow320px; методы явно различены.",
+      "status": "not_run"
+    },
+    {
+      "id": "A51",
+      "requirement": "UI-11",
+      "scenario": "isolation",
+      "expected": "External requests0, production mutations0, fake auth only QA, port conflict не убивает чужой процесс.",
+      "status": "not_run"
+    },
+    {
+      "id": "A52",
+      "requirement": "UI-11",
+      "scenario": "ready",
+      "expected": "JUnit/screenshots/console/network/contrast на exact commit; pageerror0; обязательных skip0.",
+      "status": "not_run"
+    },
+    {
+      "id": "A53",
+      "requirement": "UI-12",
+      "scenario": "release",
+      "expected": "Выборочное webui обновление, UI rollback сохраняет S1/backend/данные; diff whitelist.",
+      "status": "not_run"
+    },
+    {
+      "id": "A54",
+      "requirement": "UI-12",
+      "scenario": "telegram",
+      "expected": "Ручной запуск обоих Mini Apps с OS/Telegram versions/дата, reopen/orientation/keyboard/request restore.",
+      "status": "not_run"
+    },
+    {
+      "id": "A55",
+      "requirement": "UI-12",
+      "scenario": "release",
+      "expected": "Итоговый отчёт закрывает UI-00..12 и O01..10, сохраняет backend gaps и manual pending.",
+      "status": "not_run"
+    }
+  ]
+}

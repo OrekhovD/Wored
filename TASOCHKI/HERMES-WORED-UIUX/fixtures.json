@@ -1,0 +1,869 @@
+{
+  "version": 1,
+  "synthetic": true,
+  "kind": "semantic fixture input; adapters must map to actual HTTP contracts",
+  "clock": "2026-09-09T12:00:00Z",
+  "merge_rule": "recursively merge objects into base; arrays replace; null replaces whole subtree; missing leaves base unchanged",
+  "base": {
+    "market": {
+      "symbol": "btcusdt",
+      "price": "64250.50",
+      "as_of": "2026-09-09T11:59:55Z",
+      "fresh": true,
+      "stale_after_seconds": 60
+    },
+    "history": [
+      {
+        "time": 1788950700,
+        "open": 64200,
+        "high": 64230,
+        "low": 64180,
+        "close": 64210,
+        "volume": 100,
+        "closed": true
+      },
+      {
+        "time": 1788951600,
+        "open": 64210,
+        "high": 64240,
+        "low": 64190,
+        "close": 64220,
+        "volume": 101,
+        "closed": true
+      },
+      {
+        "time": 1788952500,
+        "open": 64220,
+        "high": 64250,
+        "low": 64200,
+        "close": 64230,
+        "volume": 102,
+        "closed": true
+      },
+      {
+        "time": 1788953400,
+        "open": 64230,
+        "high": 64260,
+        "low": 64210,
+        "close": 64240,
+        "volume": 103,
+        "closed": true
+      },
+      {
+        "time": 1788954300,
+        "open": 64240,
+        "high": 64270,
+        "low": 64220,
+        "close": 64250,
+        "volume": 104,
+        "closed": true
+      }
+    ],
+    "forecast": {
+      "request_id": 9001,
+      "base_timeframe": "15min",
+      "execution_state": "completed",
+      "evaluation_state": "pending",
+      "as_of": "2026-09-09T12:00:00Z",
+      "valid_until": "2026-09-09T13:00:00Z",
+      "roles": [
+        {
+          "role": "bull",
+          "requested_model": "fixture-bull",
+          "actual_model": "fixture-bull-v1",
+          "provider": "fixture",
+          "run_id": 101,
+          "state": "completed",
+          "failure_code": null
+        },
+        {
+          "role": "bear",
+          "requested_model": "fixture-bear",
+          "actual_model": "fixture-bear-v1",
+          "provider": "fixture",
+          "run_id": 102,
+          "state": "completed",
+          "failure_code": null
+        },
+        {
+          "role": "arbiter",
+          "requested_model": "fixture-arbiter",
+          "actual_model": "fixture-arbiter-v1",
+          "provider": "fixture",
+          "run_id": 103,
+          "state": "completed",
+          "failure_code": null
+        }
+      ],
+      "points": [
+        {
+          "run_id": 103,
+          "role": "arbiter",
+          "step_index": 1,
+          "target_time": "2026-09-09T12:15:00Z",
+          "predicted_price": 64260.5,
+          "low": 64210.5,
+          "high": 64310.5
+        },
+        {
+          "run_id": 103,
+          "role": "arbiter",
+          "step_index": 2,
+          "target_time": "2026-09-09T12:30:00Z",
+          "predicted_price": 64270.5,
+          "low": 64220.5,
+          "high": 64320.5
+        },
+        {
+          "run_id": 103,
+          "role": "arbiter",
+          "step_index": 3,
+          "target_time": "2026-09-09T12:45:00Z",
+          "predicted_price": 64280.5,
+          "low": 64230.5,
+          "high": 64330.5
+        },
+        {
+          "run_id": 103,
+          "role": "arbiter",
+          "step_index": 4,
+          "target_time": "2026-09-09T13:00:00Z",
+          "predicted_price": 64290.5,
+          "low": 64240.5,
+          "high": 64340.5
+        }
+      ]
+    },
+    "session": {
+      "id": 7001,
+      "technical_status": "ARMED",
+      "readiness": "waiting_trigger",
+      "allowed_commands": [
+        "pause",
+        "tighten",
+        "reduce"
+      ],
+      "entries": [
+        {
+          "id": 501,
+          "status": "valid"
+        }
+      ]
+    },
+    "metrics": {
+      "independent_requests": 11,
+      "evaluated_points": 44,
+      "metrics_version": 2,
+      "ranking_available": false
+    },
+    "preview": {
+      "allowed": true,
+      "price_as_of": "2026-09-09T11:59:55Z",
+      "expires_at": "2026-09-09T12:00:10Z",
+      "calculation_version": 3,
+      "liq_distance_pct": 0.5,
+      "entry_fee": "0.00001234",
+      "estimated_exit_fee": "0.00001235",
+      "funding_assumption": "0 for immediate close fixture",
+      "scenarios": [
+        {
+          "label": "+1%",
+          "net_pnl": "0.75",
+          "liquidation_crossed": false
+        }
+      ]
+    }
+  },
+  "overrides": {
+    "ready": {},
+    "stale": {
+      "market": {
+        "as_of": "2026-09-09T11:58:29Z",
+        "fresh": false
+      }
+    },
+    "network_error": {
+      "transport": {
+        "get_status": 503,
+        "preserve_previous": true
+      }
+    },
+    "queued": {
+      "forecast": {
+        "execution_state": "queued",
+        "deadline_at": "2026-09-09T12:20:00Z",
+        "roles": [],
+        "points": []
+      }
+    },
+    "running": {
+      "forecast": {
+        "execution_state": "running",
+        "deadline_at": "2026-09-09T12:04:00Z",
+        "points": []
+      }
+    },
+    "partial": {
+      "forecast": {
+        "execution_state": "partial",
+        "roles": [
+          {
+            "role": "bull",
+            "run_id": 101,
+            "state": "completed",
+            "actual_model": "fixture-bull-v1"
+          },
+          {
+            "role": "arbiter",
+            "run_id": 103,
+            "state": "failed",
+            "failure_code": "provider_timeout",
+            "actual_model": null
+          }
+        ],
+        "points": [
+          {
+            "run_id": 101,
+            "role": "bull",
+            "step_index": 1,
+            "target_time": "2026-09-09T12:15:00Z",
+            "predicted_price": 64260.5,
+            "low": 64200,
+            "high": 64300
+          }
+        ]
+      }
+    },
+    "failed": {
+      "forecast": {
+        "execution_state": "failed",
+        "failure_code": "provider_timeout",
+        "roles": [],
+        "points": []
+      }
+    },
+    "expired": {
+      "forecast": {
+        "execution_state": "completed",
+        "valid_until": "2026-09-09T11:59:59Z"
+      }
+    },
+    "no_trade": {
+      "session": {
+        "readiness": "no_trade_plan",
+        "reason_code": "no_valid_entries",
+        "entries": [],
+        "next_event": null
+      }
+    },
+    "conditional_no_trade": {
+      "session": {
+        "notradecondition": "Не входить, если цена выйдет из диапазона",
+        "readiness": "waiting_trigger",
+        "entries": [
+          {
+            "id": 501,
+            "status": "valid"
+          }
+        ]
+      }
+    },
+    "paused": {
+      "session": {
+        "technical_status": "PAUSED",
+        "allowed_commands": [
+          "continue",
+          "close_all"
+        ]
+      }
+    },
+    "empty": {
+      "forecast": null,
+      "positions": [],
+      "alerts": [],
+      "journal": [],
+      "session": null
+    },
+    "preview_valid": {},
+    "preview_invalid": {
+      "preview": {
+        "allowed": false,
+        "reasons": [
+          "market_stale"
+        ]
+      }
+    },
+    "late_response": {
+      "transport": {
+        "first_delay_ms": 1500,
+        "second_delay_ms": 10,
+        "first_symbol": "btcusdt",
+        "second_symbol": "ethusdt"
+      }
+    },
+    "post_unknown": {
+      "transport": {
+        "post_committed": true,
+        "post_response": "connection_lost",
+        "expected_second_automatic_post": false
+      }
+    },
+    "backend_gap": {
+      "preview": {
+        "allowed": false,
+        "calculation_version": null,
+        "scenarios": null
+      },
+      "metrics": {
+        "independent_requests": null
+      }
+    },
+    "low_sample": {},
+    "long_model": {
+      "display_value": "fixture/provider/long-model-long-model-long-model-long-model-long-model-long-model-long-model-long-model-long-model-long-model-long-model-long-model-long-model-long-model-long-model-long-model-"
+    },
+    "null_zero": {
+      "format_values": [
+        null,
+        0,
+        0.5,
+        0.005,
+        1.234e-05
+      ]
+    },
+    "deadline_unknown": {
+      "forecast": {
+        "execution_state": "running",
+        "deadline_at": "2026-09-09T11:59:59Z"
+      },
+      "transport": {
+        "final_status_get": 503
+      }
+    },
+    "steps_48": {
+      "forecast": {
+        "valid_until": "2026-09-10T00:00:00Z",
+        "points": [
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 1,
+            "target_time": "2026-09-09T12:15:00Z",
+            "predicted_price": 64260.5,
+            "low": 64210.5,
+            "high": 64310.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 2,
+            "target_time": "2026-09-09T12:30:00Z",
+            "predicted_price": 64270.5,
+            "low": 64220.5,
+            "high": 64320.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 3,
+            "target_time": "2026-09-09T12:45:00Z",
+            "predicted_price": 64280.5,
+            "low": 64230.5,
+            "high": 64330.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 4,
+            "target_time": "2026-09-09T13:00:00Z",
+            "predicted_price": 64290.5,
+            "low": 64240.5,
+            "high": 64340.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 5,
+            "target_time": "2026-09-09T13:15:00Z",
+            "predicted_price": 64300.5,
+            "low": 64250.5,
+            "high": 64350.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 6,
+            "target_time": "2026-09-09T13:30:00Z",
+            "predicted_price": 64310.5,
+            "low": 64260.5,
+            "high": 64360.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 7,
+            "target_time": "2026-09-09T13:45:00Z",
+            "predicted_price": 64320.5,
+            "low": 64270.5,
+            "high": 64370.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 8,
+            "target_time": "2026-09-09T14:00:00Z",
+            "predicted_price": 64330.5,
+            "low": 64280.5,
+            "high": 64380.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 9,
+            "target_time": "2026-09-09T14:15:00Z",
+            "predicted_price": 64340.5,
+            "low": 64290.5,
+            "high": 64390.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 10,
+            "target_time": "2026-09-09T14:30:00Z",
+            "predicted_price": 64350.5,
+            "low": 64300.5,
+            "high": 64400.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 11,
+            "target_time": "2026-09-09T14:45:00Z",
+            "predicted_price": 64360.5,
+            "low": 64310.5,
+            "high": 64410.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 12,
+            "target_time": "2026-09-09T15:00:00Z",
+            "predicted_price": 64370.5,
+            "low": 64320.5,
+            "high": 64420.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 13,
+            "target_time": "2026-09-09T15:15:00Z",
+            "predicted_price": 64380.5,
+            "low": 64330.5,
+            "high": 64430.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 14,
+            "target_time": "2026-09-09T15:30:00Z",
+            "predicted_price": 64390.5,
+            "low": 64340.5,
+            "high": 64440.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 15,
+            "target_time": "2026-09-09T15:45:00Z",
+            "predicted_price": 64400.5,
+            "low": 64350.5,
+            "high": 64450.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 16,
+            "target_time": "2026-09-09T16:00:00Z",
+            "predicted_price": 64410.5,
+            "low": 64360.5,
+            "high": 64460.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 17,
+            "target_time": "2026-09-09T16:15:00Z",
+            "predicted_price": 64420.5,
+            "low": 64370.5,
+            "high": 64470.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 18,
+            "target_time": "2026-09-09T16:30:00Z",
+            "predicted_price": 64430.5,
+            "low": 64380.5,
+            "high": 64480.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 19,
+            "target_time": "2026-09-09T16:45:00Z",
+            "predicted_price": 64440.5,
+            "low": 64390.5,
+            "high": 64490.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 20,
+            "target_time": "2026-09-09T17:00:00Z",
+            "predicted_price": 64450.5,
+            "low": 64400.5,
+            "high": 64500.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 21,
+            "target_time": "2026-09-09T17:15:00Z",
+            "predicted_price": 64460.5,
+            "low": 64410.5,
+            "high": 64510.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 22,
+            "target_time": "2026-09-09T17:30:00Z",
+            "predicted_price": 64470.5,
+            "low": 64420.5,
+            "high": 64520.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 23,
+            "target_time": "2026-09-09T17:45:00Z",
+            "predicted_price": 64480.5,
+            "low": 64430.5,
+            "high": 64530.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 24,
+            "target_time": "2026-09-09T18:00:00Z",
+            "predicted_price": 64490.5,
+            "low": 64440.5,
+            "high": 64540.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 25,
+            "target_time": "2026-09-09T18:15:00Z",
+            "predicted_price": 64500.5,
+            "low": 64450.5,
+            "high": 64550.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 26,
+            "target_time": "2026-09-09T18:30:00Z",
+            "predicted_price": 64510.5,
+            "low": 64460.5,
+            "high": 64560.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 27,
+            "target_time": "2026-09-09T18:45:00Z",
+            "predicted_price": 64520.5,
+            "low": 64470.5,
+            "high": 64570.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 28,
+            "target_time": "2026-09-09T19:00:00Z",
+            "predicted_price": 64530.5,
+            "low": 64480.5,
+            "high": 64580.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 29,
+            "target_time": "2026-09-09T19:15:00Z",
+            "predicted_price": 64540.5,
+            "low": 64490.5,
+            "high": 64590.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 30,
+            "target_time": "2026-09-09T19:30:00Z",
+            "predicted_price": 64550.5,
+            "low": 64500.5,
+            "high": 64600.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 31,
+            "target_time": "2026-09-09T19:45:00Z",
+            "predicted_price": 64560.5,
+            "low": 64510.5,
+            "high": 64610.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 32,
+            "target_time": "2026-09-09T20:00:00Z",
+            "predicted_price": 64570.5,
+            "low": 64520.5,
+            "high": 64620.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 33,
+            "target_time": "2026-09-09T20:15:00Z",
+            "predicted_price": 64580.5,
+            "low": 64530.5,
+            "high": 64630.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 34,
+            "target_time": "2026-09-09T20:30:00Z",
+            "predicted_price": 64590.5,
+            "low": 64540.5,
+            "high": 64640.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 35,
+            "target_time": "2026-09-09T20:45:00Z",
+            "predicted_price": 64600.5,
+            "low": 64550.5,
+            "high": 64650.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 36,
+            "target_time": "2026-09-09T21:00:00Z",
+            "predicted_price": 64610.5,
+            "low": 64560.5,
+            "high": 64660.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 37,
+            "target_time": "2026-09-09T21:15:00Z",
+            "predicted_price": 64620.5,
+            "low": 64570.5,
+            "high": 64670.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 38,
+            "target_time": "2026-09-09T21:30:00Z",
+            "predicted_price": 64630.5,
+            "low": 64580.5,
+            "high": 64680.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 39,
+            "target_time": "2026-09-09T21:45:00Z",
+            "predicted_price": 64640.5,
+            "low": 64590.5,
+            "high": 64690.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 40,
+            "target_time": "2026-09-09T22:00:00Z",
+            "predicted_price": 64650.5,
+            "low": 64600.5,
+            "high": 64700.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 41,
+            "target_time": "2026-09-09T22:15:00Z",
+            "predicted_price": 64660.5,
+            "low": 64610.5,
+            "high": 64710.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 42,
+            "target_time": "2026-09-09T22:30:00Z",
+            "predicted_price": 64670.5,
+            "low": 64620.5,
+            "high": 64720.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 43,
+            "target_time": "2026-09-09T22:45:00Z",
+            "predicted_price": 64680.5,
+            "low": 64630.5,
+            "high": 64730.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 44,
+            "target_time": "2026-09-09T23:00:00Z",
+            "predicted_price": 64690.5,
+            "low": 64640.5,
+            "high": 64740.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 45,
+            "target_time": "2026-09-09T23:15:00Z",
+            "predicted_price": 64700.5,
+            "low": 64650.5,
+            "high": 64750.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 46,
+            "target_time": "2026-09-09T23:30:00Z",
+            "predicted_price": 64710.5,
+            "low": 64660.5,
+            "high": 64760.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 47,
+            "target_time": "2026-09-09T23:45:00Z",
+            "predicted_price": 64720.5,
+            "low": 64670.5,
+            "high": 64770.5
+          },
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 48,
+            "target_time": "2026-09-10T00:00:00Z",
+            "predicted_price": 64730.5,
+            "low": 64680.5,
+            "high": 64780.5
+          }
+        ]
+      }
+    },
+    "invalid_range": {
+      "forecast": {
+        "points": [
+          {
+            "run_id": 103,
+            "role": "arbiter",
+            "step_index": 1,
+            "target_time": "2026-09-09T12:15:00Z",
+            "predicted_price": 64250,
+            "low": 65000,
+            "high": 64000
+          }
+        ]
+      }
+    },
+    "chart_unavailable": {
+      "transport": {
+        "chart_script_status": 404
+      }
+    },
+    "stale_indicators": {
+      "indicators": {
+        "fresh": false
+      },
+      "actions": {
+        "open_position": false,
+        "close_position": true
+      }
+    },
+    "xss": {
+      "display_value": "<img src=x onerror=\"window.__xssExecuted=true\">"
+    },
+    "http_errors": {
+      "transport": {
+        "statuses": [
+          400,
+          401,
+          403,
+          409,
+          422,
+          429,
+          503
+        ]
+      }
+    },
+    "storage_denied": {
+      "browser": {
+        "session_storage_throws": true
+      }
+    },
+    "auth": {
+      "identity": "fixture-admin",
+      "secret_values": "injected only by fixture server; never production"
+    },
+    "telegram": {
+      "sdk_mock": true,
+      "variants": [
+        "absent",
+        "empty",
+        "valid_fixture_signed",
+        "invalid_signature",
+        "forbidden_user"
+      ]
+    },
+    "reduced_motion": {
+      "browser": {
+        "reduced_motion": "reduce"
+      }
+    },
+    "zoom": {
+      "manual_browser_zoom_percent": 200
+    },
+    "isolation": {
+      "allowed_origin": "http://127.0.0.1:18080"
+    },
+    "release": {
+      "requires_live_read_only_smoke": true
+    },
+    "baseline": {
+      "requires_final_hermes_report": true
+    }
+  },
+  "notes": [
+    "Synthetic preview numbers test display only; do not use as financial calculation oracle.",
+    "No real model availability claim; fixture model names never become registry settings.",
+    "History provides five closed synthetic 15-minute OHLC candles; use this fixed data for render tests."
+  ]
+}

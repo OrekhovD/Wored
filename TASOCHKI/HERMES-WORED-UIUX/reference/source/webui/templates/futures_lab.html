@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="cockpit">
+  <div class="cockpit-main">
+    <div class="cockpit-symbol">FUTURES LAB</div>
+    <div class="cockpit-price" id="flTotalPnl">—</div>
+    <div class="cockpit-delta" id="flSummary">Загрузка...</div>
+  </div>
+</div>
+
+<main class="dashboard">
+  <section class="panel panel-chart">
+    <div class="panel-header">
+      <div>
+        <div class="panel-kicker">Simulation</div>
+        <h2>Позиции симуляции</h2>
+      </div>
+      <div class="toolbar">
+        <button class="ghost-button is-active" id="flFilterAll" onclick="flFilter('')">Все</button>
+        <button class="ghost-button" id="flFilterOpen" onclick="flFilter('open')">Открытые</button>
+        <button class="ghost-button" id="flFilterClosed" onclick="flFilter('closed')">Закрытые</button>
+      </div>
+    </div>
+    <div id="flPositions" class="event-list">Загрузка...</div>
+  </section>
+  <aside class="side-column">
+    <section class="panel">
+      <div class="panel-kicker">Stats</div>
+      <h2>Статистика</h2>
+      <div id="flStats" class="pill-grid"></div>
+    </section>
+    <section class="panel">
+      <div class="panel-kicker">ТЗ 7.2</div>
+      <h2>Правила</h2>
+      <div class="action-card">
+        <div class="action-copy">Только BTC/USDT. Плечо 100x-200x. Cross/isolated margin.</div>
+      </div>
+    </section>
+  </aside>
+</main>
+
+<script>
+let flCurrentFilter = '';
+
+async function flLoad() {
+  try {
+    const url = '/api/sim-positions?limit=50' + (flCurrentFilter ? '&status=' + flCurrentFilter : '');
+    const r = await fetch(url);
+    if (!r.ok) return;
+    const data = await r.json();
+    
+    const container = document.getElementById('flPositions');
+    if (!data.items.length) {
+      container.innerHTML = '<div class="event-item"><span>Нет позиций</span></div>';
+    } else {
+      container.innerHTML = data.items.map(p => {
+        const pnl = p.realized_pnl !== null ? p.realized_pnl.toFixed(4) : '—';
+        const pnlClass = p.realized_pnl > 0 ? 'is-ok' : p.realized_pnl < 0 ? 'is-warn' : '';
+        const dirIcon = p.direction === 'long' ? '📈' : '📉';
+        const statusBadge = p.status === 'open' ? '🟢' : p.status === 'liquidated' ? '🔴' : '⚪';
+        return `<div class="event-item">
+          <span class="event-symbol">${statusBadge} #${p.id} ${dirIcon} ${p.symbol.toUpperCase()} ${p.leverage}x ${p.direction}</span>
+          <span class="event-detail">${p.margin_type} | entry: ${p.entry_price || '—'} | PnL: <strong class="${pnlClass}">${pnl}</strong></span>
+          <span class="event-time">${p.created_at || ''} ${p.close_reason ? '| ' + p.close_reason : ''}</span>
+        </div>`;
+      }).join('');
+    }
+
+    document.getElementById('flSummary').textContent = `Open: ${data.open_count} | Closed: ${data.closed_count} | Total: ${data.total}`;
+    
+    const statsEl = document.getElementById('flStats');
+    statsEl.innerHTML = `
+      <div class="pill"><span class="pill-label">Open</span><span class="pill-value">${data.open_count}</span></div>
+      <div class="pill"><span class="pill-label">Closed</span><span class="pill-value">${data.closed_count}</span></div>
+      <div class="pill"><span class="pill-label">Total</span><span class="pill-value">${data.total}</span></div>
+    `;
+  } catch (e) {
+    document.getElementById('flPositions').innerHTML = '<div class="event-item">Error loading positions</div>';
+  }
+}
+
+function flFilter(status) {
+  flCurrentFilter = status;
+  document.querySelectorAll('[id^="flFilter"]').forEach(b => b.classList.remove('is-active'));
+  const btn = document.getElementById('flFilter' + (status ? status.charAt(0).toUpperCase() + status.slice(1) : 'All'));
+  if (btn) btn.classList.add('is-active');
+  flLoad();
+}
+
+flLoad();
+setInterval(flLoad, 15000);
+</script>
+{% endblock %}

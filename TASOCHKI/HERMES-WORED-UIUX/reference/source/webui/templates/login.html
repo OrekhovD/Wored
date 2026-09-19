@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block head_extra %}<script src="https://telegram.org/js/telegram-web-app.js?63"></script>{% endblock %}
+
+{% block content %}
+<main class="auth-layout">
+  <section class="panel auth-panel">
+    <div class="panel-kicker">Authentication</div>
+    <h2>Вход в WORED Web UI</h2>
+    <p class="auth-copy">
+      Эта сессия защищает браузерный доступ к alert history, AI journal drill-down и admin actions.
+    </p>
+    <form method="post" action="/login" class="auth-form">
+      <input type="hidden" name="next" value="{{ next_target }}">
+      <label class="field">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <span>Username</span>
+        <input type="text" name="username" value="{{ admin_username }}" autocomplete="username" required>
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit" class="primary-button">Open control room</button>
+    </form>
+  </section>
+</main>
+<p id="telegram-auth-status" role="status" aria-live="polite"></p>
+<script>
+(async function () {
+  const telegram = window.Telegram && window.Telegram.WebApp;
+  if (!telegram || !telegram.initData) return;
+  const status = document.getElementById('telegram-auth-status');
+  status.textContent = 'Проверяю вход из Telegram…';
+  try {
+    const response = await fetch('/api/auth/telegram', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({init_data: telegram.initData, csrf_token: {{ csrf_token | tojson }}})
+    });
+    if (!response.ok) throw new Error('Вход из Telegram не подтверждён. Откройте Mini App заново или войдите с паролем.');
+    window.location.replace({{ next_target | tojson }});
+  } catch (error) { status.textContent = error.message; }
+})();
+</script>
+{% endblock %}

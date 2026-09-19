@@ -1,0 +1,700 @@
+<title>WORED Trader Deck</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  color-scheme: dark;
+  --bg:#0a0a0a; --surface:#121212; --raised:#1a1a1a; --line:#262626; --border:#404040;
+  --text:#e5e5e5; --muted:#a3a3a3; --faint:#737373;
+  --accent:#f97316; --accent-soft:rgba(249,115,22,.14);
+  --up:#22c55e; --down:#ef4444; --info:#3b82f6; --warn:#eab308;
+  --up-soft:rgba(34,197,94,.14); --down-soft:rgba(239,68,68,.14); --warn-soft:rgba(234,179,8,.14); --info-soft:rgba(59,130,246,.14);
+  --font:'Segoe UI', system-ui, -apple-system, Roboto, sans-serif;
+  --mono:'Cascadia Code','JetBrains Mono',Consolas,ui-monospace,monospace;
+  --r:10px;
+}
+html,body{height:auto}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.45;padding-inline:16px;padding-block:12px 28px}
+*{box-sizing:border-box}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.up{color:var(--up)} .down{color:var(--down)} .muted{color:var(--muted)} .faint{color:var(--faint)}
+button{font:inherit;color:inherit}
+button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1600px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+
+/* top bar */
+.topbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px;padding:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:.02em}
+.brand .mark{width:10px;height:10px;border-radius:2px;background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.contract{font-size:16px;font-weight:600}
+.contract small{font-weight:400;color:var(--muted);margin-left:6px;font-size:12px}
+.price{font-size:24px;font-weight:600;color:var(--info)}
+.stat{display:flex;flex-direction:column;gap:1px;min-width:0}
+.stat .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--faint)}
+.stat .v{font-size:13px}
+.badges{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:11.5px;font-weight:600;letter-spacing:.04em;border:1px solid transparent;white-space:nowrap}
+.pill .dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.pill.live{color:var(--up);background:var(--up-soft)}
+.pill.paper{color:var(--accent);background:var(--accent-soft)}
+.pill.demo{color:var(--warn);background:var(--warn-soft)}
+.pill.risk{color:var(--down);background:var(--down-soft)}
+.pill.info{color:var(--info);background:var(--info-soft)}
+.pill.neutral{color:var(--muted);background:var(--raised);border-color:var(--line)}
+
+/* main grid */
+.main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;align-items:start}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);min-width:0}
+.panel-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:9px 12px;border-bottom:1px solid var(--line)}
+.panel-h h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0}
+.seg{display:inline-flex;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:2px;gap:2px}
+.seg button{background:none;border:0;border-radius:6px;padding:4px 9px;font-size:12px;color:var(--muted);cursor:pointer;min-height:28px}
+.seg button[aria-pressed="true"]{background:var(--raised);color:var(--text);box-shadow:inset 0 0 0 1px var(--border)}
+.seg button:disabled{opacity:.35;cursor:not-allowed}
+.toggles{display:flex;flex-wrap:wrap;gap:4px}
+.tg{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-size:11.5px;cursor:pointer;color:var(--faint);min-height:26px;display:inline-flex;align-items:center;gap:6px}
+.tg i{width:10px;height:2px;border-radius:1px;background:currentColor;display:inline-block}
+.tg[aria-pressed="true"]{color:var(--text);border-color:var(--border)}
+.spacer{flex:1}
+
+.chart-wrap{position:relative;height:680px}
+#chart{position:absolute;inset:0}
+.zone-labels{position:absolute;top:8px;left:0;right:0;height:0;pointer-events:none;z-index:3}
+.zl{position:absolute;top:0;font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);white-space:nowrap}
+.now-line{position:absolute;top:0;width:0;border-left:1px dashed var(--accent);pointer-events:none;z-index:3}
+.now-line b{position:absolute;top:26px;left:-18px;background:var(--accent);color:#0a0a0a;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;letter-spacing:.06em}
+.fc-zone{position:absolute;top:0;pointer-events:none;z-index:2;background:repeating-linear-gradient(135deg,rgba(249,115,22,.05) 0 6px,transparent 6px 12px);border-left:1px solid rgba(249,115,22,.25)}
+.legend{position:absolute;left:10px;top:30px;z-index:4;font-size:11.5px;display:flex;flex-wrap:wrap;gap:4px 12px;max-width:calc(100% - 80px);pointer-events:none;background:rgba(10,10,10,.6);padding:4px 8px;border-radius:6px}
+.legend span{white-space:nowrap}
+.pane-tag{position:absolute;left:10px;z-index:4;font-size:10.5px;color:var(--faint);letter-spacing:.08em;text-transform:uppercase;pointer-events:none}
+
+/* indicator strip */
+.ind-strip{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:1px;background:var(--line);border-top:1px solid var(--line);border-radius:0 0 var(--r) var(--r);overflow:hidden}
+.ind{background:var(--surface);padding:9px 10px;display:flex;flex-direction:column;gap:3px;min-width:0;position:relative}
+.ind::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--state,transparent)}
+.ind .n{font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--muted);display:flex;justify-content:space-between;gap:6px}
+.ind .n em{font-style:normal;font-weight:400;color:var(--faint)}
+.ind .now{font-size:14px}
+.ind .fc{font-size:12px;display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
+.ind .fc span.lbl{font-size:10px;color:var(--faint);letter-spacing:.06em}
+.ind .rg{font-size:10.5px;color:var(--faint)}
+
+/* side column */
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{padding:12px;display:flex;flex-direction:column;gap:10px}
+.card-t{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.card-t h3{margin:0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:12.5px}
+.kv dt{color:var(--faint)} .kv dd{margin:0;text-align:right}
+.agent-row{display:flex;gap:10px;align-items:center}
+.avatar{width:34px;height:34px;border-radius:8px;background:var(--raised);border:1px solid var(--border);display:grid;place-items:center;font-family:var(--mono);font-size:11px;color:var(--accent);flex:none}
+.agent-row .who{display:flex;flex-direction:column;min-width:0}
+.agent-row .who b{font-size:13px}
+.agent-row .who span{font-size:11.5px;color:var(--muted)}
+.subs{display:grid;grid-template-columns:1fr auto auto;gap:4px 10px;font-size:11.5px;align-items:center}
+.subs .st{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:6px}
+.reason{font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;color:var(--muted)}
+.reason b{color:var(--text);font-weight:600}
+.gauge{height:8px;border-radius:4px;background:var(--bg);border:1px solid var(--line);position:relative;overflow:hidden}
+.gauge > i{position:absolute;top:0;bottom:0;left:0;border-radius:4px}
+.dist{display:flex;flex-direction:column;gap:6px}
+.dist .row{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted)}
+.prob{display:flex;align-items:center;gap:10px}
+.prob .big{font-size:26px;font-weight:600}
+.prob .bar{flex:1;height:10px;border-radius:5px;background:linear-gradient(90deg,var(--down) 0 50%,var(--up) 50% 100%);opacity:.25;position:relative}
+.prob .bar i{position:absolute;top:-4px;width:2px;height:18px;background:var(--text);border-radius:1px}
+.act{display:flex;gap:8px;flex-wrap:wrap}
+.btn{background:var(--raised);border:1px solid var(--border);border-radius:8px;padding:0 12px;min-height:36px;font-size:12.5px;font-weight:600;cursor:pointer}
+.btn.warn{color:var(--warn)} .btn.danger{color:var(--down)}
+.btn[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+
+/* bottom */
+.bottom{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start}
+@media (min-width:1700px){.bottom{grid-template-columns:minmax(0,1fr) 360px}}
+.tabs{display:flex;gap:2px;flex-wrap:wrap}
+.tab{background:none;border:0;border-bottom:2px solid transparent;padding:6px 10px;font-size:13px;color:var(--muted);cursor:pointer;min-height:34px;display:inline-flex;gap:6px;align-items:center}
+.tab .c{font-family:var(--mono);font-size:11px;background:var(--raised);border-radius:999px;padding:0 6px;color:var(--faint)}
+.tab[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+.tab[aria-selected="true"] .c{color:var(--accent)}
+select{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font-size:12px;min-height:30px}
+.tbl-wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--faint);text-align:right;padding:8px 8px;border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0;background:var(--surface)}
+td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child,th.l,td.l{text-align:left}
+tbody tr:hover{background:var(--raised)}
+tr.liq td{background:rgba(239,68,68,.05)}
+.side-tag{font-weight:700;font-size:11.5px;padding:1px 6px;border-radius:4px}
+.side-tag.long{color:var(--up);background:var(--up-soft)} .side-tag.short{color:var(--down);background:var(--down-soft)}
+.st-tag{font-size:11px;font-weight:600;padding:1px 7px;border-radius:4px;border:1px solid var(--line);color:var(--muted)}
+.st-tag.open{color:var(--info);border-color:rgba(59,130,246,.4)}
+.st-tag.tp{color:var(--up);border-color:rgba(34,197,94,.4)}
+.st-tag.sl{color:var(--down);border-color:rgba(239,68,68,.35)}
+.st-tag.liq{color:#0a0a0a;background:var(--down);border-color:var(--down)}
+.prof{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.prof.p3{color:var(--down)}
+.summary{display:flex;flex-wrap:wrap;gap:6px 22px;padding:10px 12px;border-top:1px solid var(--line);font-size:12.5px}
+.summary span b{font-weight:600}
+.pcards{display:none;flex-direction:column;gap:8px;padding:10px}
+.pcard{border:1px solid var(--line);border-radius:8px;padding:10px;display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:12.5px;background:var(--bg)}
+.pcard .top{grid-column:1/-1;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.feed{list-style:none;margin:0;padding:6px 0;max-height:360px;overflow:auto}
+.feed li{display:grid;grid-template-columns:44px 1fr;gap:8px;padding:7px 12px;border-bottom:1px solid var(--line);font-size:12px}
+.feed time{font-family:var(--mono);color:var(--faint);font-size:11px;padding-top:1px}
+.feed .who{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:600}
+.feed p{margin:2px 0 0;color:var(--muted)}
+.note{font-size:11.5px;color:var(--faint);padding:0 2px;max-width:none}
+.note b{color:var(--warn);font-weight:600}
+
+@media (max-width:1180px){
+  .main,.bottom{grid-template-columns:minmax(0,1fr)}
+  .side{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+  .ind-strip{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media (max-width:640px){
+  body{padding-inline:12px}
+  .topbar{position:static}
+  .badges{margin-left:0}
+  .chart-wrap{height:min(62vh,520px)}
+  .ind-strip{display:flex;overflow-x:auto;scroll-snap-type:x mandatory}
+  .ind{min-width:150px;scroll-snap-align:start}
+  .tbl-wrap{display:none}
+  .pcards{display:flex}
+  .legend{display:none}
+  .side{grid-template-columns:minmax(0,1fr)}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="topbar" aria-label="Состояние рынка">
+    <div class="brand"><span class="mark" aria-hidden="true"></span>WORED · Trader</div>
+    <div class="contract">BTC-USDT <small>Perpetual · Isolated</small></div>
+    <div class="stat"><span class="k">Last</span><span class="v num price" id="tLast">—</span></div>
+    <div class="stat"><span class="k">Bid / Ask</span><span class="v num" id="tBook">—</span></div>
+    <div class="stat"><span class="k">24ч</span><span class="v num" id="t24">—</span></div>
+    <div class="stat"><span class="k">24ч high / low</span><span class="v num" id="tHL">—</span></div>
+    <div class="stat"><span class="k">Funding · до расчёта</span><span class="v num" id="tFund">—</span></div>
+    <div class="badges">
+      <span class="pill live"><span class="dot"></span>HTX snapshot 16.09 14:31 UTC</span>
+      <span class="pill paper">PAPER</span>
+      <span class="pill demo">МАКЕТ</span>
+    </div>
+  </header>
+
+  <section class="main">
+    <div class="panel">
+      <div class="panel-h">
+        <h2>График</h2>
+        <div class="seg" role="group" aria-label="Таймфрейм">
+          <button disabled>1m</button><button disabled>15m</button><button aria-pressed="true">1H</button><button disabled>4H</button>
+        </div>
+        <div class="toggles" id="overlayToggles" role="group" aria-label="Индикаторы на графике"></div>
+        <span class="spacer"></span>
+        <div class="toggles">
+          <button class="tg" id="tgCompare" aria-pressed="false"><i style="color:var(--accent)"></i>Прогноз vs факт</button>
+          <button class="tg" id="tgNow" aria-pressed="false">↦ Сейчас</button>
+        </div>
+      </div>
+      <div class="chart-wrap" id="chartWrap">
+        <div id="chart"></div>
+        <div class="fc-zone" id="fcZone"></div>
+        <div class="now-line" id="nowLine"><b>NOW</b></div>
+        <div class="zone-labels" aria-hidden="true">
+          <span class="zl" id="zlHist">История</span>
+          <span class="zl" id="zlNow">Сейчас</span>
+          <span class="zl" id="zlFc" style="color:var(--accent)">Прогноз</span>
+        </div>
+        <div class="legend" id="legend"></div>
+        <div class="pane-tag" id="tagVol">VOL · BTC</div>
+        <div class="pane-tag" id="tagMacd">MACD 12 26 9</div>
+        <div class="pane-tag" id="tagKdj">KDJ 9 3 3</div>
+      </div>
+      <div class="ind-strip" id="indStrip" aria-label="Индикаторы: сейчас и прогноз на час"></div>
+    </div>
+
+    <aside class="side">
+      <section class="panel card">
+        <div class="card-t"><h3>Агент-трейдер</h3><span class="pill live" id="modePill"><span class="dot"></span>TRADE</span></div>
+        <div class="agent-row">
+          <div class="avatar">GLM</div>
+          <div class="who"><b>Trader-Supervisor</b><span>Hermes · wored-trader · glm-5.2</span></div>
+        </div>
+        <div class="subs" id="subs"></div>
+        <div class="reason" id="reason"></div>
+        <div class="act">
+          <button class="btn warn" id="btnReduce" aria-pressed="false">Только закрытие</button>
+          <button class="btn danger" id="btnPause" aria-pressed="false">Пауза</button>
+        </div>
+      </section>
+
+      <section class="panel card">
+        <div class="card-t"><h3>План часа</h3><span class="pill neutral num" id="planValid">до 15:05 UTC</span></div>
+        <dl class="kv" id="planKv"></dl>
+      </section>
+
+      <section class="panel card">
+        <div class="card-t"><h3>Прогноз t+1</h3><span class="pill demo">демо-модель</span></div>
+        <div class="prob"><span class="big num" id="pUp">—</span><div class="bar"><i id="pUpMark"></i></div></div>
+        <dl class="kv" id="fcKv"></dl>
+      </section>
+
+      <section class="panel card">
+        <div class="card-t"><h3>Риск позиции</h3><span class="pill info">P1 · 100x</span></div>
+        <div class="dist" id="riskDist"></div>
+        <dl class="kv" id="riskKv"></dl>
+      </section>
+
+      <section class="panel card">
+        <div class="card-t"><h3>Бюджет LLM</h3><span class="pill neutral">Ollama Pro</span></div>
+        <div class="dist" id="budget"></div>
+      </section>
+    </aside>
+  </section>
+
+  <section class="bottom">
+    <div class="panel">
+      <div class="panel-h">
+        <div class="tabs" role="tablist" id="posTabs"></div>
+        <span class="spacer"></span>
+        <label class="faint" for="fAcc" style="font-size:11px">Счёт</label>
+        <select id="fAcc"><option value="all">все auto</option><option value="P0">auto_p0</option><option value="P1">auto_p1</option><option value="P2">auto_p2</option><option value="P3">auto_p3</option></select>
+        <label class="faint" for="fSide" style="font-size:11px">Сторона</label>
+        <select id="fSide"><option value="all">все</option><option value="long">Long</option><option value="short">Short</option></select>
+        <label class="faint" for="fRes" style="font-size:11px">Итог</label>
+        <select id="fRes"><option value="all">все</option><option value="win">прибыль</option><option value="loss">убыток</option></select>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th class="l">Открыта</th><th class="l">Счёт</th><th class="l">Сторона</th><th>Плечо</th><th>Маржа</th><th>Размер</th><th>Вход</th><th>Mark / выход</th><th>Ликв.</th><th>TP / SL</th><th>PnL</th><th>Комиссии</th><th>Net</th><th class="l">Статус</th><th>Длит.</th>
+          </tr></thead>
+          <tbody id="posBody"></tbody>
+        </table>
+      </div>
+      <div class="pcards" id="posCards"></div>
+      <div class="summary" id="posSummary"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-h"><h2>Лента решений</h2><span class="spacer"></span><span class="pill neutral">UTC</span></div>
+      <ul class="feed" id="feed"></ul>
+    </div>
+  </section>
+
+  <p class="note"><b>Макет.</b> Свечи — реальные данные HTX BTC-USDT perpetual (API, 07.09–16.09.2026, последняя свеча не закрыта). Прогноз построен упрощённой формулой макета (EWMA-σ и наклон EMA), это не торговая модель. Сделки, план, агенты и бюджет — демонстрационные: сделки смоделированы на тех же часовых свечах по правилам профилей P0–P3 из ТЗ. Не является инвестиционной рекомендацией.</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+const RAW = {"ts":1789569068299,"merged":{"bid":75741.7,"ask":75741.8,"last":75758.9,"open24":76470.1,"high24":77325.4,"low24":74899.9,"amount24":7377.642,"ts":1789569068454},"rows":[[1788778800,79307.2,79429.8,79228.8,79379,100.45,7966830],[1788782400,79372.8,79571.5,79353.4,79560.7,88.61,7042423],[1788786000,79547.4,79589.9,79257.3,79307.4,139.4,11074656],[1788789600,79307.4,79346.9,78906,79156.7,242.782,19200325],[1788793200,79156.7,79156.8,78638,78768.4,407.456,32120713],[1788796800,78768.3,78987.4,78768.3,78969.4,143.414,11312079],[1788800400,78969.4,79172.9,78962.5,79136.1,253.748,20069908],[1788804000,79136,79191.3,79050.1,79149.5,64.262,5084589],[1788807600,79149.4,79358.3,79111.4,79310.4,122.544,9709507],[1788811200,79318.2,79340.7,79125,79182.7,69.84,5529967],[1788814800,79182.7,79224.8,79115,79115,49.144,3890094],[1788818400,79111.9,79161.6,78708.1,78904.4,111.574,8811890],[1788822000,78898.4,79167,78886.9,79086.8,88.376,6985498],[1788825600,79073.1,79266.2,78937.5,79266.2,132.43,10475203],[1788829200,79264,79413,79217.7,79386.5,193.922,15380478],[1788832800,79386.4,79440.3,78905,78905,173.01,13695943],[1788836400,78909.7,78969.5,78695.1,78883.2,186.024,14668767],[1788840000,78876,78890,78647,78647.1,130.518,10279794],[1788843600,78647.1,78844.4,78500.3,78540.6,242.026,19039645],[1788847200,78548.8,78598.2,78230.6,78287.1,367.034,28781386],[1788850800,78299.7,78560,78144.3,78435.3,186.98,14646839],[1788854400,78435.3,78548.4,78249.4,78384.8,221.694,17388515],[1788858000,78380.5,78742.3,78307.4,78701.7,397.914,31235914],[1788861600,78699.8,78949.8,78529.7,78529.7,335.958,26453197],[1788865200,78523.9,78523.9,78245.1,78384.1,194.038,15207146],[1788868800,78384,78444,78184,78395.6,208.712,16344038],[1788872400,78419.1,78517.8,77608,77930.1,539.74,42092711],[1788876000,77927.9,78566.3,77839.7,78519.9,357.9,28008353],[1788879600,78519.9,78850,78410.7,78850,387.932,30489166],[1788883200,78850,78921,78530.4,78680.2,306.654,24140156],[1788886800,78680.2,78844.3,78457.6,78460,88.142,6926801],[1788890400,78459,78767.3,78234.4,78410.5,128.734,10098732],[1788894000,78402,78487.9,78286.1,78400,132.55,10390232],[1788897600,78421.2,78584.8,78375.7,78466.6,205.996,16173006],[1788901200,78445.6,78571,78385,78452.9,296.18,23246016],[1788904800,78452.9,78624,78427.8,78533,151.782,11916053],[1788908400,78526,78532.2,78376.2,78420,65.828,5162630],[1788912000,78420,78747,78420,78732.7,67.018,5269597],[1788915600,78732.8,78842.5,78593.5,78842.4,130.772,10296402],[1788919200,78844.3,78875,78650.1,78689.6,102.41,8064702],[1788922800,78680.1,78680.2,78530.8,78611.7,161.59,12697065],[1788926400,78618,79178.8,78617.9,79130.7,333.584,26345559],[1788930000,79130.8,79333,78805.5,78878.4,403.868,31964453],[1788933600,78919,79252.6,78832,79120,107.96,8534944],[1788937200,79114.8,79353.6,79114.7,79235.1,88.808,7035909],[1788940800,79235.2,79723.8,79224.3,79657.2,350.832,27897550],[1788944400,79670.9,79670.9,78870.2,78927.5,260.802,20639420],[1788948000,78935.7,79148.9,78833.1,78881.6,149.062,11773066],[1788951600,78881.6,79344.2,78714.4,79294.4,199.634,15775288],[1788955200,79288.9,79613.5,79251.7,79542.7,235.082,18674017],[1788958800,79559.3,79631.6,79066.1,79091.9,530.944,42132591],[1788962400,79092,79374,78856,78923.5,414.846,32789708],[1788966000,78934.1,79367.9,78039.5,78556.4,829.342,65077009],[1788969600,78564.4,78889.3,78424.8,78773,195.194,15355250],[1788973200,78772.9,78885.7,78632.2,78747.2,90.032,7090280],[1788976800,78742.9,78759.3,78377.6,78383.8,70.578,5540517],[1788980400,78374.1,78540,78119.7,78189.9,97.252,7619081],[1788984000,78195.9,78308.4,77900,78296.7,142.192,11108252],[1788987600,78284.5,78304.8,77968.1,78114.3,100.03,7816720],[1788991200,78117.1,78164.7,77720,77895.6,262.794,20457698],[1788994800,77888.7,78275,77888.7,78274.9,111.036,8678182],[1788998400,78275,78342.6,78065.9,78153.9,186.304,14569729],[1789002000,78136.7,78461.6,77921,78069.2,207.142,16188515],[1789005600,78058.7,78324.7,77950,78312.2,93.776,7329780],[1789009200,78324.7,78490.6,78255.2,78303.1,322.594,25276052],[1789012800,78303.1,78409.8,78281,78379.8,81.374,6375116],[1789016400,78379.8,78532.5,78256.4,78499.7,170.674,13385524],[1789020000,78518.6,78518.6,78132.5,78413.7,225.884,17680217],[1789023600,78413.7,78413.7,77893.1,78096.7,248.586,19407658],[1789027200,78096.7,78148,78020.5,78093.3,138.474,10813711],[1789030800,78093.4,78209.2,77912.7,77970,106.33,8299296],[1789034400,77957.7,78021.5,77779.1,77846.1,162.334,12643586],[1789038000,77846,78030.3,77661.6,77818,279.23,21736928],[1789041600,77816.2,77952.5,76626.8,76885.1,1266.18,97762619],[1789045200,76885.1,77217.6,76728.3,77145.4,349.768,26919467],[1789048800,77145.4,77398.5,76936.1,77375.3,258.766,19977862],[1789052400,77375.2,77375.2,77060.9,77217,130.302,10062076],[1789056000,77217,77280.7,76788,77176.7,174.274,13425532],[1789059600,77176.7,77514.3,77106.6,77305.7,168.594,13033339],[1789063200,77286,77300.5,76956,77225.3,128.824,9931017],[1789066800,77225.3,77271.7,77063.5,77132.4,99.282,7661192],[1789070400,77152.5,77313,77088.1,77245.5,45.286,3497492],[1789074000,77245.6,77271,77076.4,77119,50.47,3894688],[1789077600,77110,77181.1,76805,76821.5,139.744,10751089],[1789081200,76821.6,76853,76433.3,76544.5,352.228,26982686],[1789084800,76552.6,76917.2,76549.7,76892.4,114.938,8820745],[1789088400,76881.4,76979.2,76650.2,76947.8,123.262,9470690],[1789092000,76948,76990.1,76745.3,76819.1,77.762,5975786],[1789095600,76806.1,76869,76680.1,76857.7,97.176,7461498],[1789099200,76857.8,77166.1,76857.8,77092.3,85.08,6552963],[1789102800,77078.1,77225,77036.6,77224.9,105.1,8103600],[1789106400,77225,77388,77134.4,77251.1,122.092,9432218],[1789110000,77251.1,77363,77166.7,77200.1,94.068,7269659],[1789113600,77183,77452.8,77106.6,77314.7,188.772,14591718],[1789117200,77314.7,77329.5,76831.4,77016.2,231.596,17840157],[1789120800,77016.2,77133.4,76950,77005.7,154.114,11871428],[1789124400,76982.7,77021.1,76732.8,77021.1,205.85,15819424],[1789128000,77021.1,78080,76000,77983,1476.634,113900810],[1789131600,77988,79300,77229.7,79203.2,1327.606,103882873],[1789135200,79199.3,79863.1,78465.7,78749.8,1183.384,93561572],[1789138800,78765.5,78803.9,77267.4,77697.9,572.23,44704870],[1789142400,77697.9,78024.1,77350.1,77898.2,497.338,38654564],[1789146000,77884.5,77929.1,77459.3,77509.1,176.792,13736288],[1789149600,77502.9,77502.9,76859,77018,263.518,20316645],[1789153200,77027,77346.4,76984.2,77294.2,185.25,14299624],[1789156800,77257.2,77463.1,77171.5,77313.6,82.142,6354528],[1789160400,77305.5,77395,77054.7,77082,81.868,6319803],[1789164000,77090.5,77199.5,76949.6,77118.2,176.252,13586494],[1789167600,77124.5,77206.8,77102,77206.8,70.4,5431890],[1789171200,77207.8,77297.1,77181.5,77265.6,87.22,6737719],[1789174800,77264.6,77347,77232.1,77255,43.004,3323602],[1789178400,77251,77294,77189.9,77274.9,35.624,2751367],[1789182000,77250.6,77309.4,77208.1,77240.8,46.672,3605841],[1789185600,77240.7,77287,77200.1,77203.1,76.224,5886900],[1789189200,77200,77229.2,77145.3,77207.2,68.768,5308377],[1789192800,77195.8,77326.6,77182.8,77273.1,39.08,3019311],[1789196400,77273.2,77310.9,77241,77241,20.93,1617201],[1789200000,77241.1,77329.9,77241.1,77306.8,57.672,4457814],[1789203600,77322.9,77348.1,77285.6,77309.5,80.172,6198958],[1789207200,77312.7,77364.2,77280.9,77298.5,47.238,3653595],[1789210800,77298.6,77324.8,77263.2,77324.8,26.368,2038122],[1789214400,77324.8,77330.9,77267.8,77304.9,24.314,1879462],[1789218000,77304.9,77366,77223.3,77330.5,103.986,8036143],[1789221600,77338,77476.8,77338,77426.2,47.138,3649312],[1789225200,77430.1,77442.9,77339.2,77354.6,78.846,6101273],[1789228800,77354.6,77381.4,77309.7,77332.9,56.182,4345280],[1789232400,77332.9,77361.6,77158,77187.2,64.054,4948728],[1789236000,77187.1,77192.7,77105.1,77132.4,72.718,5610137],[1789239600,77124.8,77166.6,77046.3,77109.5,97.718,7534915],[1789243200,77109.5,77193.6,77109.5,77143,32,2469378],[1789246800,77143,77247,77139.3,77238.9,50.822,3922748],[1789250400,77238.8,77276,77172.1,77209.3,81.718,6310234],[1789254000,77209.3,77263.2,77209.2,77258.8,15.776,1218395],[1789257600,77258.7,77279.9,77148.6,77254.8,34.702,2679949],[1789261200,77254.8,77327.4,77237.8,77296.4,98.456,7608950],[1789264800,77296.4,77299.3,77236.7,77283.8,37.092,2866051],[1789268400,77283.8,77301.5,77177.6,77184,42.196,3258769],[1789272000,77172,77239.3,77172,77192.7,29.582,2284124],[1789275600,77192.7,77301.2,77192.6,77301.1,12.832,991332],[1789279200,77301.1,77301.2,77040.5,77099.8,64.91,5010609],[1789282800,77099.7,77148.3,77077,77099.4,58.48,4510022],[1789286400,77099.8,77155.2,76735.3,76793,225.26,17323475],[1789290000,76796.6,76879.5,76545.2,76790.6,164.586,12624560],[1789293600,76790.5,76798.2,76612.2,76642.8,77.602,5953803],[1789297200,76651.5,76782.4,76482.9,76758.2,107.634,8248373],[1789300800,76764.8,76838.3,76670.1,76742.4,92.29,7084680],[1789304400,76729.5,76900,76541.3,76827.3,137.092,10512842],[1789308000,76827.4,77222.4,76827.3,77182.2,178.822,13779432],[1789311600,77182.2,77183.1,76980.2,77099.2,97.444,7509747],[1789315200,77099.3,77325.1,77099.3,77254.9,99.268,7665420],[1789318800,77254.9,77387.6,77211.9,77306.7,66.268,5122265],[1789322400,77299.3,77350,77276.4,77314.1,28.148,2176278],[1789326000,77314.1,77369.3,77190.5,77240.1,45.072,3482911],[1789329600,77250.2,77330,77225.3,77318.5,42.488,3284039],[1789333200,77302.4,77417.5,77277.5,77281.1,44.408,3434284],[1789336800,77280,77280,76640,76686.6,276.18,21226043],[1789340400,76698.5,76839,76602.3,76833.9,131.404,10084506],[1789344000,76814.7,77056.6,76362,76798.5,211.372,16214687],[1789347600,76781.2,77129.6,76632,77089.5,106.064,8151491],[1789351200,77088.5,77684.2,77000,77566.4,371.176,28750335],[1789354800,77566.5,77824.9,77468.7,77558.6,164.276,12759506],[1789358400,77558.5,77668.5,77506,77647.9,88.484,6865274],[1789362000,77640.3,77649.1,77456.3,77555.9,58.66,4547954],[1789365600,77564.4,77855,77343,77556,182.498,14168293],[1789369200,77550,77834.8,77489.1,77834.8,97.098,7547806],[1789372800,77834.7,77952.7,77618.9,77686,153.862,11964515],[1789376400,77688.1,78326,77557.5,78084.8,325.266,25350696],[1789380000,78099.6,78119.1,77863.1,77864.3,92.836,7237305],[1789383600,77863,77886.8,77651.5,77726.1,116.01,9021390],[1789387200,77733.8,78035.1,77577.6,77659.4,150.678,11718428],[1789390800,77659.3,78451,77442,78138.4,384.492,29986832],[1789394400,78130.2,78657.2,78130.2,78483.6,479.114,37569633],[1789398000,78464.2,78642.9,78262,78541.5,226.012,17730962],[1789401600,78537.7,78855.4,78384.3,78723.7,304.952,24003177],[1789405200,78723.7,78989,78666,78881.4,251.566,19827904],[1789408800,78881.5,79284.3,78785.3,79174.8,317.994,25141134],[1789412400,79174.8,79180.9,78905.1,78931.4,116.866,9235270],[1789416000,78940.6,79557,78940.6,79047.7,307.01,24359717],[1789419600,79056.1,79058.6,78708.7,78708.7,164.498,12967892],[1789423200,78733.5,78812.4,78469.2,78511.6,151.502,11905120],[1789426800,78511.6,78513.6,78093.7,78162.1,154.244,12080077],[1789430400,78162,78200.1,77913.5,77931.2,233.83,18240602],[1789434000,77931.2,78055.6,77714.2,77881.1,233.864,18221492],[1789437600,77881.1,77990.6,77769.6,77883.9,126.746,9871213],[1789441200,77883.9,77883.9,77622.7,77644,132.446,10295960],[1789444800,77644,77705.7,77518.9,77558.5,111.918,8684545],[1789448400,77545.1,77642.3,77268.5,77606.8,234.352,18150212],[1789452000,77632.3,77700,77165.4,77252.1,166.692,12902470],[1789455600,77257.2,77289.5,76850,76899.9,257.31,19836872],[1789459200,76900,76969.8,76672.3,76969.8,258.3,19839618],[1789462800,76969.7,77035.9,76837.9,76956.5,129.204,9942074],[1789466400,76973.2,77150.8,76841.6,77019.3,182.048,14023989],[1789470000,77019.5,77187.2,76812,76915.5,145.9,11226466],[1789473600,76900.5,77113.4,76833.1,76921.8,100.49,7733784],[1789477200,76929.1,77101.4,76078.8,76599.9,455.06,34782366],[1789480800,76600,76672.2,75575,75904.1,593.058,45073594],[1789484400,75915.5,76563.7,75812,76470.1,274.502,20925717],[1789488000,76470.1,76536,76238.2,76370.4,933.14,71273437],[1789491600,76378.2,77325.4,76181.3,76941.3,770.85,59045609],[1789495200,76933.2,77164.4,74899.9,75975.2,1578.65,119983730],[1789498800,75987.9,76304.5,75805.8,76129.4,269.424,20484844],[1789502400,76157.7,76218.4,75589.3,75916.6,161.198,12231950],[1789506000,75916.6,75938.2,75378.9,75441,216.324,16365817],[1789509600,75434.2,75713.1,75112.9,75635.1,487.738,36748417],[1789513200,75635.2,75908.4,75538.6,75603.9,131.738,9976798],[1789516800,75612.5,75878.4,75555.8,75762.7,112.456,8515580],[1789520400,75758,75924,75436.7,75465.6,160.82,12165202],[1789524000,75457.8,76075.8,75451.5,75846.1,151.166,11467869],[1789527600,75846.1,76046.3,75742.7,75796,83.884,6363846],[1789531200,75796.1,75984.2,75780.1,75834.2,120.21,9119276],[1789534800,75834.2,75943.3,75650,75932.7,101.144,7668961],[1789538400,75943.3,75998.9,75800,75998.9,74.152,5630577],[1789542000,75990.7,76060.1,75700.3,75731.1,116.234,8813644],[1789545600,75723.6,75723.6,75315.8,75696.9,212.446,16044829],[1789549200,75699.9,75948.6,75699.9,75933.6,110.09,8349910],[1789552800,75948.3,75998,75868.1,75945.3,121.912,9258110],[1789556400,75949.9,76265.3,75846.2,76221,218.288,16609125],[1789560000,76220.9,76265.3,75756.1,75932,190.12,14446327],[1789563600,75921.8,75921.8,75563.4,75619.3,196.808,14902119],[1789567200,75619.3,75806.9,75413,75757.1,128.374,9705837]]};
+const LWC = window.LightweightCharts;
+const F_T = 0.0006, MMR = 0.0028, CS = 0.001, HALF_SPREAD = 0.05;
+const bars = RAW.rows.map(r => ({time:r[0], open:r[1], high:r[2], low:r[3], close:r[4], amount:r[5], turnover:r[6]}));
+const N = bars.length, last = bars[N-1];
+const fmt = (v, d=1) => v==null||!isFinite(v) ? '—' : v.toLocaleString('ru-RU',{minimumFractionDigits:d, maximumFractionDigits:d});
+const fmtUsd = (v, d=2) => (v>0?'+':v<0?'−':'') + Math.abs(v).toFixed(d);
+const pct = (v, d=2) => (v>0?'+':v<0?'−':'') + Math.abs(v*100).toFixed(d) + '%';
+const hhmm = t => new Date(t*1000).toISOString().slice(11,16);
+const ddhh = t => { const s=new Date(t*1000).toISOString(); return s.slice(8,10)+'.'+s.slice(5,7)+' '+s.slice(11,16); };
+
+/* ---------- indicators ---------- */
+function sma(a,n){ const o=Array(a.length).fill(null); let s=0; for(let i=0;i<a.length;i++){ s+=a[i]; if(i>=n) s-=a[i-n]; if(i>=n-1) o[i]=s/n; } return o; }
+function ema(a,n){ const o=Array(a.length).fill(null); const k=2/(n+1); let e=null; for(let i=0;i<a.length;i++){ if(i===n-1){ e=a.slice(0,n).reduce((x,y)=>x+y,0)/n; o[i]=e; } else if(i>=n){ e=a[i]*k+e*(1-k); o[i]=e; } } return o; }
+function boll(a,n=20,m=2){ const mid=sma(a,n), up=[], dn=[]; for(let i=0;i<a.length;i++){ if(mid[i]==null){up.push(null);dn.push(null);continue;} let v=0; for(let j=i-n+1;j<=i;j++) v+=(a[j]-mid[i])**2; const sd=Math.sqrt(v/n); up.push(mid[i]+m*sd); dn.push(mid[i]-m*sd);} return {mid,up,dn}; }
+function sar(b,step=0.02,max=0.2){ const o=Array(b.length).fill(null); if(b.length<2) return o; let up=b[1].close>=b[0].close, af=step, ep=up?b[0].high:b[0].low, s=up?b[0].low:b[0].high;
+  for(let i=1;i<b.length;i++){ s=s+af*(ep-s);
+    if(up){ s=Math.min(s,b[i-1].low, i>1?b[i-2].low:b[i-1].low); if(b[i].low<s){ up=false; s=ep; ep=b[i].low; af=step; } else if(b[i].high>ep){ ep=b[i].high; af=Math.min(af+step,max); } }
+    else { s=Math.max(s,b[i-1].high, i>1?b[i-2].high:b[i-1].high); if(b[i].high>s){ up=true; s=ep; ep=b[i].high; af=step; } else if(b[i].low<ep){ ep=b[i].low; af=Math.min(af+step,max); } }
+    o[i]=s; } return o; }
+function avl(b){ const o=[]; let day=null, t=0, a=0; for(const x of b){ const d=Math.floor(x.time/86400); if(d!==day){day=d;t=0;a=0;} t+=x.turnover; a+=x.amount; o.push(a>0?t/a:null);} return o; }
+function macd(a){ const e12=ema(a,12), e26=ema(a,26); const dif=a.map((_,i)=>e12[i]!=null&&e26[i]!=null?e12[i]-e26[i]:null); const start=dif.findIndex(v=>v!=null); const dea=Array(a.length).fill(null); const tail=ema(dif.slice(start),9); tail.forEach((v,i)=>dea[start+i]=v); const hist=dif.map((v,i)=>v!=null&&dea[i]!=null?v-dea[i]:null); return {dif,dea,hist}; }
+function kdj(b,n=9){ const K=[],D=[],J=[]; let k=50,d=50; for(let i=0;i<b.length;i++){ if(i<n-1){K.push(null);D.push(null);J.push(null);continue;} let hh=-Infinity,ll=Infinity; for(let j=i-n+1;j<=i;j++){hh=Math.max(hh,b[j].high);ll=Math.min(ll,b[j].low);} const rsv=hh>ll?(b[i].close-ll)/(hh-ll)*100:50; k=2/3*k+rsv/3; d=2/3*d+k/3; K.push(k);D.push(d);J.push(3*k-2*d);} return {K,D,J}; }
+function computeAll(b){ const c=b.map(x=>x.close); return { ma7:sma(c,7), ma25:sma(c,25), ma99:sma(c,99), ema7:ema(c,7), ema25:ema(c,25), ema99:ema(c,99), boll:boll(c), sar:sar(b), avl:avl(b), macd:macd(c), kdj:kdj(b), vol5:sma(b.map(x=>x.amount),5) }; }
+
+/* ---------- demo forecast (EWMA sigma + EMA slope) ---------- */
+function demoForecast(b, steps=3){
+  const r=[]; for(let i=1;i<b.length;i++) r.push(Math.log(b[i].close/b[i-1].close));
+  let v=r.slice(0,24).reduce((s,x)=>s+x*x,0)/24; for(let i=24;i<r.length;i++) v=0.94*v+0.06*r[i]*r[i];
+  const sig=Math.sqrt(v); const c=b.map(x=>x.close); const e7=ema(c,7), e25=ema(c,25);
+  const tilt=Math.tanh(((e7.at(-1)-e25.at(-1))/e25.at(-1))/sig); const mu=0.18*tilt*sig;
+  const Phi=z=>0.5*(1+Math.tanh(z*0.8862*1.1)); // compact normal CDF approximation
+  const vols=b.slice(-24).map(x=>x.amount).sort((x,y)=>x-y); const volMed=vols[12];
+  const out=[]; let o=b.at(-1).close, t=b.at(-1).time;
+  for(let k=1;k<=steps;k++){
+    t+=3600; const s=sig*Math.sqrt(k), m=mu*k;
+    const c50=o*Math.exp(mu), c10=o*Math.exp(mu-1.2816*sig), c90=o*Math.exp(mu+1.2816*sig);
+    const hi=Math.max(o,c50)*(1+0.55*sig), lo=Math.min(o,c50)*(1-0.55*sig);
+    const h90=Math.max(o,c90)*(1+0.9*sig), l10=Math.min(o,c10)*(1-0.9*sig);
+    out.push({time:t, step:k, open:o, close:c50, high:hi, low:lo, c10, c90, h90, l10, vol:volMed, pUp:Phi(m/s), sigma:sig, mu});
+    o=c50;
+  }
+  return out;
+}
+const fc = demoForecast(bars);
+const IND = computeAll(bars);
+const extBars = bars.concat(fc.map(f=>({time:f.time, open:f.open, high:f.high, low:f.low, close:f.close, amount:f.vol, turnover:f.vol*f.close})));
+const INDF = computeAll(extBars);
+const extLo = bars.concat([{time:fc[0].time, open:fc[0].open, high:fc[0].high, low:fc[0].low, close:fc[0].c10, amount:fc[0].vol, turnover:fc[0].vol*fc[0].c10}]);
+const extHi = bars.concat([{time:fc[0].time, open:fc[0].open, high:fc[0].high, low:fc[0].low, close:fc[0].c90, amount:fc[0].vol, turnover:fc[0].vol*fc[0].c90}]);
+const INDL = computeAll(extLo), INDH = computeAll(extHi);
+
+/* ---------- demo trades (simulated on real hourly bars) ---------- */
+const PROFILES = {
+  P0:{L:50, tp:.006, sl:.006, E:0, trig:null, hold:4},
+  P1:{L:100, tp:.006, sl:.006, E:2, trig:.0033, hold:4},
+  P2:{L:150, tp:.0025, sl:.0025, E:2, trig:.00163, hold:2},
+  P3:{L:200, tp:.001512, sl:.0012, E:2, trig:.0008, hold:2},
+};
+const PLAN = [
+  [1789394400,'long','P1'],[1789408800,'long','P2'],[1789416000,'short','P2'],[1789423200,'short','P1'],
+  [1789441200,'short','P3'],[1789452000,'long','P3'],[1789466400,'long','P0'],[1789491600,'short','P3',{fast:true}],
+  [1789495200,'long','P2'],[1789502400,'short','P1'],[1789509600,'long','P0'],[1789524000,'long','P2'],
+  [1789531200,'long','P0'],[1789542000,'short','P3'],[1789545600,'long','P1'],[1789560000,'short','P1'],
+  [1789563600,'long','P3'],[1789567200,'long','P1',{open:true}],
+];
+const idxOf = t => bars.findIndex(b=>b.time===t);
+function simulate([t, side, prof, opt={}]){
+  const p=PROFILES[prof], i=idxOf(t), b0=bars[i], dir=side==='long'?1:-1;
+  const entry=b0.open+dir*HALF_SPREAD;
+  const vol=Math.floor(8*p.L/(entry*CS)), notional=vol*CS*entry, M=notional/p.L;
+  const dliq0=M/notional-MMR-F_T; let E=0, dliq=dliq0, topupAt=null;
+  const tp=entry*(1+dir*p.tp), sl=entry*(1-dir*p.sl);
+  let status='open', exit=null, exitT=null, reason='';
+  const endIdx = opt.open ? N-1 : Math.min(N-1, i+p.hold-1);
+  for(let j=i;j<=endIdx;j++){
+    const b=bars[j]; const adverse = dir===1 ? (entry-b.low)/entry : (b.high-entry)/entry;
+    const range=(b.high-b.low)/b.open;
+    if(p.E && !E && adverse>=p.trig && !opt.fast){ E=p.E; dliq=(M+E)/notional-MMR-F_T; topupAt=b.time; }
+    if(adverse>=dliq && range>=0.008 || (opt.fast && adverse>=dliq0)){ status='liq'; exit=entry*(1-dir*dliq); exitT=b.time+1800; reason = opt.fast ? 'liquidated_before_topup' : 'liquidated'; break; }
+    if(adverse>=p.sl){ status='sl'; exit=sl; exitT=b.time+1800; reason='stop_loss'; break; }
+    const fav = dir===1 ? (b.high-entry)/entry : (entry-b.low)/entry;
+    if(fav>=p.tp){ status='tp'; exit=tp; exitT=b.time+1800; reason='take_profit'; break; }
+    if(j===endIdx && !opt.open){ status='timeout'; exit=b.close; exitT=b.time+3599; reason='timeout'; }
+  }
+  const mark = last.close; const px = status==='open'? mark : exit;
+  const gross = status==='liq' ? -(M+E) : dir*(px-entry)*vol*CS;
+  const feeIn = notional*F_T, feeOut = status==='open' ? 0 : (status==='liq' ? 0 : vol*CS*px*F_T);
+  const fees = feeIn+feeOut;
+  const net = gross - fees;
+  return {t, side, prof, acct:'auto_'+prof.toLowerCase(), L:p.L, vol, notional, M, E, entry, exit:px, liq:entry*(1-dir*dliq), liq0:entry*(1-dir*dliq0), dliq, dliq0, tp, sl, status, reason, gross, fees, net, exitT: status==='open'? null : exitT, topupAt, dir, openTime:t};
+}
+const TRADES = PLAN.map(simulate).reverse();
+
+/* ---------- top bar ---------- */
+const mg = RAW.merged;
+document.getElementById('tLast').textContent = fmt(mg.last);
+document.getElementById('tBook').textContent = fmt(mg.bid)+' / '+fmt(mg.ask);
+const ch24=(mg.last-mg.open24)/mg.open24;
+const t24=document.getElementById('t24'); t24.textContent=pct(ch24); t24.className='v num '+(ch24>=0?'up':'down');
+document.getElementById('tHL').textContent = fmt(mg.high24)+' / '+fmt(mg.low24);
+(function(){ const now=Math.floor(mg.ts/1000); const next=Math.ceil(now/28800)*28800; const s=next-now; document.getElementById('tFund').textContent = '0.0100% (демо) · '+String(Math.floor(s/3600)).padStart(2,'0')+':'+String(Math.floor(s%3600/60)).padStart(2,'0'); })();
+
+/* ---------- chart ---------- */
+const wrap = document.getElementById('chartWrap');
+const chart = LWC.createChart(document.getElementById('chart'), {
+  autoSize:true,
+  layout:{ background:{type:'solid', color:'#0e0e0e'}, textColor:'#a3a3a3', fontFamily:"'Cascadia Code','JetBrains Mono',Consolas,monospace", fontSize:11, panes:{separatorColor:'#262626', separatorHoverColor:'#404040', enableResize:true} },
+  grid:{ vertLines:{color:'rgba(255,255,255,0.035)'}, horzLines:{color:'rgba(255,255,255,0.035)'} },
+  rightPriceScale:{ borderColor:'#262626' },
+  timeScale:{ borderColor:'#262626', timeVisible:true, secondsVisible:false, rightOffset:3, barSpacing:9 },
+  crosshair:{ mode: LWC.CrosshairMode.Normal },
+  localization:{ priceFormatter: p => p.toLocaleString('ru-RU',{maximumFractionDigits:1}) },
+});
+const UP='#22c55e', DOWN='#ef4444';
+const candles = chart.addSeries(LWC.CandlestickSeries, { upColor:UP, downColor:DOWN, borderVisible:false, wickUpColor:UP, wickDownColor:DOWN, priceLineColor:'#3b82f6' });
+candles.setData(bars.map(({time,open,high,low,close})=>({time,open,high,low,close})));
+const fcSeries = chart.addSeries(LWC.CandlestickSeries, { upColor:'rgba(34,197,94,0.22)', downColor:'rgba(239,68,68,0.22)', borderVisible:true, borderUpColor:'rgba(34,197,94,0.9)', borderDownColor:'rgba(239,68,68,0.9)', wickUpColor:'rgba(34,197,94,0.75)', wickDownColor:'rgba(239,68,68,0.75)', priceLineVisible:false, lastValueVisible:false });
+fcSeries.setData(fc.map(f=>({time:f.time, open:f.open, high:f.h90, low:f.l10, close:f.close})));
+const bandOpt = { color:'rgba(249,115,22,0.75)', lineWidth:1, lineStyle:LWC.LineStyle.Dashed, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false };
+const q90 = chart.addSeries(LWC.LineSeries, bandOpt), q10 = chart.addSeries(LWC.LineSeries, bandOpt);
+q90.setData([{time:last.time, value:last.close}, ...fc.map(f=>({time:f.time, value:f.c90}))]);
+q10.setData([{time:last.time, value:last.close}, ...fc.map(f=>({time:f.time, value:f.c10}))]);
+
+const line = (arr, color, opts={}) => { const s=chart.addSeries(LWC.LineSeries, Object.assign({color, lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false}, opts)); s.setData(arr.map((v,i)=>v==null?{time:extBars[i].time}:{time:extBars[i].time, value:v})); return s; };
+const cut = (a) => a.map((v,i)=> i<N ? v : null);   // history only
+const OVER = {
+  MA:  { color:'#facc15', series:[line(cut(INDF.ma7),'#facc15'), line(cut(INDF.ma25),'#c084fc'), line(cut(INDF.ma99),'#38bdf8')], on:true, label:'MA 7 25 99' },
+  EMA: { color:'#fb7185', series:[line(cut(INDF.ema7),'#fb7185',{lineStyle:2}), line(cut(INDF.ema25),'#a3e635',{lineStyle:2}), line(cut(INDF.ema99),'#67e8f9',{lineStyle:2})], on:false, label:'EMA 7 25 99' },
+  BOLL:{ color:'#94a3b8', series:[line(cut(INDF.boll.up),'rgba(148,163,184,.7)'), line(cut(INDF.boll.mid),'rgba(148,163,184,.45)'), line(cut(INDF.boll.dn),'rgba(148,163,184,.7)')], on:true, label:'BOLL 20 2' },
+  SAR: { color:'#e879f9', series:[line(cut(INDF.sar),'#e879f9',{lineVisible:false, pointMarkersVisible:true, pointMarkersRadius:1.6})], on:false, label:'SAR 0.02 0.2' },
+  AVL: { color:'#f97316', series:[line(cut(INDF.avl),'#f97316',{lineWidth:1.5})], on:false, label:'AVL сессия' },
+};
+const tgBox=document.getElementById('overlayToggles');
+for(const [k,o] of Object.entries(OVER)){
+  const b=document.createElement('button'); b.className='tg'; b.setAttribute('aria-pressed',String(o.on)); b.innerHTML=`<i style="color:${o.color}"></i>${k}`;
+  b.onclick=()=>{ o.on=!o.on; b.setAttribute('aria-pressed',String(o.on)); o.series.forEach(s=>s.applyOptions({visible:o.on})); renderLegend(); };
+  o.series.forEach(s=>s.applyOptions({visible:o.on})); tgBox.appendChild(b);
+}
+function renderLegend(){
+  const i=N-1; const L=document.getElementById('legend'); const parts=[];
+  if(OVER.MA.on) parts.push(`<span style="color:#facc15">MA7 ${fmt(IND.ma7[i])}</span><span style="color:#c084fc">MA25 ${fmt(IND.ma25[i])}</span><span style="color:#38bdf8">MA99 ${fmt(IND.ma99[i])}</span>`);
+  if(OVER.EMA.on) parts.push(`<span style="color:#fb7185">EMA7 ${fmt(IND.ema7[i])}</span><span style="color:#a3e635">EMA25 ${fmt(IND.ema25[i])}</span><span style="color:#67e8f9">EMA99 ${fmt(IND.ema99[i])}</span>`);
+  if(OVER.BOLL.on) parts.push(`<span style="color:#94a3b8">BOLL ${fmt(IND.boll.up[i])} · ${fmt(IND.boll.mid[i])} · ${fmt(IND.boll.dn[i])}</span>`);
+  if(OVER.SAR.on) parts.push(`<span style="color:#e879f9">SAR ${fmt(IND.sar[i])}</span>`);
+  if(OVER.AVL.on) parts.push(`<span style="color:#f97316">AVL ${fmt(IND.avl[i])}</span>`);
+  L.innerHTML=parts.join('') || '<span class="faint">индикаторы скрыты</span>';
+  L.classList.add('num');
+}
+renderLegend();
+
+// sub panes
+const volS = chart.addSeries(LWC.HistogramSeries, { priceFormat:{type:'volume'}, priceLineVisible:false, lastValueVisible:false }, 1);
+volS.setData(bars.map(b=>({time:b.time, value:b.amount, color: b.close>=b.open?'rgba(34,197,94,.55)':'rgba(239,68,68,.55)'})).concat(fc.map(f=>({time:f.time, value:f.vol, color:'rgba(249,115,22,.35)'}))));
+const vma = chart.addSeries(LWC.LineSeries, {color:'#facc15', lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false}, 1);
+vma.setData(IND.vol5.map((v,i)=>v==null?{time:bars[i].time}:{time:bars[i].time,value:v}));
+const mh = chart.addSeries(LWC.HistogramSeries, {priceLineVisible:false, lastValueVisible:false}, 2);
+mh.setData(INDF.macd.hist.map((v,i)=>v==null?{time:extBars[i].time}:{time:extBars[i].time, value:v, color: i>=N ? 'rgba(249,115,22,.5)' : (v>=0?'rgba(34,197,94,.6)':'rgba(239,68,68,.6)')}));
+const mdif = chart.addSeries(LWC.LineSeries, {color:'#e5e5e5', lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false}, 2);
+const mdea = chart.addSeries(LWC.LineSeries, {color:'#f97316', lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false}, 2);
+mdif.setData(INDF.macd.dif.map((v,i)=>v==null?{time:extBars[i].time}:{time:extBars[i].time,value:v}));
+mdea.setData(INDF.macd.dea.map((v,i)=>v==null?{time:extBars[i].time}:{time:extBars[i].time,value:v}));
+const kS = chart.addSeries(LWC.LineSeries, {color:'#e5e5e5', lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false}, 3);
+const dS = chart.addSeries(LWC.LineSeries, {color:'#facc15', lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false}, 3);
+const jS = chart.addSeries(LWC.LineSeries, {color:'#c084fc', lineWidth:1, priceLineVisible:false, lastValueVisible:false, crosshairMarkerVisible:false}, 3);
+kS.setData(INDF.kdj.K.map((v,i)=>v==null?{time:extBars[i].time}:{time:extBars[i].time,value:v}));
+dS.setData(INDF.kdj.D.map((v,i)=>v==null?{time:extBars[i].time}:{time:extBars[i].time,value:v}));
+jS.setData(INDF.kdj.J.map((v,i)=>v==null?{time:extBars[i].time}:{time:extBars[i].time,value:v}));
+try{ const ps=chart.panes(); if(ps[0].setStretchFactor){ ps[0].setStretchFactor(5); ps[1].setStretchFactor(1); ps[2].setStretchFactor(1.3); ps[3].setStretchFactor(1.3); } else { const H=wrap.clientHeight; ps[1].setHeight(Math.round(H*0.11)); ps[2].setHeight(Math.round(H*0.14)); ps[3].setHeight(Math.round(H*0.14)); } }catch(e){}
+
+// past forecasts vs actual (demo): step-1 forecast made from data up to previous bar
+const pastFc = chart.addSeries(LWC.CandlestickSeries, { upColor:'rgba(0,0,0,0)', downColor:'rgba(0,0,0,0)', borderVisible:true, borderUpColor:'rgba(249,115,22,.95)', borderDownColor:'rgba(249,115,22,.95)', wickUpColor:'rgba(249,115,22,.6)', wickDownColor:'rgba(249,115,22,.6)', priceLineVisible:false, lastValueVisible:false, visible:false });
+const past=[]; let hits=0, inBand=0;
+for(let i=N-25;i<N-1;i++){ const f=demoForecast(bars.slice(0,i),1)[0]; const a=bars[i]; past.push({time:a.time, open:f.open, high:f.h90, low:f.l10, close:f.close}); if(Math.sign(f.close-f.open)===Math.sign(a.close-a.open)) hits++; if(a.high<=f.h90 && a.low>=f.l10) inBand++; }
+pastFc.setData(past);
+const tgC=document.getElementById('tgCompare');
+tgC.onclick=()=>{ const on=tgC.getAttribute('aria-pressed')!=='true'; tgC.setAttribute('aria-pressed',String(on)); pastFc.applyOptions({visible:on}); };
+
+// markers + position lines
+const markers=[];
+for(const tr of TRADES){
+  markers.push({time:tr.t, position: tr.dir===1?'belowBar':'aboveBar', color: tr.dir===1?UP:DOWN, shape: tr.dir===1?'arrowUp':'arrowDown', text: (tr.dir===1?'L ':'S ')+tr.prof});
+  if(tr.exitT){ const et=Math.floor(tr.exitT/3600)*3600; markers.push({time:et, position:'inBar', color: tr.status==='liq'?'#ef4444':(tr.net>0?'#22c55e':'#a3a3a3'), shape: tr.status==='liq'?'square':'circle', text: tr.status==='liq'?'LIQ':''}); }
+}
+markers.sort((a,b)=>a.time-b.time);
+LWC.createSeriesMarkers(candles, markers);
+const openTr = TRADES.find(t=>t.status==='open');
+if(openTr){
+  candles.createPriceLine({price:openTr.entry, color:'#3b82f6', lineWidth:1, lineStyle:LWC.LineStyle.Solid, axisLabelVisible:true, title:'ENTRY'});
+  candles.createPriceLine({price:openTr.tp, color:UP, lineWidth:1, lineStyle:LWC.LineStyle.Dashed, axisLabelVisible:true, title:'TP'});
+  candles.createPriceLine({price:openTr.sl, color:'#eab308', lineWidth:1, lineStyle:LWC.LineStyle.Dashed, axisLabelVisible:true, title:'SL'});
+  candles.createPriceLine({price:openTr.liq, color:DOWN, lineWidth:1, lineStyle:LWC.LineStyle.Dotted, axisLabelVisible:true, title:'LIQ'});
+}
+
+const span = () => Math.max(28, Math.min(84, Math.round(wrap.clientWidth/12)));
+chart.timeScale().setVisibleLogicalRange({from:N-span(), to:N+5});
+function placeOverlay(){
+  const ts=chart.timeScale(); const x=ts.timeToCoordinate(last.time); const xEnd=ts.timeToCoordinate(fc.at(-1).time);
+  let mainH=wrap.clientHeight*0.58; try{ mainH=chart.panes()[0].getHeight(); }catch(e){}
+  const now=document.getElementById('nowLine'), zone=document.getElementById('fcZone');
+  const psw = (()=>{ try{ return chart.priceScale('right').width(); }catch(e){ return 60; } })();
+  const w=wrap.clientWidth-psw;
+  if(x==null){ now.hidden=true; zone.hidden=true; } else {
+    const bs = ts.options().barSpacing||9; const xs=x+bs/2+1;
+    now.hidden=false; now.style.left=xs+'px'; now.style.height=mainH+'px';
+    zone.hidden=false; zone.style.left=xs+'px'; zone.style.width=Math.max(0,w-xs)+'px'; zone.style.height=mainH+'px';
+    const zlH=document.getElementById('zlHist'), zlN=document.getElementById('zlNow'), zlF=document.getElementById('zlFc');
+    zlH.style.left='12px'; zlH.hidden = xs<180;
+    zlN.style.left=Math.max(0,xs-58)+'px';
+    zlF.style.left=(xs+8)+'px'; zlF.hidden = (w-xs)<60;
+  }
+  let y=mainH; const tags=[['tagVol',1],['tagMacd',2],['tagKdj',3]];
+  try{ const ps=chart.panes(); let acc=0; for(let i=0;i<ps.length;i++){ const h=ps[i].getHeight(); tags.forEach(([id,idx])=>{ if(idx===i) document.getElementById(id).style.top=(acc+4)+'px'; }); acc+=h+1; } }catch(e){}
+}
+chart.timeScale().subscribeVisibleLogicalRangeChange(()=>requestAnimationFrame(placeOverlay));
+new ResizeObserver(()=>requestAnimationFrame(placeOverlay)).observe(wrap);
+setTimeout(placeOverlay,60);
+document.getElementById('tgNow').onclick=()=>chart.timeScale().setVisibleLogicalRange({from:N-span(), to:N+5});
+chart.subscribeCrosshairMove(p=>{
+  const L=document.getElementById('legend');
+  if(!p || !p.time){ renderLegend(); return; }
+  const f=fc.find(x=>x.time===p.time);
+  if(f){ L.innerHTML=`<span style="color:var(--accent)">ПРОГНОЗ t+${f.step} · ${hhmm(f.time)} UTC</span><span>O ${fmt(f.open)}</span><span>C q10/q50/q90 ${fmt(f.c10)} / ${fmt(f.close)} / ${fmt(f.c90)}</span><span>H q90 ${fmt(f.h90)}</span><span>L q10 ${fmt(f.l10)}</span><span>P(up) ${(f.pUp*100).toFixed(0)}%</span>`; return; }
+  const b=bars.find(x=>x.time===p.time); if(!b) return;
+  L.innerHTML=`<span>${ddhh(b.time)}</span><span>O ${fmt(b.open)}</span><span>H ${fmt(b.high)}</span><span>L ${fmt(b.low)}</span><span class="${b.close>=b.open?'up':'down'}">C ${fmt(b.close)} (${pct((b.close-b.open)/b.open)})</span><span class="faint">V ${fmt(b.amount,1)} BTC</span>`;
+});
+
+/* ---------- indicator strip ---------- */
+const i0=N-1, i1=N;
+const cards=[
+  {n:'MA', p:'7', now:IND.ma7[i0], nx:INDF.ma7[i1], lo:INDL.ma7[i1], hi:INDH.ma7[i1]},
+  {n:'SAR', p:'.02 .2', now:IND.sar[i0], nx:INDF.sar[i1], lo:INDL.sar[i1], hi:INDH.sar[i1], sar:true},
+  {n:'AVL', p:'сессия', now:IND.avl[i0], nx:INDF.avl[i1], lo:INDL.avl[i1], hi:INDH.avl[i1]},
+  {n:'EMA', p:'25', now:IND.ema25[i0], nx:INDF.ema25[i1], lo:INDL.ema25[i1], hi:INDH.ema25[i1]},
+  {n:'BOLL', p:'mid 20', now:IND.boll.mid[i0], nx:INDF.boll.mid[i1], lo:INDL.boll.mid[i1], hi:INDH.boll.mid[i1], extra:`${fmt(INDF.boll.dn[i1],0)} – ${fmt(INDF.boll.up[i1],0)}`},
+  {n:'VOL', p:'BTC', now:last.amount, nx:fc[0].vol, d:1, extra:`MA5 ${fmt(IND.vol5[i0],0)}`},
+  {n:'MACD', p:'hist', now:IND.macd.hist[i0], nx:INDF.macd.hist[i1], lo:INDL.macd.hist[i1], hi:INDH.macd.hist[i1], d:1, osc:true},
+  {n:'KDJ', p:'J', now:IND.kdj.J[i0], nx:INDF.kdj.J[i1], lo:INDL.kdj.J[i1], hi:INDH.kdj.J[i1], d:1, osc:true},
+];
+const px=last.close;
+document.getElementById('indStrip').innerHTML = cards.map(c=>{
+  const d = c.nx - c.now; const dd=c.d??1;
+  let state='var(--line)';
+  if(c.osc) state = c.nx>c.now ? 'var(--up)' : 'var(--down)';
+  else if(c.n==='VOL') state='var(--line)';
+  else state = px>=c.nx ? 'var(--up)' : 'var(--down)';
+  const lohi = (c.lo!=null && c.hi!=null) ? `${fmt(Math.min(c.lo,c.hi),dd)} – ${fmt(Math.max(c.lo,c.hi),dd)}` : (c.extra||'');
+  return `<div class="ind" style="--state:${state}">
+    <div class="n">${c.n}<em>${c.p}</em></div>
+    <div class="now num">${fmt(c.now,dd)}</div>
+    <div class="fc num"><span class="lbl">t+1</span>${fmt(c.nx,dd)} <span class="${d>=0?'up':'down'}">${d>=0?'▲':'▼'} ${fmt(Math.abs(d),dd)}</span></div>
+    <div class="rg num">${c.extra && c.lo!=null ? c.extra : lohi}</div>
+  </div>`;
+}).join('');
+
+/* ---------- side cards ---------- */
+const f1=fc[0];
+document.getElementById('pUp').textContent=(f1.pUp*100).toFixed(0)+'%';
+document.getElementById('pUp').className='big num '+(f1.pUp>=0.5?'up':'down');
+document.getElementById('pUpMark').style.left=(f1.pUp*100)+'%';
+const kv=(el,rows)=>document.getElementById(el).innerHTML=rows.map(([k,v,c])=>`<dt>${k}</dt><dd class="num ${c||''}">${v}</dd>`).join('');
+kv('fcKv',[
+  ['Close q50', fmt(f1.close)],
+  ['Диапазон close q10–q90', fmt(f1.c10,0)+' – '+fmt(f1.c90,0)],
+  ['Фитили H q90 / L q10', fmt(f1.h90,0)+' / '+fmt(f1.l10,0)],
+  ['σ часа (EWMA)', (f1.sigma*100).toFixed(3)+'%'],
+  ['Критик: множитель', '×0.90'],
+  ['Факт 24 ч: направление', hits+' / 24'],
+  ['Факт 24 ч: в диапазоне', inBand+' / 24'],
+]);
+const pEntry=0.65;
+document.getElementById('reason').innerHTML = f1.pUp*0.9 < pEntry
+  ? `Ожидание входа: <b>p_up × 0.90 = ${(f1.pUp*0.9).toFixed(2)}</b> &lt; p_entry ${pEntry.toFixed(2)} · <span class="num">waiting_trigger</span>`
+  : `Сигнал: <b>p_up × 0.90 = ${(f1.pUp*0.9).toFixed(2)}</b> ≥ p_entry ${pEntry.toFixed(2)}`;
+document.getElementById('subs').innerHTML = [
+  ['Planner','glm-5.2','14:01','var(--up)'],
+  ['Market-Scout','deepseek-v4.1-flash','14:00','var(--up)'],
+  ['Forecast-Critic','minimax-m2.7','14:00','var(--up)'],
+  ['Entry-Gate','deepseek-v4.1-flash','14:04','var(--up)'],
+  ['Journal-Coach','glm-5.3-flash','14:31','var(--warn)'],
+].map(([n,m,t,c])=>`<span><i class="st" style="background:${c}"></i>${n}</span><span class="faint">${m}</span><span class="num faint">${t}</span>`).join('');
+kv('planKv',[
+  ['Режим','trade','up'],
+  ['Стороны','long, short'],
+  ['Профиль','P1 · 100x · ±0.6%'],
+  ['p_entry_min','0.65'],
+  ['Входы / развороты','1 из 6 · 0 из 1'],
+  ['Режим (Scout)','range'],
+  ['Версия плана','v3 · glm-5.2 · $0.012'],
+]);
+if(openTr){
+  const d = (openTr.exit-openTr.entry)/openTr.entry*openTr.dir;
+  const toLiq = Math.abs(openTr.exit-openTr.liq)/openTr.exit;
+  const used = Math.max(0,Math.min(1,(openTr.dliq - toLiq)/openTr.dliq));
+  document.getElementById('riskDist').innerHTML = `
+    <div class="row"><span>До ликвидации</span><span class="num">${(toLiq*100).toFixed(2)}% · ${fmt(Math.abs(openTr.exit-openTr.liq),0)} $</span></div>
+    <div class="gauge" role="img" aria-label="Использовано ${(used*100).toFixed(0)}% дистанции до ликвидации"><i style="width:${(used*100).toFixed(0)}%;background:${used>0.5?'var(--down)':used>0.3?'var(--warn)':'var(--up)'}"></i></div>
+    <div class="row"><span>Триггер доливки +$2 при −0.33%</span><span class="num">${openTr.topupAt?'выполнена':'не нужна'}</span></div>`;
+  kv('riskKv',[
+    ['Long · 10 cont', fmt(openTr.entry)+' → '+fmt(openTr.exit)],
+    ['uPnL', fmtUsd(openTr.gross)+' $ ('+pct(openTr.gross/openTr.M,1)+')', openTr.gross>=0?'up':'down'],
+    ['Маржа', fmt(openTr.M,2)+' + '+fmt(openTr.E,2)+' $'],
+    ['Ликвидация (mark)', fmt(openTr.liq)],
+    ['MM = N × (0.0028 + 0.0006)', fmt(openTr.notional*(MMR+F_T),2)+' $'],
+  ]);
+}
+const spentDay=0.62, limDay=1.6, spentM=14.2, limM=30;
+document.getElementById('budget').innerHTML = `
+  <div class="row"><span>Сегодня</span><span class="num">${spentDay.toFixed(2)} / ${limDay.toFixed(2)} $</span></div>
+  <div class="gauge"><i style="width:${spentDay/limDay*100}%;background:var(--up)"></i></div>
+  <div class="row"><span>Месяц (кредиты)</span><span class="num">${spentM.toFixed(1)} / ${limM} $</span></div>
+  <div class="gauge"><i style="width:${spentM/limM*100}%;background:var(--up)"></i></div>
+  <div class="row"><span>Запросов сегодня · пик ×2 12–18 UTC</span><span class="num">171 / 400</span></div>`;
+
+/* ---------- mode buttons ---------- */
+const modePill=document.getElementById('modePill');
+function setMode(m){
+  const map={trade:['live','TRADE'], reduce_only:['demo','ТОЛЬКО ЗАКРЫТИЕ'], pause:['risk','PAUSED']};
+  modePill.className='pill '+map[m][0]; modePill.innerHTML='<span class="dot"></span>'+map[m][1];
+  document.getElementById('btnReduce').setAttribute('aria-pressed', String(m==='reduce_only'));
+  document.getElementById('btnPause').setAttribute('aria-pressed', String(m==='pause'));
+  addFeed(hhmm(Math.floor(mg.ts/1000)),'Владелец',`Режим → ${map[m][1]}. Защиты открытых позиций активны.`,'var(--accent)',true);
+}
+let mode='trade';
+document.getElementById('btnReduce').onclick=()=>{ mode = mode==='reduce_only'?'trade':'reduce_only'; setMode(mode); };
+document.getElementById('btnPause').onclick=()=>{ mode = mode==='pause'?'trade':'pause'; setMode(mode); };
+
+/* ---------- positions ---------- */
+const STATUS = {open:['open','Открыта'], tp:['tp','TP'], sl:['sl','SL'], timeout:['','Timeout'], liq:['liq','LIQ']};
+let tab='all';
+const tabsDef=[['open','Открытые'],['closed','Закрытые'],['liq','Ликвидированные'],['all','Все']];
+function filtered(){
+  const acc=document.getElementById('fAcc').value, side=document.getElementById('fSide').value, res=document.getElementById('fRes').value;
+  return TRADES.filter(t=>{
+    if(tab==='open' && t.status!=='open') return false;
+    if(tab==='closed' && (t.status==='open'||t.status==='liq')) return false;
+    if(tab==='liq' && t.status!=='liq') return false;
+    if(acc!=='all' && t.prof!==acc) return false;
+    if(side!=='all' && t.side!==side) return false;
+    if(res==='win' && !(t.net>0)) return false;
+    if(res==='loss' && !(t.net<=0)) return false;
+    return true;
+  });
+}
+function dur(t){ const end = t.exitT ?? Math.floor(mg.ts/1000); const m=Math.max(1,Math.round((end-t.t)/60)); return m>=60? Math.floor(m/60)+' ч '+String(m%60).padStart(2,'0')+' м' : m+' м'; }
+function renderPositions(){
+  const counts={open:0,closed:0,liq:0,all:TRADES.length};
+  TRADES.forEach(t=>{ if(t.status==='open') counts.open++; else if(t.status==='liq') counts.liq++; else counts.closed++; });
+  document.getElementById('posTabs').innerHTML = tabsDef.map(([k,l])=>`<button class="tab" role="tab" id="tab-${k}" aria-selected="${tab===k}" data-k="${k}">${l}<span class="c">${counts[k]}</span></button>`).join('');
+  document.querySelectorAll('#posTabs .tab').forEach(b=>b.onclick=()=>{ tab=b.dataset.k; renderPositions(); });
+  const rows=filtered();
+  const st = t => { const [c,l]=STATUS[t.status]; return `<span class="st-tag ${c}" title="${t.reason}">${l}</span>${t.topupAt?' <span class="faint" title="доливка маржи">+$2</span>':''}${t.reason==='liquidated_before_topup'?' <span class="faint">до доливки</span>':''}`; };
+  document.getElementById('posBody').innerHTML = rows.map(t=>`<tr class="${t.status==='liq'?'liq':''}">
+    <td class="num">${ddhh(t.t)}</td>
+    <td class="l"><span class="prof ${t.prof==='P3'?'p3':''}">${t.acct}</span></td>
+    <td class="l"><span class="side-tag ${t.side}">${t.side==='long'?'Long':'Short'}</span></td>
+    <td class="num">${t.L}x</td>
+    <td class="num">${fmt(t.M,2)}${t.E?' + '+fmt(t.E,2):''}</td>
+    <td class="num">${(t.vol*CS).toFixed(3)} <span class="faint">(${t.vol})</span></td>
+    <td class="num">${fmt(t.entry)}</td>
+    <td class="num">${fmt(t.exit)}</td>
+    <td class="num ${t.status==='liq'?'down':'faint'}">${fmt(t.liq)}</td>
+    <td class="num faint">${fmt(t.tp,0)} / ${fmt(t.sl,0)}</td>
+    <td class="num ${t.gross>=0?'up':'down'}">${fmtUsd(t.gross)}</td>
+    <td class="num faint">−${t.fees.toFixed(2)}</td>
+    <td class="num ${t.net>=0?'up':'down'}"><b>${fmtUsd(t.net)}</b></td>
+    <td class="l">${st(t)}</td>
+    <td class="num faint">${dur(t)}</td>
+  </tr>`).join('') || `<tr><td class="l muted" colspan="15">Нет позиций под выбранные фильтры.</td></tr>`;
+  document.getElementById('posCards').innerHTML = rows.map(t=>`<div class="pcard">
+    <div class="top"><span class="side-tag ${t.side}">${t.side==='long'?'Long':'Short'} ${t.L}x</span><span class="prof ${t.prof==='P3'?'p3':''}">${t.acct}</span>${st(t)}<span class="spacer"></span><span class="num faint">${ddhh(t.t)}</span></div>
+    <span class="faint">Вход → ${t.status==='open'?'mark':'выход'}</span><span class="num">${fmt(t.entry)} → ${fmt(t.exit)}</span>
+    <span class="faint">Маржа · размер</span><span class="num">${fmt(t.M,2)}${t.E?' + '+fmt(t.E,2):''} · ${t.vol} cont</span>
+    <span class="faint">Ликвидация</span><span class="num">${fmt(t.liq)}</span>
+    <span class="faint">Net (комиссии ${t.fees.toFixed(2)})</span><span class="num ${t.net>=0?'up':'down'}"><b>${fmtUsd(t.net)} $</b></span>
+  </div>`).join('') || '<p class="muted">Нет позиций под выбранные фильтры.</p>';
+  const closed=rows.filter(t=>t.status!=='open');
+  const wins=closed.filter(t=>t.net>0).length, net=rows.reduce((s,t)=>s+t.net,0), fees=rows.reduce((s,t)=>s+t.fees,0), liq=closed.filter(t=>t.status==='liq').length;
+  const avgMin = closed.length? Math.round(closed.reduce((s,t)=>s+(t.exitT-t.t)/60,0)/closed.length):0;
+  document.getElementById('posSummary').innerHTML = `
+    <span>Позиций <b class="num">${rows.length}</b></span>
+    <span>Win rate <b class="num">${closed.length? Math.round(wins/closed.length*100):0}%</b> <span class="faint">(${wins}/${closed.length})</span></span>
+    <span>Net PnL <b class="num ${net>=0?'up':'down'}">${fmtUsd(net)} $</b></span>
+    <span>Комиссии <b class="num">−${fees.toFixed(2)} $</b></span>
+    <span>Funding <b class="num">0.00 $</b></span>
+    <span>Ликвидаций <b class="num ${liq?'down':''}">${liq}</b></span>
+    <span>Средняя длительность <b class="num">${avgMin} м</b></span>`;
+}
+['fAcc','fSide','fRes'].forEach(id=>document.getElementById(id).onchange=renderPositions);
+renderPositions();
+
+/* ---------- feed ---------- */
+const feedEl=document.getElementById('feed');
+function addFeed(time, who, text, color, prepend=false){
+  const li=document.createElement('li'); li.innerHTML=`<time>${time}</time><div><span class="who" style="color:${color}">${who}</span><p>${text}</p></div>`;
+  prepend ? feedEl.prepend(li) : feedEl.appendChild(li);
+}
+const feedItems=[];
+if(openTr) feedItems.push([openTr.t+310,'Runner',`Long auto_p1 10 cont @ ${fmt(openTr.entry)} · TP ${fmt(openTr.tp,0)} · SL ${fmt(openTr.sl,0)} · ликв. ${fmt(openTr.liq,0)}`,'var(--info)']);
+feedItems.push([last.time+290,'Entry-Gate',`allow · long: p_up × 0.90 = 0.68 ≥ 0.65, спред 1 тик, данные свежие (2 с)`,'var(--up)']);
+feedItems.push([last.time+65,'Planner',`План v3: trade, P1, обе стороны, до 6 входов. Причины: range_regime, forecast_ok`,'var(--accent)']);
+feedItems.push([last.time+22,'Forecast-Critic',`Множитель ×0.90: объём ниже медианы часа, прогноз не расширять`,'#c084fc']);
+feedItems.push([last.time+20,'Market-Scout',`Режим range; ликвидации за час: long 0.4 млн $, short 0.2 млн $`,'#38bdf8']);
+for(const t of TRADES.filter(t=>t.status!=='open').slice(0,6)){
+  const txt = t.status==='liq' ? `Ликвидация ${t.acct} ${t.side} ${t.L}x · −${(t.M+t.E).toFixed(2)} $ маржи · ${t.reason}` : `${STATUS[t.status][1]} ${t.acct} ${t.side} ${t.L}x · net ${fmtUsd(t.net)} $`;
+  feedItems.push([t.exitT, t.status==='liq'?'Risk engine':'Runner', txt, t.status==='liq'?'var(--down)':(t.net>0?'var(--up)':'var(--muted)')]);
+  if(t.topupAt) feedItems.push([t.topupAt+900,'Risk engine',`Доливка +2.00 $ ${t.acct}: движение против позиции достигло триггера`,'var(--warn)']);
+}
+feedItems.push([Math.floor(RAW.ts/1000/86400)*86400+300,'Hermes',`Отчёт дня отправлен в Telegram: сделки, net PnL, 2 ликвидации в auto_p2/auto_p3, расход LLM 1.41 $`,'var(--accent)']);
+feedItems.sort((a,b)=>b[0]-a[0]).forEach(([t,w,x,c])=>addFeed(hhmm(t),w,x,c));
+</script>

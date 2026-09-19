@@ -1,0 +1,119 @@
+{
+  "kind": "documentation_package_checks_only",
+  "readme_sections": 13,
+  "acceptance_tests_defined": 55,
+  "fixture_scenarios_defined": 35,
+  "markdown_fences": "balanced",
+  "layout_html_ids_and_assets": "passed",
+  "layout_javascript_syntax": "passed",
+  "token_contrast_pairs": [
+    {
+      "foreground": "--ui-text",
+      "background": "--ui-bg",
+      "ratio": 15.717
+    },
+    {
+      "foreground": "--ui-text",
+      "background": "--ui-surface",
+      "ratio": 14.625
+    },
+    {
+      "foreground": "--ui-text",
+      "background": "--ui-surface-raised",
+      "ratio": 13.529
+    },
+    {
+      "foreground": "--ui-muted",
+      "background": "--ui-bg",
+      "ratio": 7.849
+    },
+    {
+      "foreground": "--ui-muted",
+      "background": "--ui-surface",
+      "ratio": 7.303
+    },
+    {
+      "foreground": "--ui-muted",
+      "background": "--ui-surface-raised",
+      "ratio": 6.756
+    },
+    {
+      "foreground": "--ui-accent",
+      "background": "--ui-bg",
+      "ratio": 7.063
+    },
+    {
+      "foreground": "--ui-accent",
+      "background": "--ui-surface",
+      "ratio": 6.572
+    },
+    {
+      "foreground": "--ui-accent",
+      "background": "--ui-surface-raised",
+      "ratio": 6.08
+    },
+    {
+      "foreground": "--ui-success",
+      "background": "--ui-bg",
+      "ratio": 8.689
+    },
+    {
+      "foreground": "--ui-success",
+      "background": "--ui-surface",
+      "ratio": 8.085
+    },
+    {
+      "foreground": "--ui-success",
+      "background": "--ui-surface-raised",
+      "ratio": 7.479
+    },
+    {
+      "foreground": "--ui-danger-text",
+      "background": "--ui-bg",
+      "ratio": 10.431
+    },
+    {
+      "foreground": "--ui-danger-text",
+      "background": "--ui-surface",
+      "ratio": 9.706
+    },
+    {
+      "foreground": "--ui-danger-text",
+      "background": "--ui-surface-raised",
+      "ratio": 8.979
+    },
+    {
+      "foreground": "--ui-info-text",
+      "background": "--ui-bg",
+      "ratio": 10.979
+    },
+    {
+      "foreground": "--ui-info-text",
+      "background": "--ui-surface",
+      "ratio": 10.216
+    },
+    {
+      "foreground": "--ui-info-text",
+      "background": "--ui-surface-raised",
+      "ratio": 9.451
+    },
+    {
+      "foreground": "--ui-on-color",
+      "background": "--ui-accent",
+      "ratio": 7.063
+    },
+    {
+      "foreground": "--ui-on-color",
+      "background": "--ui-success",
+      "ratio": 8.689
+    },
+    {
+      "foreground": "--ui-on-color",
+      "background": "--ui-danger",
+      "ratio": 5.261
+    }
+  ],
+  "application_tests": "not_run_documentation_task",
+  "layout_browser_visual_check": "not_run",
+  "production_mutations": false
+}

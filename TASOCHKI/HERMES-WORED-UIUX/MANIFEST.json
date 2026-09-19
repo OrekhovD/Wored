@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "entrypoint": "README.md",
+  "type": "implementation_specification",
+  "files": [
+    {
+      "path": "acceptance.json",
+      "bytes": 15456,
+      "sha256": "13ae2543f7ed5ebd1c7da05e2a5c798b69e767defa6b081f17020b3ba3aa7f63"
+    },
+    {
+      "path": "AGENTS.md",
+      "bytes": 1158,
+      "sha256": "f8a5d4f1cefee1b19aedaec66f47ac8844b6f293ed6acb9e95bec716aad5f5d5"
+    },
+    {
+      "path": "AUTHORING-CHECKS.json",
+      "bytes": 2782,
+      "sha256": "1dd209469e56a6389e6c29a88ae4a383754570285356427e13193fd91d960263"
+    },
+    {
+      "path": "design-tokens.css",
+      "bytes": 697,
+      "sha256": "88806c41df3f981601be2ac8c04303fab80f0c40a58f55377e81037c981e5247"
+    },
+    {
+      "path": "fixtures.json",
+      "bytes": 23685,
+      "sha256": "cc1fa797f72aaacc800cd93a6ec26b35cbc962218ed195223e8fd575f73b3419"
+    },
+    {
+      "path": "layouts.html",
+      "bytes": 13082,
+      "sha256": "2fb76b6117caa2ece9e524921647678d82c9bd0c29325abe88048cb16f386318"
+    },
+    {
+      "path": "README.md",
+      "bytes": 73331,
+      "sha256": "66b869670382a0557f3ff0557b007f51945e358a7191b87cfb1dd647e3ffbf69"
+    },
+    {
+      "path": "reference/baseline.json",
+      "bytes": 2537,
+      "sha256": "9cdae6e9021cfc17b827bdf26098284b80703b8a301d4a4cc04647b0f118031e"
+    },
+    {
+      "path": "reference/INDEPENDENT-REVIEW.md",
+      "bytes": 65831,
+      "sha256": "dd7e51c07e48127fded1054b727720a17f0ae45d58e6195250944b7bdc75d939"
+    },
+    {
+      "path": "reference/ORIGINAL-R10-R11.md",
+      "bytes": 5884,
+      "sha256": "7779819eb9ab1448e4467d284b0baa1bffd4861320f132207afaea5906dfab6f"
+    },
+    {
+      "path": "reference/source/webui/static/app.js",
+      "bytes": 16984,
+      "sha256": "25a4fa3131e9fe7a25bdb93688a98506a0deda1ff81670e6fd2a26d3aca83da3"
+    },
+    {
+      "path": "reference/source/webui/static/styles.css",
+      "bytes": 50942,
+      "sha256": "e87de8571ae6d2ae36c0d23826a7e8bc8f4cadde16c1e836dff3db6083e26c03"
+    },
+    {
+      "path": "reference/source/webui/templates/alerts.html",
+      "bytes": 4730,
+      "sha256": "463ea7839c74522245cb7ca97b00d2b1c68e7fb91b7b6c469979e75c4b9a42e9"
+    },
+    {
+      "path": "reference/source/webui/templates/base.html",
+      "bytes": 4824,
+      "sha256": "5c4a6198d2542c14113ab7a2d576febf642afaab7f509aa12ecdda4d7a1da5e5"
+    },
+    {
+      "path": "reference/source/webui/templates/command_deck.html",
+      "bytes": 25816,
+      "sha256": "836ce10ec253bc6f2070dddcc3a4783e8c2364bca9caf0cf1f2419f666c1604b"
+    },
+    {
+      "path": "reference/source/webui/templates/daily_session.html",
+      "bytes": 44179,
+      "sha256": "650e5992f10239f3bbb483315a8b8b60ea055dfcd4fd86181c740e21934f20a4"
+    },
+    {
+      "path": "reference/source/webui/templates/futures_lab.html",
+      "bytes": 3914,
+      "sha256": "c8a719b397e005ed234114e6c1d28d687b529fde517a88b45e7cd62f6d254523"
+    },
+    {
+      "path": "reference/source/webui/templates/index.html",
+      "bytes": 7786,
+      "sha256": "ed35dfa0bbea1f0a44be8992d61db0d99b87309fc9925dc0e7a04043f5d960e8"
+    },
+    {
+      "path": "reference/source/webui/templates/journal.html",
+      "bytes": 4543,
+      "sha256": "8a5d5b710966911c8489b1fcbb2d5cbc42ae594698bb0f0ef92b24a6a1982806"
+    },
+    {
+      "path": "reference/source/webui/templates/login.html",
+      "bytes": 2028,
+      "sha256": "fe9ec1a798a0fe12deb7e7b89f9d656e50f2ba968866b24c45fd065ff6f445d9"
+    },
+    {
+      "path": "reference/source/webui/templates/models.html",
+      "bytes": 2780,
+      "sha256": "597f54cdcbe8b309d18791cb8b9eded52d24a1f00596142368fe482c11b703ca"
+    },
+    {
+      "path": "reference/source/webui/templates/predictions.html",
+      "bytes": 40586,
+      "sha256": "bc7c39daa64c43465b4a292df1d961514b5d4e7b35c03400eb94bb9369cbb1bb"
+    },
+    {
+      "path": "reference/source/webui/templates/strategy.html",
+      "bytes": 10849,
+      "sha256": "af688f6a778a5981540bdf3ffb3a8c0ec29c97602f66d068667a7519f8c93f8a"
+    }
+  ]
+}

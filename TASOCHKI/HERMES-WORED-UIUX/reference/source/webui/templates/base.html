@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  {% block head_extra %}{% endblock %}
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page_title or "WORED Web UI" }}</title>
+  <link rel="stylesheet" href="/static/styles.css?v=4">
+  <script src="https://unpkg.com/lightweight-charts@5.2.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <div class="hero-grid"></div>
+
+    <nav class="topbar">
+      <a class="brand" href="/">WORED</a>
+      <div class="topbar-links">
+        <a class="{% if current_path == '/' %}is-current{% endif %}" href="/">Dashboard</a>
+        <a class="{% if current_path == '/command-deck' %}is-current{% endif %}" href="/command-deck">⚡ Command</a>
+        <a class="{% if current_path == '/alerts' %}is-current{% endif %}" href="/alerts">Alerts<span id="navAlertBadge"></span></a>
+        <a class="{% if current_path.startswith('/predictions') %}is-current{% endif %}" href="/predictions">Predictions</a>
+        <a class="{% if current_path.startswith('/journal') %}is-current{% endif %}" href="/journal">AI Journal</a>
+        <a class="{% if current_path == '/futures-lab' %}is-current{% endif %}" href="/futures-lab">Futures Lab</a>
+        <a class="{% if current_path == '/daily-session' %}is-current{% endif %}" href="/daily-session">Daily Session</a>
+        <a class="{% if current_path == '/strategy' %}is-current{% endif %}" href="/strategy">Strategy</a>
+        <a class="{% if current_path == '/model-management' %}is-current{% endif %}" href="/model-management">Models</a>
+      </div>
+      <div class="topbar-health" id="topbarHealth">
+        <span class="health-dot is-idle" id="healthRedis">Redis</span>
+        <span class="health-dot is-idle" id="healthPostgres">PG</span>
+        <span class="health-dot is-idle" id="healthCollector">Feed</span>
+        <span class="health-dot is-idle" id="topbarAlerts">Alerts —</span>
+      </div>
+      <div class="topbar-auth">
+        {% if auth_enabled %}
+          {% if authenticated %}
+            <span class="auth-pill auth-ok">Signed in as {{ admin_username }}</span>
+            <form method="post" action="/logout" class="inline-form">
+              <button type="submit" class="ghost-button">Logout</button>
+            </form>
+          {% else %}
+            <span class="auth-pill auth-warn">Auth required</span>
+            <a class="ghost-button link-button" href="/login">Login</a>
+          {% endif %}
+        {% else %}
+          <span class="auth-pill auth-warn">Local mode</span>
+        {% endif %}
+      </div>
+    </nav>
+
+    {% if flash %}
+      <div class="flash flash-{{ flash.level }}">{{ flash.message }}</div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+
+    <footer class="footer">
+      <div>WORED browser control surface for local operations.</div>
+      <div class="attribution">
+        {{ chart_notice }}
+        <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView</a>
+      </div>
+    </footer>
+  </div>
+
+  <div id="globalToast" class="toast"></div>
+
+  <script>
+  (function() {
+    async function refreshGlobalHealth() {
+      try {
+        const r = await fetch("/api/health");
+        if (!r.ok) return;
+        const h = await r.json();
+
+        const dots = {
+          healthRedis: h.redis,
+          healthPostgres: h.postgres,
+          healthCollector: h.collector_feed,
+        };
+        for (const [id, ok] of Object.entries(dots)) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          el.className = "health-dot " + (ok ? "is-ok" : "is-warn");
+        }
+      } catch (_) {}
+    }
+
+    async function refreshAlertBadge() {
+      try {
+        const r = await fetch("/api/alerts?limit=1");
+        if (!r.ok) return;
+        const data = await r.json();
+        const badge = document.getElementById("navAlertBadge");
+        if (!badge) return;
+        const openCount = data.counts?.open ?? 0;
+        if (openCount > 0) {
+          badge.className = "nav-badge";
+          badge.textContent = openCount;
+        } else {
+          badge.className = "";
+          badge.textContent = "";
+        }
+      } catch (_) {}
+    }
+
+    refreshGlobalHealth();
+    refreshAlertBadge();
+    setInterval(refreshGlobalHealth, 15000);
+    setInterval(refreshAlertBadge, 30000);
+  })();
+
+  window.WORED_TOAST = function(message, level) {
+    const toast = document.getElementById("globalToast");
+    if (!toast) return;
+    toast.textContent = message;
+    toast.className = "toast is-visible" + (level === "ok" ? " toast-ok" : level === "bad" ? " toast-bad" : "");
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => { toast.className = "toast"; }, 3000);
+  };
+  </script>
+</body>
+</html>

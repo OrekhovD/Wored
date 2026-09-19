@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "scope": "specification_only",
+  "prepared_date": "2026-09-10",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "0cf0dff9947f1c1f0212dbb004b54927b8086948937b3428630beb36a77ab0f0"
+    },
+    {
+      "path": "START-HERMES.md",
+      "sha256": "cae9af649c4b43f922b7ec53c9790d4629cb0800aa44647c50b88b9bb0eab2a1"
+    },
+    {
+      "path": "acceptance.json",
+      "sha256": "2eaf68610ecdd5a5efe90a095530d722d246b03b0a539813d71499cf1587b3e5"
+    },
+    {
+      "path": "accounting-fixtures.json",
+      "sha256": "9b03f34f9988c390c88d478af7ea656c83a6dee10667b23b9cf31b861719c168"
+    },
+    {
+      "path": "STATUS.template.json",
+      "sha256": "30ab5a0807b4cee055f13c2553d89fe51b9c2392c3c71b6033e508a1650ac59c"
+    },
+    {
+      "path": "baseline.json",
+      "sha256": "da2c35c72a510e7815c56823271a999637d32316204a2813f0f48315249d731d"
+    },
+    {
+      "path": "validate_bundle.py",
+      "sha256": "9679e39eb355e1b2648087bce884ee5ac4b5614d2a108a847e1b61a1846cb605"
+    }
+  ]
+}

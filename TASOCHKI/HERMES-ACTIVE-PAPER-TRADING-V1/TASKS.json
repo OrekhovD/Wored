@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "package": "HERMES-ACTIVE-PAPER-TRADING-V1",
+  "scope": "implementation_handoff_not_implementation_evidence",
+  "tasks": [
+    {
+      "id": "T01",
+      "title": "Диагностика RACHELLO и фиксация исходного состояния",
+      "status": "not_started",
+      "depends_on": [],
+      "requirements": ["REQ-01", "REQ-02"],
+      "acceptance_cases": ["AC-01"],
+      "ownership": ["read-only runtime diagnosis", "working-tree inventory", "docs/PAPER-TRADING-IMPLEMENTATION.md"],
+      "deliverables": ["Фактическая причина ожидания либо доказанный блокер доступа", "Карта session/day/account/engine и источников данных", "Текущий diff и список необходимых untracked dependencies"],
+      "gate": "Не выдавать гипотезу за диагноз; при недоступности runtime продолжить независимые offline этапы"
+    },
+    {
+      "id": "T02",
+      "title": "Общий домен, схема, команды и ledger",
+      "status": "not_started",
+      "depends_on": ["T01"],
+      "requirements": ["REQ-03", "REQ-04", "REQ-06"],
+      "acceptance_cases": ["AC-03", "AC-04", "AC-05", "AC-22"],
+      "ownership": ["paper_trading/contracts.py", "paper_trading/repository.py", "paper_trading/ledger.py", "paper_trading/service.py", "additive SQL migrations", "tests/paper_trading"],
+      "deliverables": ["Архитектура и точная mapping таблиц до изменений", "Типизированные команды и status DTO", "Авторизация, idempotency, Decimal и финансовые равенства"],
+      "gate": "Disposable PostgreSQL integration без skips, golden ledger reconciles"
+    },
+    {
+      "id": "T03",
+      "title": "Perpetual market, риск и исполнение",
+      "status": "not_started",
+      "depends_on": ["T02"],
+      "requirements": ["REQ-05", "REQ-06"],
+      "acceptance_cases": ["AC-07", "AC-08", "AC-09", "AC-10", "AC-11", "AC-12"],
+      "ownership": ["paper_trading/market.py", "paper_trading/risk.py", "paper_trading/execution.py", "collector/htx/perpetual_market.py", "tests/paper_trading/fixtures"],
+      "deliverables": ["Свечи и котировки одного perpetual контракта", "Market/IOC/stop-market модель, partial fills, SL/TP", "Signed funding settlement и liquidation model с источниками/ограничениями"],
+      "gate": "Арифметика и freshness подтверждены; отсутствие market data не вызывает demo fallback"
+    },
+    {
+      "id": "T04",
+      "title": "Реальный baseline runner и восстановление",
+      "status": "not_started",
+      "depends_on": ["T03"],
+      "requirements": ["REQ-07", "REQ-08", "REQ-12", "REQ-13"],
+      "acceptance_cases": ["AC-06", "AC-13", "AC-14", "AC-18"],
+      "ownership": ["paper_trading/strategy.py", "paper_trading/runner.py", "collector/main.py", "collector/scheduler/pipeline_jobs.py", "scripts/run_paper_acceptance.py"],
+      "deliverables": ["Зарегистрированный collector runner", "Baseline v1, dedup, lease fencing, cooldown и recovery", "Recorded replay long/short сигнал→fill→close→ledger с hashes"],
+      "gate": "Полный цикл через production engine на replay; никаких forced orders в acceptance стратегии"
+    },
+    {
+      "id": "T05",
+      "title": "AI план и ограниченное потребление провайдеров",
+      "status": "not_started",
+      "depends_on": ["T04"],
+      "requirements": ["REQ-07", "REQ-08", "REQ-12"],
+      "acceptance_cases": ["AC-15", "AC-16"],
+      "ownership": ["paper_trading/planner.py", "chatbot/services/plan_contract.py", "chatbot/services/plan_store.py", "existing provider gateway integration"],
+      "deliverables": ["Исполняемый подробный план с альтернативами и отказами", "No_trade без противоречивого обязательного entry", "Budget reservation, accounting, stale response guards и независимые protective exits"],
+      "gate": "Mock failures и races проходят; фактический live model audit указывается отдельно"
+    },
+    {
+      "id": "T06",
+      "title": "Один продукт в Telegram и WebUI",
+      "status": "not_started",
+      "depends_on": ["T04", "T05"],
+      "requirements": ["REQ-03", "REQ-09"],
+      "acceptance_cases": ["AC-17", "AC-19", "AC-20"],
+      "ownership": ["paper_trading/presenters.py", "chatbot/handlers/pipeline.py", "chatbot/services/session_manager.py", "webui/paper_api.py", "webui/paper_store.py", "webui/app.py", "existing trading-day/daily-session templates and JS"],
+      "deliverables": ["Общие команды/позиции/P&L и status DTO", "Численные причины нуля позиций и ближайшее действие", "Desktop/mobile и Telegram acceptance evidence"],
+      "gate": "Нет второго скрытого executor в адаптерах; actual Telegram проверка после разрешённого развёртывания"
+    },
+    {
+      "id": "T07",
+      "title": "Закрытие обоих счетов, отчёт, проверяемое обучение",
+      "status": "not_started",
+      "depends_on": ["T05", "T06"],
+      "requirements": ["REQ-06", "REQ-10"],
+      "acceptance_cases": ["AC-21", "AC-22", "AC-23"],
+      "ownership": ["paper_trading/service.py", "paper_trading/learning.py", "report presenters", "learning/reconciliation tests"],
+      "deliverables": ["Idempotent dual-account closeout", "Immutable financial report независимо от AI", "Candidate evaluation/replay/holdout и next-day activation, insufficient_data/deferred"],
+      "gate": "Closed только после settlement/reconciliation; никаких выдуманных применённых правил обучения"
+    },
+    {
+      "id": "T08",
+      "title": "Миграция, release, QA и эксплуатационная документация",
+      "status": "not_started",
+      "depends_on": ["T07"],
+      "requirements": ["REQ-02", "REQ-11", "REQ-12", "REQ-13", "REQ-14"],
+      "acceptance_cases": ["AC-02", "AC-24", "AC-25", "AC-28"],
+      "ownership": ["migration dry-run/cutover scripts", "docker/qa.Dockerfile", "QA/release inventory", "docs/PAPER-TRADING-IMPLEMENTATION.md", "configuration and operations docs"],
+      "deliverables": ["Rehearsal backup/restore/cutover/rollback без двойного владения позицией", "Все зависимости в воспроизводимом release", "Reviewable diff, exact commands, passed/failed/skipped и остаточные риски"],
+      "gate": "Код и QA готовы до запроса на production; env/Compose production изменения только в согласованном внедрении"
+    },
+    {
+      "id": "T09",
+      "title": "Разрешённое внедрение и естественный live_paper цикл",
+      "status": "not_started",
+      "depends_on": ["T08"],
+      "requirements": ["REQ-01", "REQ-02", "REQ-03", "REQ-05", "REQ-06", "REQ-07", "REQ-08", "REQ-09", "REQ-12", "REQ-13", "REQ-14"],
+      "acceptance_cases": ["AC-01", "AC-20", "AC-26", "AC-27", "AC-28"],
+      "ownership": ["approved production deployment", "read-only evidence capture", "final acceptance report"],
+      "deliverables": ["Loaded versions и multi-endpoint runtime status", "60-minute runtime observation", "Естественный auto trade chain и одинаковые данные обоих UI либо явный awaiting_natural_signal"],
+      "gate": "Никаких реальных биржевых ордеров; при отсутствии сигнала не принуждать вход и не объявлять полную live-приёмку"
+    }
+  ]
+}

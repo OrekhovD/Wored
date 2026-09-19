@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "prepared_date": "2026-09-10",
+  "source_root": "D:\\WORED",
+  "observed_head": "b3c0fb1ee7cbb512b14c5c8973e08ebb2b8cb1c2",
+  "evidence_type": "static_file_read_and_git_only",
+  "runtime_verified": false,
+  "application_tests_run": false,
+  "known_modified_tracked_files": [
+    "tests/ui/fixture_app.py"
+  ],
+  "untracked_inventory_note": "Several user files and task bundles are untracked; run fresh git status. Do not delete or overwrite.",
+  "observed_compose_services": [
+    "postgres",
+    "redis",
+    "collector",
+    "chatbot",
+    "chatbot_wored",
+    "webui"
+  ],
+  "observed_python_bases": {
+    "chatbot": "3.9-slim",
+    "collector": "3.9-slim",
+    "webui": "3.11-slim",
+    "qa": "3.11-slim"
+  },
+  "existing_qa": "docker-compose.qa.yml; isolated postgres-qa wored_qa tmpfs internal network",
+  "warnings": [
+    "Current containers were not inspected; Dockerfile bases are configuration, not runtime evidence.",
+    "Production bind mounts make in-place source edits potentially live.",
+    "Reference RFC and this bundle may be untracked and absent from a newly created worktree."
+  ]
+}

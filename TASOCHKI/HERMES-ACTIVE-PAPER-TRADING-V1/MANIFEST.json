@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "package": "HERMES-ACTIVE-PAPER-TRADING-V1",
+  "integrity_scope": "All package files except this manifest; hashes detect changes, not authorship",
+  "files": [
+    {
+      "path": "ACCEPTANCE.md",
+      "bytes": 15984,
+      "sha256": "8982d91e075f1412c99acc61e02ebbf7f65ade0f658963ab8ed04b01a87a3017"
+    },
+    {
+      "path": "BASELINE.json",
+      "bytes": 5345,
+      "sha256": "b0a3a4a31b939e3201f48c581c5266860b18e5b8ba4c438bd01cf0c8dd97307d"
+    },
+    {
+      "path": "EVIDENCE.md",
+      "bytes": 4763,
+      "sha256": "0522849bcf3804b578056d4915a7093f98ac8091d2ec760616511ba0531b46bf"
+    },
+    {
+      "path": "README.md",
+      "bytes": 57504,
+      "sha256": "594acdba9285b7a594396bb2e536c85dceb40e6630a5109569c3aadc9478f4e9"
+    },
+    {
+      "path": "START-HERMES.md",
+      "bytes": 4168,
+      "sha256": "7835e6a827b57f852a93acc2e6a4ae1ac070476c96ff11f6b31b56165df22fa9"
+    },
+    {
+      "path": "TASKS.json",
+      "bytes": 8193,
+      "sha256": "90f358e013dfd3e24f46f2a8a7877a632a21ab0c8ae1ba649345ffec6d7a82e4"
+    },
+    {
+      "path": "validate_bundle.py",
+      "bytes": 3608,
+      "sha256": "b1e5378c8c264ad20aa96858e8540a9e1f196324b3601f0610317ce8b51ddc2b"
+    }
+  ]
+}

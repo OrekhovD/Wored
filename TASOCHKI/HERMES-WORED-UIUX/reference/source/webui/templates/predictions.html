@@ -1,0 +1,956 @@
+{% extends "base.html" %}
+
+{% block content %}
+{# Top prediction launcher: always visible at the top of the page #}
+<section class="panel prediction-launcher-panel">
+  <div class="prediction-launcher-header">
+    <div>
+      <div class="panel-kicker">New Prediction</div>
+      <h2>Launch a model-vs-model forecast</h2>
+    </div>
+    <p class="prediction-launcher-hint">
+      Pick symbol, timeframe and horizon. Bull, Bear and Arbiter roles run side-by-side.
+    </p>
+  </div>
+
+  <form method="post" action="/predictions" class="prediction-launcher-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field-compact field-launcher">
+      <span>Symbol</span>
+      <select name="symbol">
+        {% for symbol in watchlist %}
+        <option value="{{ symbol }}" {% if symbol == default_symbol %}selected{% endif %}>{{ symbol | upper }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field-compact field-launcher">
+      <span>Timeframe</span>
+      <select name="base_timeframe">
+        <option value="60min" selected>1h</option>
+        <option value="15min">15m</option>
+        <option value="4hour">4h</option>
+        <option value="1day">1d</option>
+      </select>
+    </label>
+    <label class="field-compact field-launcher">
+      <span>Steps</span>
+      <select name="horizon_steps">
+        <option value="1" selected>1</option>
+        <option value="4">4</option>
+        <option value="8">8</option>
+        <option value="12">12</option>
+        <option value="24">24</option>
+        <option value="48">48</option>
+      </select>
+    </label>
+    <label class="field-compact field-launcher">
+      <span>Depth</span>
+      <select name="depth">
+        <option value="1">1</option>
+        <option value="3" selected>3</option>
+        <option value="6">6</option>
+        <option value="9">9</option>
+      </select>
+    </label>
+    <button type="submit" class="primary-button prediction-launcher-button">Generate forecast</button>
+  </form>
+</section>
+
+{% if selected_request %}
+{# DETAIL PAGE: compact, no header/form/stats #}
+<section class="prediction-layout prediction-detail-layout">
+  <aside class="panel prediction-sidebar">
+    <div class="section-header">
+      <div>
+        <div class="panel-kicker">Forecast History</div>
+        <h2>Saved requests</h2>
+      </div>
+    </div>
+
+    <div class="request-list request-list-scrollable">
+      {% if prediction_requests %}
+        {% for item in prediction_requests %}
+        <a href="/predictions" class="request-link {% if selected_request and selected_request.id == item.id %}is-selected{% endif %}">
+          <div class="status-pill-row">
+            <strong>{{ item.symbol | upper }}</strong>
+            <span class="table-pill {% if item.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
+              {{ item.status }}
+            </span>
+          </div>
+          <div class="request-meta">
+            <span>{{ item.base_timeframe or '60min' }} · {{ item.horizon_hours }}h</span>
+            <span>${{ "%.2f"|format(item.base_price) }}</span>
+            <span>{{ item.completed_models }}/{{ item.completed_models + item.failed_models }}</span>
+          </div>
+          {% if item.avg_accuracy is not none %}
+          <div class="request-score">Acc {{ "%.0f"|format(item.avg_accuracy) }}%</div>
+          {% endif %}
+          <div class="subtle">{{ item.created_at_display or item.created_at }}</div>
+        </a>
+        {% endfor %}
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-state-icon">🔮</div>
+        <div class="empty-state-title">No forecasts yet</div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="pager">
+      {% if page > 1 %}
+      <a class="ghost-button link-button" href="/predictions?page={{ page - 1 }}">Prev</a>
+      {% endif %}
+      {% if has_next_page %}
+      <a class="ghost-button link-button" href="/predictions?page={{ page + 1 }}">Next</a>
+      {% endif %}
+    </div>
+  </aside>
+
+  <div class="panel prediction-detail">
+    {# Compact header #}
+    <div class="prediction-detail-header">
+      <div>
+        <div class="panel-kicker">Request #{{ selected_request.id }}</div>
+        <h2>{{ selected_request.symbol | upper }} · {{ selected_request.base_timeframe or '60min' }} · {{ selected_request.horizon_hours }}h · depth {{ selected_request.depth or 3 }} · {{ selected_request.models | length }} roles</h2>
+      </div>
+      <div class="detail-metrics-compact">
+        <span class="table-pill {% if selected_request.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}" data-request-status>
+          {{ selected_request.status }}
+        </span>
+        <span class="mono">base ${{ "%.2f"|format(selected_request.base_price) }}</span>
+        <span class="subtle">{{ selected_request.created_at_display or selected_request.created_at }}</span>
+      </div>
+    </div>
+
+    {% if selected_request.status == 'pending' %}
+    <div class="pending-banner" style="margin:0.5rem 0 1rem; padding:0.75rem 1rem; background:rgba(31,214,163,0.12); border:1px solid rgba(31,214,163,0.25); border-radius:8px; color:rgba(255,255,255,0.9);">
+      <strong>Prediction is running in the background.</strong> This page auto-refreshes every 5 seconds.
+    </div>
+    {% endif %}
+
+    {%- set ok = selected_request.completed_models -%}
+    {%- set fail = selected_request.failed_models -%}
+    {%- set ev = selected_request.evaluated_points -%}
+    {%- set tot = selected_request.total_points -%}
+    <div class="detail-chips">
+      <span class="chip"><span class="chip-label">Models</span> <strong>{{ ok }} ok / {{ fail }} fail</strong></span>
+      <span class="chip"><span class="chip-label">Evaluated</span> <strong>{{ ev }}/{{ tot }}</strong></span>
+      {% if selected_request.avg_accuracy is not none %}
+      <span class="chip"><span class="chip-label">Accuracy</span> <strong>{{ "%.1f"|format(selected_request.avg_accuracy) }}%</strong></span>
+      {% endif %}
+    </div>
+
+    {% if selected_request.comparison_rows %}
+    <div class="prediction-chart-card">
+      <div class="section-header-compact">
+        <div class="panel-kicker">Forecast Visualizer</div>
+        <div class="subtle small">Target price paths vs real market</div>
+      </div>
+      <div id="predictionChart" class="chart-frame prediction-chart-frame"></div>
+      <div class="forecast-legend" id="forecastLegend">
+        <div class="forecast-legend-item">
+          <div class="forecast-legend-dot" style="background:#1fd6a3; border-color:#1fd6a3;"></div>
+          <span>History (up)</span>
+        </div>
+        <div class="forecast-legend-item">
+          <div class="forecast-legend-dot" style="background:#ff5d73; border-color:#ff5d73;"></div>
+          <span>History (down)</span>
+        </div>
+        <div class="forecast-legend-item">
+          <div class="forecast-legend-dot" style="background:rgba(54,201,221,0.7); border-color:#36c9dd;"></div>
+          <span>Live (up)</span>
+        </div>
+        <div class="forecast-legend-item">
+          <div class="forecast-legend-dot" style="background:rgba(167,139,250,0.7); border-color:#a78bfa;"></div>
+          <span>Live (down)</span>
+        </div>
+        {% for model in selected_request.comparison_models %}
+        {% set model_colors = ['#1fd6a3', '#36c9dd', '#ff5d73', '#ff9b54', '#a78bfa'] %}
+        <div class="forecast-legend-item" data-role="{{ model.role_name | lower }}">
+          <div class="forecast-legend-line" style="background:{{ model_colors[loop.index0 % 5] }};"></div>
+          <span>{{ model.role_name or 'Model' }} · {{ model.short_name }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="forecast-role-tabs">
+        <button class="forecast-role-tab is-active" data-filter="all">All</button>
+        <button class="forecast-role-tab" data-filter="bull">Bull</button>
+        <button class="forecast-role-tab" data-filter="bear">Bear</button>
+        <button class="forecast-role-tab" data-filter="arbiter">Arbiter</button>
+      </div>
+    </div>
+
+    <section class="detail-block comparison-section">
+      <div class="section-header-compact">
+        <div class="panel-kicker">Comparison Matrix</div>
+        {% if selected_request.top_model %}
+        <span class="table-pill table-pill-ok">Leader {{ selected_request.top_model.short_name }} · {{ "%.1f"|format(selected_request.top_model.avg_accuracy) }}%</span>
+        {% endif %}
+      </div>
+
+      <div class="table-wrap">
+        <table class="data-table comparison-table comparison-table-compact">
+          <thead>
+            <tr>
+              <th class="th-hour">Step</th>
+              <th class="th-target">Target</th>
+              <th class="th-actual">Real</th>
+              {% for model in selected_request.comparison_models %}
+              <th class="comparison-model-head-compact">
+                <div class="model-name-role">
+                  <strong>{{ model.short_name }}</strong>
+                  {% if model.role_name %}
+                  <span class="role-pill role-pill-{{ model.role_name | lower }}">{{ model.role_name }}</span>
+                  {% endif %}
+                </div>
+                <span class="table-pill {% if model.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">{{ model.status }}</span>
+              </th>
+              {% endfor %}
+              <th class="th-best">Best</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in selected_request.comparison_rows %}
+            <tr>
+              <td><strong>#{{ row.step_index }}</strong></td>
+              <td class="mono small">{{ row.target_time_display or row.target_time or "&mdash;" }}</td>
+              <td>
+                {% if row.actual_price is not none %}
+                <strong>${{ "%.0f"|format(row.actual_price) }}</strong>
+                <span class="{% if row.actual_change_pct is not none and row.actual_change_pct > 0 %}delta-up{% elif row.actual_change_pct is not none and row.actual_change_pct < 0 %}delta-down{% endif %} small">
+                  {% if row.actual_change_pct is not none %}{{ "%+.2f"|format(row.actual_change_pct) }}%{% else %}flat{% endif %}
+                </span>
+                {% else %}
+                <span class="subtle">pending</span>
+                {% endif %}
+              </td>
+              {% for cell in row.model_cells %}
+              <td class="comparison-cell-compact {% if cell.is_best %}is-best{% elif cell.cell_state == 'failed' %}is-failed{% endif %}">
+                {% if cell.point %}
+                <div class="cell-price">${{ "%.0f"|format(cell.point.predicted_price) }}</div>
+                <div class="cell-change {% if cell.point.predicted_change_pct > 0 %}delta-up{% elif cell.point.predicted_change_pct < 0 %}delta-down{% endif %}">
+                  {{ "%+.2f"|format(cell.point.predicted_change_pct) }}%
+                </div>
+                {% if cell.point.accuracy_score is not none %}
+                <div class="cell-score">{{ "%.0f"|format(cell.point.accuracy_score) }}%</div>
+                {% else %}
+                <div class="subtle small">pending</div>
+                {% endif %}
+                {% elif cell.cell_state == "failed" %}
+                <span class="subtle small">failed</span>
+                {% else %}
+                <span class="subtle small">—</span>
+                {% endif %}
+              </td>
+              {% endfor %}
+              <td>
+                {% if row.best_accuracy is not none %}
+                <strong class="small">{{ row.best_models | join(", ") }}</strong>
+                <span class="score-badge small">{{ "%.0f"|format(row.best_accuracy) }}%</span>
+                {% else %}
+                <span class="subtle">—</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    {%- if selected_request.comparison_rows -%}
+    {%- set show_individual = false -%}
+    {%- endif -%}
+
+    <div class="prediction-model-list">
+      {% for model in selected_request.models %}
+      <details class="prediction-model-card-compact">
+        <summary class="model-card-summary">
+          <div class="model-card-header">
+            <div class="model-name-role">
+              <strong>{{ model.model_name }}</strong>
+              {% if model.agent_role %}
+              <span class="role-pill role-pill-{{ model.agent_role }}">{{ model.agent_role }}</span>
+              {% endif %}
+            </div>
+            <span class="subtle mono small">{{ model.model_id }}</span>
+          </div>
+          <div class="model-card-meta">
+            <span class="table-pill {% if model.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">{{ model.status }}</span>
+            {% if model.avg_accuracy is not none %}
+            <span class="score-badge small">{{ "%.1f"|format(model.avg_accuracy) }}%</span>
+            {% endif %}
+          </div>
+        </summary>
+
+        {% if model.summary %}
+        <p class="model-summary small">{{ model.summary }}</p>
+        {% endif %}
+        {% if model.error_message %}
+        <p class="model-error small">{{ model.error_message }}</p>
+        {% endif %}
+
+        {% if model.points %}
+        <div class="table-wrap">
+          <table class="data-table forecast-table-compact">
+            <thead>
+              <tr>
+                <th>Step</th>
+                <th>Target</th>
+                <th>Pred</th>
+                <th>Low/High</th>
+                <th>Chg</th>
+                <th>Actual</th>
+                <th>Score</th>
+                <th>Dir</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for point in model.points %}
+              <tr>
+                <td>{{ point.step_index or point.forecast_hour }}</td>
+                <td class="mono small">{{ point.target_time_display or point.target_time }}</td>
+                <td class="mono">${{ "%.0f"|format(point.predicted_price) }}</td>
+                <td class="mono small">
+                  {% if point.get("predicted_low") is not none and point.get("predicted_high") is not none %}
+                    ${{ "%.0f"|format(point.get("predicted_low")) }}–${{ "%.0f"|format(point.get("predicted_high")) }}
+                  {% else %}
+                    <span class="subtle">—</span>
+                  {% endif %}
+                </td>
+                <td class="{% if point.predicted_change_pct > 0 %}delta-up{% elif point.predicted_change_pct < 0 %}delta-down{% endif %}">{{ "%+.2f"|format(point.predicted_change_pct) }}%</td>
+                <td class="mono">
+                  {% if point.actual_price is not none %}${{ "%.0f"|format(point.actual_price) }}{% else %}<span class="subtle">—</span>{% endif %}
+                </td>
+                <td>
+                  {% if point.accuracy_score is not none %}<span class="score-badge small">{{ "%.0f"|format(point.accuracy_score) }}%</span>{% else %}<span class="subtle">—</span>{% endif %}
+                </td>
+                <td>
+                  {% if point.direction_match is sameas true %}<span class="dir-hit">✓</span>{% elif point.direction_match is sameas false %}<span class="dir-miss">✗</span>{% else %}<span class="subtle">—</span>{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </details>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+{% if selected_request and (historical_candles or selected_request.comparison_rows) %}
+<script>
+(function() {
+  function initChart() {
+    var el = document.getElementById('predictionChart');
+    if (!el) return;
+
+    if (typeof LightweightCharts === 'undefined') {
+      setTimeout(initChart, 150);
+      return;
+    }
+
+    if (el._chartInstance) {
+      try { el._chartInstance.remove(); } catch(e) {}
+    }
+
+    var chartWidth = el.clientWidth || el.parentElement.clientWidth || 600;
+    var chart = LightweightCharts.createChart(el, {
+      width: chartWidth,
+      height: 320,
+      autoSize: true,
+      layout: { background: { color: 'transparent' }, textColor: 'rgba(255,255,255,0.7)' },
+      grid: { vertLines: { color: 'rgba(255,255,255,0.05)' }, horzLines: { color: 'rgba(255,255,255,0.05)' } },
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)', autoScale: true },
+      timeScale: {
+        borderColor: 'rgba(255,255,255,0.15)',
+        timeVisible: true,
+        secondsVisible: false,
+        visible: true,
+        height: 28,
+        rightOffset: 4,
+        barSpacing: 8,
+        tickMarkFormatter: function(time) {
+          // time is unix timestamp in seconds; display Asia/Bangkok (+7)
+          var totalSeconds = (time - 0) + 7 * 3600;
+          var d = new Date(totalSeconds * 1000);
+          var h = d.getUTCHours();
+          var m = d.getUTCMinutes();
+          var day = d.getUTCDate();
+          var month = d.getUTCMonth() + 1;
+          return (month < 10 ? '0' : '') + month + '-' + (day < 10 ? '0' : '') + day + ' ' + (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+        },
+      },
+      crosshair: {
+        vertLine: { color: 'rgba(255,255,255,0.3)', width: 1, style: 2, labelBackgroundColor: '#1fd6a3' },
+        horzLine: { color: 'rgba(255,255,255,0.3)', width: 1, style: 2, labelBackgroundColor: '#1fd6a3' },
+      },
+    });
+    el._chartInstance = chart;
+
+    function createCandlestickSeries(options) {
+      // v5 API: chart.addSeries(LightweightCharts.CandlestickSeries, options)
+      if (typeof LightweightCharts.CandlestickSeries !== 'undefined' && typeof chart.addSeries === 'function') {
+        return chart.addSeries(LightweightCharts.CandlestickSeries, options);
+      }
+      // v4 fallback
+      if (typeof chart.addCandlestickSeries === 'function') {
+        return chart.addCandlestickSeries(options);
+      }
+      return null;
+    }
+
+    function createLineSeries(options) {
+      // v5 API: chart.addSeries(LightweightCharts.LineSeries, options)
+      if (typeof LightweightCharts.LineSeries !== 'undefined' && typeof chart.addSeries === 'function') {
+        return chart.addSeries(LightweightCharts.LineSeries, options);
+      }
+      // v4 fallback
+      if (typeof chart.addLineSeries === 'function') {
+        return chart.addLineSeries(options);
+      }
+      return null;
+    }
+
+    var basePrice = {{ selected_request.base_price }};
+    var modelColors = ['#1fd6a3', '#36c9dd', '#ff5d73', '#ff9b54', '#a78bfa'];
+
+    // Historical candles before prediction creation
+    var historicalCandles = {{ historical_candles | tojson }};
+    if (historicalCandles && historicalCandles.length) {
+      var histSeries = createCandlestickSeries({
+        upColor: '#1fd6a3', downColor: '#ff5d73',
+        borderUpColor: '#1fd6a3', borderDownColor: '#ff5d73',
+        wickUpColor: '#1fd6a3', wickDownColor: '#ff5d73'
+      });
+      if (histSeries) {
+        histSeries.setData(historicalCandles);
+      }
+    }
+
+    // Live candles after prediction creation
+    var liveCandles = {{ live_candles | tojson }};
+    if (liveCandles && liveCandles.length) {
+      var liveSeries = createCandlestickSeries({
+        upColor: 'rgba(54,201,221,0.7)', downColor: 'rgba(167,139,250,0.7)',
+        borderUpColor: '#36c9dd', borderDownColor: '#a78bfa',
+        wickUpColor: '#36c9dd', wickDownColor: '#a78bfa'
+      });
+      if (liveSeries) {
+        liveSeries.setData(liveCandles);
+      }
+    }
+
+    // Forecast lines
+    var comparisonModels = {{ selected_request.comparison_models | tojson }};
+    var comparisonRows = {{ selected_request.comparison_rows | tojson }};
+    var forecastSeries = [];
+    if (comparisonModels && comparisonRows && comparisonRows.length) {
+      comparisonModels.forEach(function(model, idx) {
+        forecastSeries[idx] = null;
+        var series = createLineSeries({
+          color: modelColors[idx % modelColors.length],
+          lineWidth: 2,
+          lastValueVisible: false,
+          title: (model.role_name || model.short_name)
+        });
+        if (!series) return;
+        var lineData = comparisonRows
+          .filter(function(row) { return row.model_cells && row.model_cells[idx] && row.model_cells[idx].point; })
+          .map(function(row) {
+            var cell = row.model_cells[idx];
+            var ts = row.target_time_ts;
+            if (!ts && row.target_time) ts = Math.floor(new Date(row.target_time).getTime() / 1000);
+            return {
+              time: ts,
+              value: cell.point.predicted_price
+            };
+          });
+        if (lineData.length) {
+          // Ensure first forecast point connects from base price at creation time
+          var firstTs = lineData[0].time;
+          lineData.unshift({
+            time: {{ base_ts }} || firstTs,
+            value: basePrice
+          });
+          series.setData(lineData);
+        }
+        forecastSeries[idx] = series;
+      });
+    }
+
+    // Forecast candles — average across models per step, drawn as candlesticks
+    if (comparisonRows && comparisonRows.length) {
+      var fcCandles = [];
+      comparisonRows.forEach(function(row) {
+        var ts = row.target_time_ts;
+        if (!ts && row.target_time) ts = Math.floor(new Date(row.target_time).getTime() / 1000);
+        if (!ts) return;
+        // Round to the START of the next hour so forecast candles sit on
+        // clean hourly boundaries and don't overlap live/historical candles.
+        // target_time is the END of the forecast hour (e.g. 08:59:39);
+        // ceil to the next hour boundary (09:00:00) for a distinct bar.
+        ts = Math.floor(ts); // Preserve the target timestamp for every configured timeframe.
+        var prices = [], lows = [], highs = [];
+        row.model_cells.forEach(function(cell) {
+          if (cell.point) {
+            prices.push(cell.point.predicted_price);
+            if (cell.point.predicted_low) lows.push(cell.point.predicted_low);
+            if (cell.point.predicted_high) highs.push(cell.point.predicted_high);
+          }
+        });
+        if (!prices.length) return;
+        var avg = prices.reduce(function(a,b){return a+b}) / prices.length;
+        var lo = lows.length ? Math.min.apply(null, lows) : avg;
+        var hi = highs.length ? Math.max.apply(null, highs) : avg;
+        // Determine open: use previous forecast candle close or base price
+        var openVal = fcCandles.length ? fcCandles[fcCandles.length-1].close : basePrice;
+        fcCandles.push({
+          time: ts,
+          open: openVal,
+          high: hi,
+          low: lo,
+          close: avg
+        });
+      });
+      if (fcCandles.length) {
+        var fcSeries = createCandlestickSeries({
+          upColor: '#f97316', downColor: '#a78bfa',
+          borderUpColor: '#f97316', borderDownColor: '#a78bfa',
+          wickUpColor: '#f97316', wickDownColor: '#a78bfa'
+        });
+        if (fcSeries) {
+          fcSeries.setData(fcCandles);
+        }
+      }
+    }
+
+    chart.timeScale().fitContent();
+
+    // Keep references to series keyed by role so tabs can toggle visibility
+    var seriesByRole = {};
+    comparisonModels.forEach(function(model, idx) {
+      var role = (model.agent_role || model.role_name || 'neutral').toLowerCase();
+      if (!seriesByRole[role]) seriesByRole[role] = [];
+      if (forecastSeries[idx]) seriesByRole[role].push(forecastSeries[idx]);
+    });
+
+    document.querySelectorAll('.forecast-role-tab').forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        var filter = tab.dataset.filter;
+        document.querySelectorAll('.forecast-role-tab').forEach(function(t) { t.classList.remove('is-active'); });
+        tab.classList.add('is-active');
+        document.querySelectorAll('.forecast-legend-item[data-role]').forEach(function(item) {
+          var visible = filter === 'all' || item.dataset.role === filter;
+          item.classList.toggle('is-hidden', !visible);
+        });
+        Object.keys(seriesByRole).forEach(function(role) {
+          var visible = filter === 'all' || role === filter;
+          seriesByRole[role].forEach(function(s) { s.applyOptions({ visible: visible }); });
+        });
+      });
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initChart);
+  } else {
+    initChart();
+  }
+})();
+</script>
+{% endif %}
+
+{% else %}
+{# LIST PAGE: full header + form + stats + sidebar #}
+<header class="page-header">
+  <div>
+    <div class="eyebrow">Prediction Lab</div>
+    <h1>Multi-timeframe multi-model crypto forecasts</h1>
+    <p class="page-copy">
+      Choose a symbol, timeframe, and step horizon; generate price paths from Bull, Bear, and Arbiter roles;
+      then track how each one performs against the real market as steps close.
+    </p>
+  </div>
+  <div class="stats-grid prediction-stats">
+    <div class="metric-card">
+      <span class="metric-label">Available symbols</span>
+      <span class="metric-value">{{ watchlist | length }}</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Forecast steps</span>
+      <span class="metric-value">1–48</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Model slots</span>
+      <span class="metric-value">{{ model_statuses | length }}</span>
+    </div>
+  </div>
+</header>
+
+<section class="panel prediction-form-panel">
+  <div class="section-header">
+    <div>
+      <div class="panel-kicker">New Prediction</div>
+      <h2>Launch a model-vs-model forecast request</h2>
+    </div>
+    <div class="subtle">Every model predicts each hour from the same base price.</div>
+  </div>
+
+  <form method="post" action="/predictions" class="prediction-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="field">
+      <span>Symbol</span>
+      <select name="symbol">
+        {% for symbol in watchlist %}
+        <option value="{{ symbol }}" {% if symbol == default_symbol %}selected{% endif %}>{{ symbol | upper }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Timeframe</span>
+      <select name="base_timeframe">
+        <option value="60min" selected>1h</option>
+        <option value="15min">15m</option>
+        <option value="4hour">4h</option>
+        <option value="1day">1d</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Steps</span>
+      <select name="horizon_steps">
+        <option value="4" selected>4</option>
+        <option value="8">8</option>
+        <option value="12">12</option>
+        <option value="24">24</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Pattern depth</span>
+      <select name="depth">
+        <option value="3" selected>3</option>
+        <option value="6">6</option>
+        <option value="9">9</option>
+      </select>
+    </label>
+
+    <button type="submit" class="primary-button">Generate forecast</button>
+  </form>
+
+  <div class="model-status-grid">
+    {% for item in model_statuses %}
+    <div class="model-status {% if item.available %}is-ready{% else %}is-missing{% endif %}">
+      <div class="status-pill-row">
+        <strong>{{ item.name }}</strong>
+        <span class="table-pill {% if item.available %}table-pill-ok{% else %}table-pill-warn{% endif %}">
+          {% if item.available %}ready{% else %}offline{% endif %}
+        </span>
+      </div>
+      <div class="subtle mono">{{ item.model_id }}</div>
+      {% if item.reason %}
+      <div class="model-status-copy">{{ item.reason }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="prediction-layout">
+  <aside class="panel prediction-sidebar">
+    <div class="section-header">
+      <div>
+        <div class="panel-kicker">Forecast History</div>
+        <h2>Saved requests</h2>
+      </div>
+    </div>
+
+    <div class="request-list request-list-scrollable">
+      {% if prediction_requests %}
+        {% for item in prediction_requests %}
+        <a href="/predictions" class="request-link {% if selected_request and selected_request.id == item.id %}is-selected{% endif %}">
+          <div class="status-pill-row">
+            <strong>{{ item.symbol | upper }}</strong>
+            <span class="table-pill {% if item.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">
+              {{ item.status }}
+            </span>
+          </div>
+          <div class="request-meta">
+            <span>{{ item.base_timeframe or '60min' }} · {{ item.horizon_hours }}h</span>
+            <span>base ${{ "%.2f"|format(item.base_price) }}</span>
+          </div>
+          <div class="request-meta">
+            <span>{{ item.completed_models }} ok / {{ item.failed_models }} fail</span>
+            <span>{{ item.evaluated_points }}/{{ item.total_points }} evaluated</span>
+          </div>
+          {% if item.avg_accuracy is not none %}
+          <div class="request-score">Avg success {{ "%.1f"|format(item.avg_accuracy) }}% / miss {{ "%.1f"|format(item.avg_failure) }}%</div>
+          {% endif %}
+          <div class="subtle">{{ item.created_at_display or item.created_at }}</div>
+        </a>
+        {% endfor %}
+      {% else %}
+      <div class="empty-state">
+        <div class="empty-state-icon">🔮</div>
+        <div class="empty-state-title">No forecasts yet</div>
+        <div class="empty-state-copy">Generate a forecast to compare model predictions against real market data.</div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="pager">
+      {% if page > 1 %}
+      <a class="ghost-button link-button" href="/predictions?page={{ page - 1 }}">Previous</a>
+      {% endif %}
+      {% if has_next_page %}
+      <a class="ghost-button link-button" href="/predictions?page={{ page + 1 }}">Next</a>
+      {% endif %}
+    </div>
+  </aside>
+
+  <div class="panel prediction-detail">
+    {% if selected_request %}
+    <div class="section-header">
+      <div>
+        <div class="panel-kicker">Request #{{ selected_request.id }}</div>
+        <h2>{{ selected_request.symbol | upper }} over {{ selected_request.horizon_hours }} hour{% if selected_request.horizon_hours != 1 %}s{% endif %}</h2>
+      </div>
+      <div class="detail-metrics">
+        <span class="table-pill {% if selected_request.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}" data-request-status>
+          {{ selected_request.status }}
+        </span>
+        <span class="subtle">Base ${{ "%.2f"|format(selected_request.base_price) }}</span>
+      </div>
+    </div>
+
+    {% if selected_request.status == 'pending' %}
+    <div class="pending-banner" style="margin:0.75rem 0; padding:0.75rem 1rem; background:rgba(31,214,163,0.12); border:1px solid rgba(31,214,163,0.25); border-radius:8px; color:rgba(255,255,255,0.9);">
+      <strong>Prediction is running in the background.</strong> This page auto-refreshes every 5 seconds.
+    </div>
+    {% endif %}
+
+    <div class="stats-grid">
+      <div class="metric-card">
+        <span class="metric-label">Created</span>
+        <span class="metric-value">{{ selected_request.created_at_display or selected_request.created_at }}</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Models</span>
+        <span class="metric-value">{{ selected_request.completed_models }} ok / {{ selected_request.failed_models }} fail</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Evaluation</span>
+        <span class="metric-value">{{ selected_request.evaluated_points }}/{{ selected_request.total_points }}</span>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Average success</span>
+        <span class="metric-value">
+          {% if selected_request.avg_accuracy is not none %}
+          {{ "%.1f"|format(selected_request.avg_accuracy) }}% / miss {{ "%.1f"|format(selected_request.avg_failure) }}%
+          {% else %}
+          pending
+          {% endif %}
+        </span>
+      </div>
+    </div>
+
+    {% if selected_request.comparison_rows %}
+    <section class="detail-block comparison-section">
+      <div class="section-header">
+        <div>
+          <div class="panel-kicker">Comparison Matrix</div>
+          <h3>Real market versus every model by hour</h3>
+        </div>
+        {% if selected_request.top_model %}
+        <div class="detail-metrics">
+          <span class="table-pill table-pill-ok">Leader {{ selected_request.top_model.short_name }}</span>
+          <span class="score-badge">{{ "%.1f"|format(selected_request.top_model.avg_accuracy) }}%</span>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="table-wrap">
+        <table class="data-table comparison-table">
+          <thead>
+            <tr>
+              <th>Hour</th>
+              <th>Target</th>
+              <th>Real result</th>
+              {% for model in selected_request.comparison_models %}
+              <th class="comparison-model-head">
+                <div class="comparison-head">
+                  <strong>{{ model.short_name }}</strong>
+                  {% if model.role_name %}
+                  <div class="subtle">{{ model.role_name }}</div>
+                  {% endif %}
+                </div>
+                <span class="table-pill {% if model.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">{{ model.status }}</span>
+              </th>
+              {% endfor %}
+              <th>Best</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in selected_request.comparison_rows %}
+            <tr>
+              <td><strong>{{ row.step_index }}</strong></td>
+              <td class="mono small">{{ row.target_time_display or row.target_time or "&mdash;" }}</td>
+              <td>
+                {% if row.actual_price is not none %}
+                <strong>${{ "%.0f"|format(row.actual_price) }}</strong>
+                <span class="{% if row.actual_change_pct is not none and row.actual_change_pct > 0 %}delta-up{% elif row.actual_change_pct is not none and row.actual_change_pct < 0 %}delta-down{% endif %} small">
+                  {% if row.actual_change_pct is not none %}{{ "%+.2f"|format(row.actual_change_pct) }}%{% else %}flat{% endif %}
+                </span>
+                {% else %}
+                <span class="subtle">pending</span>
+                {% endif %}
+              </td>
+              {% for cell in row.model_cells %}
+              <td class="{% if cell.is_best %}is-best{% elif cell.cell_state == 'failed' %}is-failed{% endif %}">
+                {% if cell.point %}
+                <div class="cell-price">${{ "%.0f"|format(cell.point.predicted_price) }}</div>
+                <div class="cell-change {% if cell.point.predicted_change_pct > 0 %}delta-up{% elif cell.point.predicted_change_pct < 0 %}delta-down{% endif %}">
+                  {{ "%+.2f"|format(cell.point.predicted_change_pct) }}%
+                </div>
+                {% if cell.point.accuracy_score is not none %}
+                <div class="cell-score">{{ "%.0f"|format(cell.point.accuracy_score) }}%</div>
+                {% else %}
+                <div class="subtle small">pending</div>
+                {% endif %}
+                {% elif cell.cell_state == "failed" %}
+                <span class="subtle small">failed</span>
+                {% else %}
+                <span class="subtle small">—</span>
+                {% endif %}
+              </td>
+              {% endfor %}
+              <td>
+                {% if row.best_accuracy is not none %}
+                <strong class="small">{{ row.best_models | join(", ") }}</strong>
+                <span class="score-badge small">{{ "%.0f"|format(row.best_accuracy) }}%</span>
+                {% else %}
+                <span class="subtle">—</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
+    <div class="prediction-model-list">
+      {% for model in selected_request.models %}
+      <details class="prediction-model-card">
+        <summary>
+          <div class="model-name-role">
+            <strong>{{ model.model_name }}</strong>
+            {% if model.agent_role %}
+            <span class="role-pill role-pill-{{ model.agent_role }}">{{ model.agent_role }}</span>
+            {% endif %}
+          </div>
+          <div class="model-card-meta">
+            <span class="table-pill {% if model.status == 'completed' %}table-pill-ok{% else %}table-pill-warn{% endif %}">{{ model.status }}</span>
+            {% if model.avg_accuracy is not none %}
+            <span class="score-badge">{{ "%.1f"|format(model.avg_accuracy) }}%</span>
+            {% endif %}
+          </div>
+        </summary>
+
+        {% if model.summary %}
+        <p class="model-summary">{{ model.summary }}</p>
+        {% endif %}
+        {% if model.error_message %}
+        <p class="model-error">{{ model.error_message }}</p>
+        {% endif %}
+
+        {% if model.points %}
+        <div class="table-wrap">
+          <table class="data-table forecast-table">
+            <thead>
+              <tr>
+                <th>Hour</th>
+                <th>Target</th>
+                <th>Pred</th>
+                <th>Low/High</th>
+                <th>Chg</th>
+                <th>Actual</th>
+                <th>Score</th>
+                <th>Dir</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for point in model.points %}
+              <tr>
+                <td>{{ point.step_index or point.forecast_hour }}</td>
+                <td class="mono small">{{ point.target_time_display or point.target_time }}</td>
+                <td class="mono">${{ "%.0f"|format(point.predicted_price) }}</td>
+                <td class="mono small">
+                  {% if point.get("predicted_low") is not none and point.get("predicted_high") is not none %}
+                    ${{ "%.0f"|format(point.get("predicted_low")) }}–${{ "%.0f"|format(point.get("predicted_high")) }}
+                  {% else %}
+                    <span class="subtle">—</span>
+                  {% endif %}
+                </td>
+                <td class="{% if point.predicted_change_pct > 0 %}delta-up{% elif point.predicted_change_pct < 0 %}delta-down{% endif %}">{{ "%+.2f"|format(point.predicted_change_pct) }}%</td>
+                <td class="mono">
+                  {% if point.actual_price is not none %}${{ "%.0f"|format(point.actual_price) }}{% else %}<span class="subtle">—</span>{% endif %}
+                </td>
+                <td>
+                  {% if point.accuracy_score is not none %}<span class="score-badge">{{ "%.0f"|format(point.accuracy_score) }}%</span>{% else %}<span class="subtle">—</span>{% endif %}
+                </td>
+                <td>
+                  {% if point.direction_match is sameas true %}<span class="dir-hit">✓</span>{% elif point.direction_match is sameas false %}<span class="dir-miss">✗</span>{% else %}<span class="subtle">—</span>{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </details>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-state-icon">🔮</div>
+      <div class="empty-state-title">No forecast selected</div>
+      <div class="empty-state-copy">Generate a forecast or pick one from the list to inspect model predictions.</div>
+    </div>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% if selected_request and selected_request.status == 'pending' %}
+<script>
+(function() {
+  var selectedId = {{ selected_request.id }};
+  var statusEl = document.querySelector('[data-request-status]');
+  function poll() {
+    fetch('/api/predictions')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var items = data && data.items ? data.items : [];
+        var latest = items[0] || {};
+        if (latest.id === selectedId && latest.status !== 'pending') {
+          window.location.reload();
+          return;
+        }
+        if (statusEl && latest.id === selectedId) { statusEl.textContent = latest.status; }
+      })
+      .catch(function() {});
+  }
+  setInterval(poll, 5000);
+  poll();
+})();
+</script>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,329 @@
+{
+  "package_version": "1.1",
+  "entrypoint": "README.md",
+  "target_model": "GLM-5.2",
+  "source_base": "9eb52a07609f05d9e5304caac039630e2bb04057",
+  "verified_target_head": "5bed365d1d147447e1002ca7ca0a0fb5cba59064",
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "44f4aaca2d9a3103dd0a43a828f819229073079c86da13e7cfdfa509e6c07752",
+      "bytes": 1609
+    },
+    {
+      "path": "AUTHORING-CHECKS.json",
+      "sha256": "8158ffb882afd9ddc3c7868df98ac5e872d0af8e985ae9430f96f6100ec18d33",
+      "bytes": 684
+    },
+    {
+      "path": "bootstrap.ps1",
+      "sha256": "b236dd47f1e243e7fba4efde92404373fc8681cf8ef974f1796822f485846521",
+      "bytes": 2225
+    },
+    {
+      "path": "FILES.md",
+      "sha256": "66f437f6eeafd72f44c628b66eb4f02da53eb84bfcfaa4e4091eb2369303d777",
+      "bytes": 5823
+    },
+    {
+      "path": "payload/changed-files/.dockerignore",
+      "sha256": "d15c78cc2d5f7d837aed9cfe8a3053c50873eca330dfc0a62be8926937004662",
+      "bytes": 86
+    },
+    {
+      "path": "payload/changed-files/chatbot/handlers/predictions.py",
+      "sha256": "ca908caab433ee7a97b7ea86852150bbddf36eaaaadf7ea205fa647808934051",
+      "bytes": 13379
+    },
+    {
+      "path": "payload/changed-files/chatbot/integrations/webui_client.py",
+      "sha256": "3cb1300ff912f82f46be782cfdcadad75cbd1f4a1b778f434c228e1bc7aa9cd0",
+      "bytes": 2435
+    },
+    {
+      "path": "payload/changed-files/chatbot/services/execution_engine.py",
+      "sha256": "e62f8ecd6441c6e412fc6c657f6760d43d879bcbebb17441836021c29355d50a",
+      "bytes": 19353
+    },
+    {
+      "path": "payload/changed-files/chatbot/services/market_data.py",
+      "sha256": "bc10bcfe822406bda58491dd49bdf0e051766333771fcf2c911362ca28a30164",
+      "bytes": 5239
+    },
+    {
+      "path": "payload/changed-files/chatbot/services/pipeline_schema.py",
+      "sha256": "0f592b24bb7272276c875f46595df20e8a323d5d8eadf7a68819195f54456109",
+      "bytes": 10565
+    },
+    {
+      "path": "payload/changed-files/chatbot/services/session_manager.py",
+      "sha256": "f4a5459b4f7bd4da75411f07ceecee34be3ad95c0716654f617e5d286fbb62b8",
+      "bytes": 69202
+    },
+    {
+      "path": "payload/changed-files/chatbot/services/sim_engine.py",
+      "sha256": "a7b301f0bef7d33ad6e6806df8dcfb497dd23e04dcba849f2901e5b1819d6a2e",
+      "bytes": 17250
+    },
+    {
+      "path": "payload/changed-files/chatbot/services/sim_math.py",
+      "sha256": "9b4729de3162727970d2ea10646b0bac84cc4fc7bab52f96e5bab6071293029b",
+      "bytes": 2877
+    },
+    {
+      "path": "payload/changed-files/chatbot/tests/test_predictions_handler.py",
+      "sha256": "510ddaf10148ed22dc0f66f85bc40bcb85945357871f016d1008d5d3fcc6d85b",
+      "bytes": 4517
+    },
+    {
+      "path": "payload/changed-files/collector/htx/websocket.py",
+      "sha256": "18fb2e47482e245aed7bd223ea242904e4535d6166f9ffe6f91883e168eb1511",
+      "bytes": 2866
+    },
+    {
+      "path": "payload/changed-files/collector/indicators/calculator.py",
+      "sha256": "aca979861dfa46200d4ff99ef0332389fedf2accd9483dccf6ff65ea6a5d7c1e",
+      "bytes": 1036
+    },
+    {
+      "path": "payload/changed-files/collector/indicators/snapshot.py",
+      "sha256": "b2b01ea1f5e8dff68d7d6801234e93c9ca793892012ca10b12dcb0fe95579cde",
+      "bytes": 1103
+    },
+    {
+      "path": "payload/changed-files/collector/main.py",
+      "sha256": "3eeb58291f327a8fa6c4ec9f6b78badb16eb1163f0fdd80c2e8a6c19c46b05cb",
+      "bytes": 3946
+    },
+    {
+      "path": "payload/changed-files/collector/predictions/evaluator.py",
+      "sha256": "ee0402e1c928426cd36bd3bd3aaac1ac24950b6bedf09bf576fa662b608a6a38",
+      "bytes": 9444
+    },
+    {
+      "path": "payload/changed-files/collector/predictions/scoring.py",
+      "sha256": "f965f74b4f487ef613eaef312b9b4cb190533a6c83ab2934d9e66e9a895b1263",
+      "bytes": 2259
+    },
+    {
+      "path": "payload/changed-files/collector/scheduler/pipeline_jobs.py",
+      "sha256": "9b9a2a740ba2680766d2dfbbcacef0b962fb2bbba42fff825d74509ef7b43ff0",
+      "bytes": 12088
+    },
+    {
+      "path": "payload/changed-files/collector/scheduler/sim_monitor.py",
+      "sha256": "d33d51636d5991cee60afbd3e3bcf803ce1bc58c773f1f73e1354c2a68a1468d",
+      "bytes": 4644
+    },
+    {
+      "path": "payload/changed-files/collector/tests/test_predictions.py",
+      "sha256": "c53855cb38ca03306fe07d49f1c1f25aa492766a75915de7adbf23325c886b8f",
+      "bytes": 2077
+    },
+    {
+      "path": "payload/changed-files/docker/qa.Dockerfile",
+      "sha256": "fc27b79e320cb2a63d0f4ccee2bf3963c28fb7060d6cb65bd663964d83e905e3",
+      "bytes": 438
+    },
+    {
+      "path": "payload/changed-files/docker-compose.qa.yml",
+      "sha256": "1313366c1d9a9dfd392fa6f44f9c3dae707267b3ef6c897ee0cae4d7a48dbe11",
+      "bytes": 710
+    },
+    {
+      "path": "payload/changed-files/docker-compose.yml",
+      "sha256": "1d5460f6bab7989a368881ef4956b3d9db848f6a80b9893986f72efc888803d0",
+      "bytes": 2601
+    },
+    {
+      "path": "payload/changed-files/docs/STABILIZATION-2026-09-08.md",
+      "sha256": "babeb62451f48bd697b1b2b063ca0d3e88818e41aea569d4ae24f520658b9cfa",
+      "bytes": 12829
+    },
+    {
+      "path": "payload/changed-files/pytest.ini",
+      "sha256": "da9808d584f4d7bf9f89efb0e294727a7abd06903d9ae8fbc45f5dd93c59b684",
+      "bytes": 75
+    },
+    {
+      "path": "payload/changed-files/scripts/check_stabilization.py",
+      "sha256": "5d1f5f755db499df1504e64b4549eb62847f7cfd7c8b2e0d21c0a9a9aea1dded",
+      "bytes": 1336
+    },
+    {
+      "path": "payload/changed-files/scripts/run_stabilization_tests.py",
+      "sha256": "f3467af6d2bee382ccbfca47e21fe1de4291dee6c3de94d5f2cab5e2a195ce7c",
+      "bytes": 488
+    },
+    {
+      "path": "payload/changed-files/tests/stabilization/test_contracts.py",
+      "sha256": "9f92a8d674d8679a81b5a30bf5445864b861acefa69b1ac9ff71c0e6ae01d8fc",
+      "bytes": 10313
+    },
+    {
+      "path": "payload/changed-files/tests/stabilization/test_execution_contracts.py",
+      "sha256": "1c80268335ddd78020d4f32cdd89681124672f38d806519a69eea39a47e1b9e8",
+      "bytes": 3438
+    },
+    {
+      "path": "payload/changed-files/tests/stabilization/test_http_boundary.py",
+      "sha256": "d05bf7fba52e035e467bc4a48e283ff2adf3b4fc07cab27d0b605164adac572a",
+      "bytes": 3913
+    },
+    {
+      "path": "payload/changed-files/tests/stabilization/test_postgres_queue.py",
+      "sha256": "c8478acb270551226e8f3daeaebbf76a686b1ee33512f02da024658bced91788",
+      "bytes": 4334
+    },
+    {
+      "path": "payload/changed-files/tests/stabilization/test_postgres_sessions.py",
+      "sha256": "1ece384e45bba0d9e1424c25e4e9ff062ca91be41d92e080f001854a310c5197",
+      "bytes": 4905
+    },
+    {
+      "path": "payload/changed-files/webui/access_control.py",
+      "sha256": "380d30ac87f7dba2eddc2b4bbde403e6ea6d4fa152fa772da33c9b2ea9c97f0b",
+      "bytes": 2174
+    },
+    {
+      "path": "payload/changed-files/webui/app.py",
+      "sha256": "3810ebdfae8fabfe152f77b54eca372b828db60263e0960a310f7f0174f80cb4",
+      "bytes": 173283
+    },
+    {
+      "path": "payload/changed-files/webui/forecast_input.py",
+      "sha256": "73a207abe286ea154acd7ab39c760cf245a4f407908710fdc751283aab1479ce",
+      "bytes": 1898
+    },
+    {
+      "path": "payload/changed-files/webui/forecast_queue.py",
+      "sha256": "4e64c02c358280924a64f94b570869fea24408ce8e89a13c0b36fa58b4810051",
+      "bytes": 3902
+    },
+    {
+      "path": "payload/changed-files/webui/forecast_schema.py",
+      "sha256": "092bc9037639e0095de64b46627c263b6981f010bc37c8b488a6f03f119674bc",
+      "bytes": 4435
+    },
+    {
+      "path": "payload/changed-files/webui/prediction_engine.py",
+      "sha256": "3f98803e7547302016b6ade0c5bbae27216a95e87dfb303ad551800f57cc3402",
+      "bytes": 36084
+    },
+    {
+      "path": "payload/changed-files/webui/templates/base.html",
+      "sha256": "4d123ca069b5e8ea015acf00fe309ddec957a589f27d712fbd667155a520de56",
+      "bytes": 4945
+    },
+    {
+      "path": "payload/changed-files/webui/templates/command_deck.html",
+      "sha256": "6f98b1399c5e90471a0023ff8713c52777a3109eb002c899b4f1de0aeba96546",
+      "bytes": 26281
+    },
+    {
+      "path": "payload/changed-files/webui/templates/daily_session.html",
+      "sha256": "98f62d0c2c4a858777026a620c38e730f6cc36a6f28eef217057d1cecb6a1454",
+      "bytes": 45158
+    },
+    {
+      "path": "payload/changed-files/webui/templates/login.html",
+      "sha256": "d4d20d47f1111aee3f6ab2287ceb94016345fff736ea362714fe907aeb1789e6",
+      "bytes": 2070
+    },
+    {
+      "path": "payload/changed-files/webui/templates/predictions.html",
+      "sha256": "adcfd66d048e8550abda32bb6aaca462251967fcb00e6973ea1e574f5d73ce4f",
+      "bytes": 41542
+    },
+    {
+      "path": "payload/changed-files/webui/tests/test_app.py",
+      "sha256": "12fe253f83c82ebd716046ec533275e9378fe33eda5336f526f070029710aabb",
+      "bytes": 8106
+    },
+    {
+      "path": "payload/changed-files/webui/tests/test_prediction_engine.py",
+      "sha256": "92d74b5ce7b0aa68f3dbca008544216f7acfd4a07c85f8e9dfba64fd56484e23",
+      "bytes": 4403
+    },
+    {
+      "path": "payload/evidence/collector-tests.xml",
+      "sha256": "20cfebe028535583c3a24de496141e8bf3dc6352e02dd3f74b633b6ae888d43c",
+      "bytes": 1151
+    },
+    {
+      "path": "payload/evidence/http-stabilization-tests.xml",
+      "sha256": "71ab3ec7a24f4b0dd0ceda3b38b1c1a1370d63bbc407b931ceac03213d60ef76",
+      "bytes": 12540
+    },
+    {
+      "path": "payload/evidence/live-qa-evidence.json",
+      "sha256": "1dee4ad88b5e20d4c468be18285c07e2b6e5ba4a7a2d0280c780ac1136ed0413",
+      "bytes": 988
+    },
+    {
+      "path": "payload/evidence/sql-tests.xml",
+      "sha256": "d7ea9808682cb79e49e3ecef99d96717daebf5a39fdfbc59a09ae8327268e5bb",
+      "bytes": 1451
+    },
+    {
+      "path": "payload/evidence/stabilization-tests.xml",
+      "sha256": "9a7359a4db628bfb40339b2100167e0bf57301caf6756adcddfc7a51eb8ce1ac",
+      "bytes": 12820
+    },
+    {
+      "path": "payload/evidence/syntax_evidence.json",
+      "sha256": "cc985a70c0f7d977f744ee94aa9d21d75b173446e37d2c30aaddd0df7ac83f02",
+      "bytes": 298
+    },
+    {
+      "path": "payload/evidence/telegram-tests.xml",
+      "sha256": "8d561dbd521a1d14d63238de68410b0b8e9915bdd7fd9523f0570d575b808d9a",
+      "bytes": 1986
+    },
+    {
+      "path": "payload/evidence/tool-checks.json",
+      "sha256": "9ccd5528cd1b18425a76851d8f9477a38dd0eadc3faa775a341ead2edcf29f34",
+      "bytes": 2559
+    },
+    {
+      "path": "payload/manifest.json",
+      "sha256": "e6267369f27f8cd988f296195d72008e9f218f72eb3d1ace9bca3f0eb1ab6616",
+      "bytes": 10283
+    },
+    {
+      "path": "payload/REPORT.md",
+      "sha256": "6fc0a5dee8d0ce4f6d0776e5145a815e96ea58ccb4387c55f029d0621a683251",
+      "bytes": 21641
+    },
+    {
+      "path": "payload/stabilization.patch",
+      "sha256": "9fe2488fa6c536430fe37fedf23f5f602bf0b194a51af827c387a1ecba855906",
+      "bytes": 209083
+    },
+    {
+      "path": "README.md",
+      "sha256": "ab6712266fe5a33e5bf3d5ff56da006a22d2c63b1b3b378cd19b57284d327eda",
+      "bytes": 93180
+    },
+    {
+      "path": "reference/INDEPENDENT-REVIEW.md",
+      "sha256": "dd7e51c07e48127fded1054b727720a17f0ae45d58e6195250944b7bdc75d939",
+      "bytes": 65831
+    },
+    {
+      "path": "requirements-qa.txt",
+      "sha256": "8f52daf7a86ab0bf2f47a0475be616de83fff8de9773dba0d5e2400f8518303e",
+      "bytes": 1074
+    },
+    {
+      "path": "tools/run_sql_qa.py",
+      "sha256": "4462b9f6ab63bed003911c1e651616bcbd4c4ad45a5e5aad61107dfa53407a55",
+      "bytes": 3613
+    },
+    {
+      "path": "tools/verify_payload.py",
+      "sha256": "4771c093e2f971248391f5ba23118293aeb1abe3471e589c008a7c6a2010e66c",
+      "bytes": 2583
+    }
+  ]
+}

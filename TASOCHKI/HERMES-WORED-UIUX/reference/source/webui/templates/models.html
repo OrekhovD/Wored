@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="cockpit">
+  <div class="cockpit-main">
+    <div class="cockpit-symbol">MODEL MANAGEMENT</div>
+    <div class="cockpit-price" id="mmStatus">—</div>
+    <div class="cockpit-delta" id="mmSummary">Загрузка...</div>
+  </div>
+</div>
+
+<main class="dashboard">
+  <section class="panel panel-chart">
+    <div class="panel-header">
+      <div>
+        <div class="panel-kicker">Probe</div>
+        <h2>Статус моделей</h2>
+      </div>
+      <div class="toolbar">
+        <button class="ghost-button is-active" onclick="mmProbe()">Обновить</button>
+      </div>
+    </div>
+    <div id="mmModels" class="event-list">Загрузка...</div>
+  </section>
+  <aside class="side-column">
+    <section class="panel">
+      <div class="panel-kicker">Summary</div>
+      <h2>Сводка</h2>
+      <div id="mmSummaryGrid" class="pill-grid"></div>
+    </section>
+  </aside>
+</main>
+
+<script>
+async function mmProbe() {
+  document.getElementById('mmModels').innerHTML = 'Пробую...';
+  try {
+    const r = await fetch('/api/models/probe');
+    if (!r.ok) {
+      document.getElementById('mmModels').innerHTML = '<div class="event-item">Auth required or error</div>';
+      return;
+    }
+    const data = await r.json();
+    const models = data.models || [];
+    
+    let okCount = 0, failCount = 0, noKeyCount = 0;
+    document.getElementById('mmModels').innerHTML = models.map(m => {
+      const isOk = m.status === 'ok';
+      const isNoKey = m.status === 'no_key';
+      if (isOk) okCount++;
+      else if (isNoKey) noKeyCount++;
+      else failCount++;
+      
+      const icon = isOk ? '✅' : isNoKey ? '🔑' : '❌';
+      const latency = m.latency_ms ? `${m.latency_ms}ms` : '';
+      return `<div class="event-item">
+        <span class="event-symbol">${icon} ${m.name}</span>
+        <span class="event-detail">${m.provider} | ${m.model_id} | ${m.status} ${latency}</span>
+      </div>`;
+    }).join('');
+    
+    document.getElementById('mmStatus').textContent = okCount + '/' + models.length;
+    document.getElementById('mmSummary').textContent = `OK: ${okCount} | Fail: ${failCount} | No key: ${noKeyCount}`;
+    document.getElementById('mmSummaryGrid').innerHTML = `
+      <div class="pill"><span class="pill-label">OK</span><span class="pill-value is-ok">${okCount}</span></div>
+      <div class="pill"><span class="pill-label">Failed</span><span class="pill-value is-warn">${failCount}</span></div>
+      <div class="pill"><span class="pill-label">No Key</span><span class="pill-value">${noKeyCount}</span></div>
+    `;
+  } catch (e) {
+    document.getElementById('mmModels').innerHTML = '<div class="event-item">Error: ' + e.message + '</div>';
+  }
+}
+mmProbe();
+</script>
+{% endblock %}

@@ -1,0 +1,19 @@
+{
+  "package_entry": "README.md",
+  "auto_discovery": "AGENTS.md",
+  "payload_preflight": {
+    "status": "ready_to_apply",
+    "files": 44,
+    "repo_head": "5bed365d1d147447e1002ca7ca0a0fb5cba59064",
+    "patch_base": "9eb52a07609f05d9e5304caac039630e2bb04057",
+    "mutations": false
+  },
+  "helper_python_syntax": "passed",
+  "sql_helper_help": "passed",
+  "requirements_pinned_distributions": 54,
+  "bootstrap_execution": "not_run_no_environment_install_requested",
+  "sql_and_application_tests_in_repackaging": "not_rerun_historical_evidence_in_payload",
+  "production_mutated": false,
+  "all_R01_R12_present": true,
+  "bootstrap_powershell_syntax": "passed"
+}
