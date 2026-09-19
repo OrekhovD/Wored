@@ -1186,6 +1186,12 @@ class PaperTradingRunner:
             self._last_error = str(exc)
             log.warning("start_day failed: %s", exc)
 
+        # Mark command as completed so poll() stops returning it
+        if self.repository is not None and cmd.command_id is not None:
+            try:
+                await self.repository.complete_command(cmd.command_id)
+            except Exception:
+                pass
         return True
 
     async def _handle_finish_day(self, cmd: Command) -> bool:
@@ -1289,6 +1295,7 @@ class PaperTradingRunner:
         if self._last_1m_bar_ts == last_bar.timestamp:
             return
         self._last_1m_bar_ts = last_bar.timestamp
+        log.info("evaluate_signals: new bar %s close=%s, bars=%d", last_bar.timestamp, last_bar.close, len(bars_1m))
 
         # Fetch enough closed higher-TF bars to initialise EMA20/EMA50.  The
         # strategy de-duplicates overlapping windows by candle timestamp.
@@ -1338,6 +1345,11 @@ class PaperTradingRunner:
 
             # Execute the signal→order→fill→ledger chain
             await self._execute_signal(signal, now)
+        else:
+            log.info("evaluate_signals: no signal (regime_bullish=%s, ema20=%s, atr=%s)",
+                     self.strategy.regime_bullish() if self.strategy else None,
+                     self.strategy._ema20_1m.value if self.strategy else None,
+                     self.strategy._atr14_1m.value if self.strategy else None)
 
     async def _execute_signal(self, signal: StrategySignal, now: float) -> None:
         """Execute the full signal→order→fill→ledger chain.

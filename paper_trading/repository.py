@@ -481,6 +481,15 @@ class PaperRepository:
             )
         return _row_to_command(row) if row else None
 
+    async def complete_command(self, command_id: UUID, result: dict | None = None) -> bool:
+        """Mark a command as completed so poll() stops returning it."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE paper_v2_commands SET status='completed', result=$1, updated_at=$2 WHERE command_id=$3",
+                json.dumps(result) if result else None, _now_utc(), str(command_id),
+            )
+        return True
+
     async def update_command_result(
         self,
         command_id: UUID,
