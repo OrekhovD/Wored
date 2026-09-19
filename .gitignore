@@ -42,3 +42,20 @@ test_allowed_models.py
 test_other_deepseek.py
 nVidia.md
 TASOCHKI/ТЗ/
+
+# --- 2026-09-19: anti-junk rules (staging cleanup) ---
+# Python virtual envs anywhere in the tree
+.venv/
+venv/
+# Timestamped backups of tracked files
+*.bak.*
+# Temporary/scratch runners at repo root
+/tmp_*
+# Test/browser artifacts
+/output/
+# Editor/agent local config
+.codex/
+# Scratch dir (contains key-probing scripts)
+scratch/
+# Duplicated source snapshots inside TASOCHKI bundles
+TASOCHKI/**/payload/
