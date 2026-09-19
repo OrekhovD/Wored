@@ -1,0 +1,59 @@
+{
+  "assignment": "HERMES-WORED stabilization",
+  "staging_repo": "D:\\WORED_STAGING_20260908",
+  "branch": "hermes/stabilization-20260908",
+  "base_commit": "5bed365d1d147447e1002ca7ca0a0fb5cba59064",
+  "release_commit": "e7789a9",
+  "qa_venv": "D:\\WORED\\TASOCHKI\\HERMES-WORED\\.venv (Python 3.11.15)",
+  "docker": "6 services running, all healthy",
+  "phases": {
+    "P0": "PASSED",
+    "P1": "PASSED",
+    "P2": "PASSED (248 stabilization + 59 project tests)",
+    "P3": "PASSED — release commit e7789a9, build OK, backup OK, migrations applied to 'trading' DB",
+    "P4": "IN PROGRESS — health checks passing, bots polling",
+    "P5": "NOT STARTED"
+  },
+  "requirements": {
+    "R01": "PASSED (37 tests)",
+    "R02": "PASSED (11 tests)",
+    "R03": "PASSED (37 tests)",
+    "R04": "PASSED (42 tests)",
+    "R05": "PARTIAL (29 offline, DB-backed pending)",
+    "R06": "PASSED",
+    "R07": "PASSED (3 tests)",
+    "R08": "PASSED (12 tests)",
+    "R09": "PASSED (15 tests)",
+    "R10": "NOT STARTED",
+    "R11": "NOT STARTED",
+    "R12": "PASSED (migrations applied to production DB)"
+  },
+  "test_count": {
+    "stabilization": "248 passed, 1 skipped, 0 failed",
+    "project_tests": "59 passed, 0 failed",
+    "total": "307+ passed"
+  },
+  "migrations": {
+    "20260908_01": "applied (checksum 779d6f09479e10b2)",
+    "20260908_02": "applied (checksum bd979dc454ca5a2a)",
+    "20260908_03": "applied (checksum 6c869c1dfa8bea38)"
+  },
+  "backup": {
+    "path": "D:\\WORED_BACKUPS\\20260908T154013Z",
+    "sha256": "60b1fe8d7b770524fe6196d2f0c88f7ef60607c0935253129a6342c6715849b7",
+    "env_files": true,
+    "git_bundle": true,
+    "pg_dump": true,
+    "redis_rdb": true,
+    "restore_check": "PASSED"
+  },
+  "health": {
+    "postgres": true,
+    "redis": true,
+    "collector_feed": true,
+    "chatbot_polling": true,
+    "chatbot_wored_polling": true,
+    "webui_healthy": true,
+    "api_health": "200"
+  }
+}

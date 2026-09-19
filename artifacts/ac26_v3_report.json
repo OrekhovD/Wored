@@ -1,0 +1,59 @@
+{
+  "case_id": "AC-26",
+  "requirement_ids": [
+    "REQ-08",
+    "REQ-12",
+    "REQ-13"
+  ],
+  "status": "FAIL",
+  "utc_start": "2026-09-17T18:19:00.445346+00:00",
+  "utc_end": "2026-09-17T19:13:04.692444+00:00",
+  "duration_minutes": 54.1,
+  "git_sha": "5bfd0d2",
+  "snapshots_captured": 10,
+  "assertions": {
+    "continuous_heartbeat": {
+      "result": "PASS",
+      "healthy": 10,
+      "total": 10,
+      "age_range": "0.3-4.0s"
+    },
+    "feed_freshness": {
+      "result": "FAIL",
+      "fresh_count": 0,
+      "total_snapshots": 10,
+      "detail": "0/10 snapshots had fresh feed (age <= 15s)"
+    },
+    "heartbeat_errors": {
+      "result": "PASS",
+      "error_count": 0
+    },
+    "day_state": {
+      "result": "PASS",
+      "states_observed": [
+        "DayState.running"
+      ],
+      "running_observed": true,
+      "detail": "Day states: {'DayState.running'}. Running state observed."
+    },
+    "health_endpoints": {
+      "result": "PASS",
+      "healthz_ok": 10,
+      "readyz_ok": 10,
+      "total": 10
+    },
+    "entries_unblocked": {
+      "result": "PASS",
+      "snapshots_unblocked": 10,
+      "total": 10
+    }
+  },
+  "summary": "54-min observation. 10 snapshots. Heartbeat 10/10 healthy. Feed fresh 0/10. Day running: True. Errors: 0. Status: FAIL.",
+  "residual_limits": [
+    "Heartbeat: PASS",
+    "Feed: FAIL (0/10)",
+    "Day state: PASS (running=True)",
+    "Health: PASS",
+    "Entries: PASS"
+  ]
+}

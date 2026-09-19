@@ -1,0 +1,350 @@
+[
+  {
+    "timestamp": "2026-09-17T18:19:00.445346+00:00",
+    "checks": {
+      "heartbeat_age": 0.9,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76713",
+      "feed_last": "76713.1",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  },
+  {
+    "timestamp": "2026-09-17T18:25:01.148055+00:00",
+    "checks": {
+      "heartbeat_age": 1.7,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76709.8",
+      "feed_last": "76738",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  },
+  {
+    "timestamp": "2026-09-17T18:31:01.059825+00:00",
+    "checks": {
+      "heartbeat_age": 1.4,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76694.3",
+      "feed_last": "76705",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  },
+  {
+    "timestamp": "2026-09-17T18:37:01.507811+00:00",
+    "checks": {
+      "heartbeat_age": 1.8,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76581.8",
+      "feed_last": "76581.9",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  },
+  {
+    "timestamp": "2026-09-17T18:43:02.250357+00:00",
+    "checks": {
+      "heartbeat_age": 2.6,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76542",
+      "feed_last": "76539.2",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  },
+  {
+    "timestamp": "2026-09-17T18:49:02.341034+00:00",
+    "checks": {
+      "heartbeat_age": 2.6,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76616.3",
+      "feed_last": "76606.7",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  },
+  {
+    "timestamp": "2026-09-17T18:55:03.372595+00:00",
+    "checks": {
+      "heartbeat_age": 3.7,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76588.1",
+      "feed_last": "76588.1",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  },
+  {
+    "timestamp": "2026-09-17T19:01:03.204773+00:00",
+    "checks": {
+      "heartbeat_age": 3.5,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76559.4",
+      "feed_last": "76559.5",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  },
+  {
+    "timestamp": "2026-09-17T19:07:03.671543+00:00",
+    "checks": {
+      "heartbeat_age": 4.0,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76591.4",
+      "feed_last": "76604.4",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  },
+  {
+    "timestamp": "2026-09-17T19:13:04.692444+00:00",
+    "checks": {
+      "heartbeat_age": 0.3,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76546.9",
+      "feed_last": "76539",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  },
+  {
+    "timestamp": "2026-09-17T19:19:04.627472+00:00",
+    "checks": {
+      "heartbeat_age": 4.9,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76474.2",
+      "feed_last": "76487.1",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  },
+  {
+    "timestamp": "2026-09-17T19:25:05.350435+00:00",
+    "checks": {
+      "heartbeat_age": 0.8,
+      "entries_blocked": false,
+      "last_error": null,
+      "feed_bid": "76555.9",
+      "feed_last": "76568",
+      "feed_age": -1,
+      "feed_fresh": false,
+      "paper_trading": {
+        "day_state": "DayState.running",
+        "accounts": [
+          {
+            "kind": "manual",
+            "cash": "1000.00000000",
+            "pos": 0
+          },
+          {
+            "kind": "auto",
+            "cash": "1000.00000000",
+            "pos": 0
+          }
+        ]
+      },
+      "healthz": 200,
+      "readyz": 200
+    }
+  }
+]
