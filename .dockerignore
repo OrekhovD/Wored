@@ -21,3 +21,7 @@ scratch/
 !collector/
 !docker/
 !migrations/
+# UI-11 acceptance fixture (single file; rest of TASOCHKI stays excluded)
+!TASOCHKI/
+!TASOCHKI/HERMES-WORED-UIUX/
+!TASOCHKI/HERMES-WORED-UIUX/fixtures.json

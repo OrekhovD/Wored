@@ -14,7 +14,7 @@ from typing import Any
 
 FIXTURES_PATH = Path(os.environ.get(
     "WORED_FIXTURES_PATH",
-    "D:/WORED/TASOCHKI/HERMES-WORED-UIUX/fixtures.json",
+    Path(__file__).resolve().parents[2] / "TASOCHKI" / "HERMES-WORED-UIUX" / "fixtures.json",
 ))
 
 # ─── Fixture loading and merge ────────────────────────────────────────────────

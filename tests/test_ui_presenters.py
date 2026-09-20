@@ -96,7 +96,8 @@ class TestFmtTime:
         assert fmt_time('') == '—'
 
     def test_iso(self):
-        assert fmt_time('2026-09-09T16:30:00Z') == '09.09 16:30 UTC'
+        # b083857: fmt_time displays Asia/Bangkok (UTC+7); 16:30Z -> 23:30
+        assert fmt_time('2026-09-09T16:30:00Z') == '09.09 23:30'
 
 
 class TestStateLabel:
