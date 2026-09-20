@@ -13,6 +13,8 @@ DEFAULT_QUOTAS = {
     "worker":  int(os.getenv("QUOTA_WORKER_DAY", "1000")),
     "analyst": int(os.getenv("QUOTA_ANALYST_DAY", "100")),
     "premium": int(os.getenv("QUOTA_PREMIUM_DAY", "20")),
+    # Slow-ring daily reflector: very low cap (ТЗ block F budget).
+    "reflector": int(os.getenv("QUOTA_REFLECTOR_DAY", "2")),
 }
 
 WARN_THRESHOLD = 0.80

@@ -441,10 +441,16 @@ CREATE TABLE IF NOT EXISTS paper_v2_strategy_versions (
                           'active', 'rolled_back')),
     parameters      JSONB        NOT NULL DEFAULT '{}'::jsonb,
     evaluation_evidence JSONB    NOT NULL DEFAULT '{}'::jsonb,
+    trials          INTEGER      NOT NULL DEFAULT 0,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
     activated_at    TIMESTAMPTZ,
     schema_version  INTEGER      NOT NULL DEFAULT 2
 );
+
+-- Self-learn block D/E: number of statistical trials run against a candidate,
+-- feeding the Deflated Sharpe Ratio multiple-testing correction.
+ALTER TABLE paper_v2_strategy_versions
+    ADD COLUMN IF NOT EXISTS trials INTEGER NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_strategy_versions_status
     ON paper_v2_strategy_versions (status);

@@ -37,6 +37,18 @@
       "fallback": "deterministic_markdown",
       "schema": null
     },
+    "reflector": {
+      "model": "ollama-cloud/glm-5.2",
+      "model_env": "REFLECTOR_MODEL",
+      "max_requests_per_day": 2,
+      "max_input_tokens": 2000,
+      "max_output_tokens": 1024,
+      "trigger": "daily_after_session",
+      "fallback": "deterministic_heuristic_candidate",
+      "advisory_only": true,
+      "can_activate": false,
+      "schema": "strategy_learning"
+    },
     "weekly_review": {
       "model": "glm-5.2",
       "max_requests_per_day": 1,

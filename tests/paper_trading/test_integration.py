@@ -210,20 +210,28 @@ class TestLearningGate:
         result = evaluator.evaluate(candidate, baseline)
         assert result.status == "insufficient_data"
 
-    def test_rejected_on_worse_drawdown(self):
+    def test_rejected_without_statistical_edge(self):
         from paper_trading.learning import LearningEvaluator, Episode
-        evaluator = LearningEvaluator({"min_episodes": 4, "min_holdout_episodes": 2, "chronological_split": 0.5})
-        def make_eps(version: str, dd: str, count: int):
+        # A candidate indistinguishable from baseline (same PnL distribution) must
+        # not be promoted: the bootstrap CI lower bound does not clear zero.
+        evaluator = LearningEvaluator({
+            "min_episodes": 8, "min_holdout_episodes": 4, "min_trading_days": 1,
+            "chronological_split": 0.5, "max_lookback_minutes": 0, "max_hold_minutes": 0,
+            "bar_minutes": 1, "embargo_bars": 1, "n_trials": 1, "dsr_threshold": 0.0,
+            "bootstrap_resamples": 500,
+        })
+        def make_eps(version: str, count: int):
             return [Episode(
                 episode_id=f"{version}-{i}", strategy_version=version, instrument="BTC-USDT", interval="1m",
-                entry_time=f"2026-01-0{i+1}T00:00:00Z", exit_time=f"2026-01-0{i+1}T00:10:00Z",
+                entry_time=f"2026-01-{i+1:02d}T00:00:00Z", exit_time=f"2026-01-{i+1:02d}T00:10:00Z",
                 side="long", entry_price=Decimal("100"), exit_price=Decimal("101"),
                 qty=Decimal("1"), gross_pnl=Decimal("1"), entry_fee=Decimal("0.06"),
                 exit_fee=Decimal("0.06"), funding_cashflow=Decimal("0"),
-                net_pnl=Decimal("0.88"), max_drawdown=Decimal(dd), duration_minutes=10,
+                net_pnl=Decimal("0.88"), max_drawdown=Decimal("0.5"), duration_minutes=10,
             ) for i in range(count)]
-        
-        candidate = make_eps("v2", "5", 4)  # worse drawdown
-        baseline = make_eps("v1", "1", 4)   # better drawdown
+
+        candidate = make_eps("v2", 10)
+        baseline = make_eps("v1", 10)
         result = evaluator.evaluate(candidate, baseline)
         assert result.status == "rejected"
+        assert result.gate_results.get("holdout_significance_ci") is False

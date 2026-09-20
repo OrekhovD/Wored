@@ -325,13 +325,21 @@
       try { LWC.createSeriesMarkers(candles, markers); } catch (e2) {}
     }
 
-    // Price lines for open positions
+    // Price lines for open positions — skip missing levels (LWC throws on null price)
     var openTr = chartData.positions.find(function (t) { return t.status === 'open'; });
     if (openTr) {
-      candles.createPriceLine({ price: openTr.entry, color: INFO, lineWidth: 1, lineStyle: LWC.LineStyle.Solid, axisLabelVisible: true, title: 'ENTRY' });
-      candles.createPriceLine({ price: openTr.tp, color: UP, lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: 'TP' });
-      candles.createPriceLine({ price: openTr.sl, color: WARN, lineWidth: 1, lineStyle: LWC.LineStyle.Dashed, axisLabelVisible: true, title: 'SL' });
-      candles.createPriceLine({ price: openTr.liq, color: DOWN, lineWidth: 1, lineStyle: LWC.LineStyle.Dotted, axisLabelVisible: true, title: 'LIQ' });
+      var levelLines = [
+        [openTr.entry, INFO, LWC.LineStyle.Solid, 'ENTRY'],
+        [openTr.tp, UP, LWC.LineStyle.Dashed, 'TP'],
+        [openTr.sl, WARN, LWC.LineStyle.Dashed, 'SL'],
+        [openTr.liq, DOWN, LWC.LineStyle.Dotted, 'LIQ']
+      ];
+      levelLines.forEach(function (lvl) {
+        if (typeof lvl[0] !== 'number' || !isFinite(lvl[0]) || lvl[0] <= 0) return;
+        try {
+          candles.createPriceLine({ price: lvl[0], color: lvl[1], lineWidth: 1, lineStyle: lvl[2], axisLabelVisible: true, title: lvl[3] });
+        } catch (e) {}
+      });
     }
   }
 

@@ -8,6 +8,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from htx.websocket import ws_listen
 from htx.perpetual_market import publish_perpetual_markets
 from htx.history_loader import publish_closed_candles
+from htx.funding import record_funding_rate
+from htx.gap_monitor import check_candle_gaps
 from indicators.calculator import calculate_indicators
 from indicators.snapshot import publish_market_contexts
 from journal.writer import write_entry
@@ -95,6 +97,16 @@ async def main():
             log.info("Paper trading runner not registered (disabled or error)")
     except Exception as exc:
         log.warning("Paper trading runner registration failed: %s", exc)
+
+    # Trader v1 perpetual market store: ensure schema, funding history, gap watchdog.
+    try:
+        from storage.perp_candles import ensure_perp_schema
+        await ensure_perp_schema(pool)
+        log.info("Trader v1 perpetual candle/funding schema ensured.")
+    except Exception as exc:
+        log.warning("Trader v1 perp schema init (collector): %s", exc)
+    scheduler.add_job(record_funding_rate, "interval", minutes=10, id="record_funding_rate", max_instances=1, coalesce=True)
+    scheduler.add_job(check_candle_gaps, "interval", minutes=5, id="check_candle_gaps", max_instances=1, coalesce=True)
 
     from storage.postgres_client import cleanup_old_tickers
 

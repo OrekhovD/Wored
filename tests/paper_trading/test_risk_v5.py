@@ -32,7 +32,12 @@ class TestV5Liquidation:
     """Tier-aware isolated-margin liquidation tests."""
 
     def test_long_100x_basic(self):
-        """L=100, MMR=0.0028, taker=0.0006 → d_liq = 0.01 - 0.0028 - 0.0006 = 0.0066."""
+        """L=100, MMR=0.0028, taker=0.0006 → division form (ADR-01/ADR-05).
+
+        The unified ``trading_math`` core solves ``equity = maintenance``; the
+        margin fraction is ``1/leverage``, so the long liquidation price is
+        ``E * (1 + taker - 1/L) / (1 - MMR)``.
+        """
         entry = Decimal("78000")
         liq = calculate_liquidation_price(
             entry_price=entry,
@@ -41,12 +46,11 @@ class TestV5Liquidation:
             maintenance_margin_rate=Decimal("0.0028"),
             taker_fee_rate=Decimal("0.0006"),
         )
-        # liq = 78000 * (1 - 0.0066) = 78000 * 0.9934 = 77485.2
-        expected = entry * (Decimal(1) - Decimal("0.0066"))
+        expected = entry * (Decimal(1) + Decimal("0.0006") - Decimal("0.01")) / (Decimal(1) - Decimal("0.0028"))
         assert liq == expected
 
     def test_short_200x_basic(self):
-        """L=200, MMR=0.0028, taker=0.0006 → d_liq = 0.005 - 0.0028 - 0.0006 = 0.0016."""
+        """L=200, MMR=0.0028, taker=0.0006 → short division form (ADR-05)."""
         entry = Decimal("78000")
         liq = calculate_liquidation_price(
             entry_price=entry,
@@ -55,12 +59,12 @@ class TestV5Liquidation:
             maintenance_margin_rate=Decimal("0.0028"),
             taker_fee_rate=Decimal("0.0006"),
         )
-        # liq = 78000 * (1 + 0.0016) = 78124.8
-        expected = entry * (Decimal(1) + Decimal("0.0016"))
+        # short: E * (1/L + 1 - taker) / (1 + MMR)
+        expected = entry * (Decimal("0.005") + Decimal(1) - Decimal("0.0006")) / (Decimal(1) + Decimal("0.0028"))
         assert liq == expected
 
     def test_long_8x_basic(self):
-        """L=8, MMR=0.0028, taker=0.0006 → d_liq = 0.125 - 0.0028 - 0.0006 = 0.1216."""
+        """L=8, MMR=0.0028, taker=0.0006 → long division form (ADR-05)."""
         entry = Decimal("78000")
         liq = calculate_liquidation_price(
             entry_price=entry,
@@ -69,7 +73,7 @@ class TestV5Liquidation:
             maintenance_margin_rate=Decimal("0.0028"),
             taker_fee_rate=Decimal("0.0006"),
         )
-        expected = entry * (Decimal(1) - Decimal("0.1216"))
+        expected = entry * (Decimal(1) + Decimal("0.0006") - Decimal("0.125")) / (Decimal(1) - Decimal("0.0028"))
         assert liq == expected
 
     def test_extra_margin_reduces_liquidation_distance(self):

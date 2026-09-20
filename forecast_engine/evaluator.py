@@ -17,6 +17,12 @@ from decimal import Decimal
 from typing import List, Optional, Sequence
 
 from forecast_engine.contracts import ForecastCandle, ForecastRun, OHLCVBar
+from forecast_engine.metrics import (
+    brier_score as _brier_score,
+    interval_coverage as _interval_coverage,
+    pinball_loss as _pinball_loss,
+    skill_score as _skill_score,
+)
 
 ZERO = Decimal(0)
 ONE = Decimal(1)
@@ -32,6 +38,9 @@ class ForecastEval:
     mae: Optional[Decimal]
     directional_accuracy: Optional[Decimal]
     in_band_rate: Optional[Decimal]
+    pinball_loss: Optional[float] = None
+    coverage: Optional[float] = None
+    brier: Optional[float] = None
     metadata: dict = field(default_factory=dict)
 
 
@@ -89,6 +98,13 @@ def evaluate_forecast(
     directional_hits = 0
     in_band = 0
     count = 0
+    # Quantile / probabilistic accumulators (block C, D8)
+    quantile_triples: List[List] = []
+    actual_closes: List[Decimal] = []
+    band_lows: List[Decimal] = []
+    band_highs: List[Decimal] = []
+    p_ups: List[Decimal] = []
+    actual_ups: List[int] = []
 
     for fc in forecast_items:
         fc_open = _get_open_time(fc)
@@ -105,24 +121,35 @@ def evaluate_forecast(
         actual_dir = _direction(actual.open, actual.close)
         if pred_dir == actual_dir:
             directional_hits += 1
-        # In-band rate (only for ForecastCandle with predicted_high/low)
+        # Band edges: ForecastCandle (predicted_*) else legacy ForecastPoint (high/low)
         pred_high = getattr(fc, "predicted_high", None)
         pred_low = getattr(fc, "predicted_low", None)
+        if pred_high is None:
+            pred_high = getattr(fc, "high", None)
+        if pred_low is None:
+            pred_low = getattr(fc, "low", None)
         if pred_high is not None and pred_low is not None:
             if pred_low <= actual.close <= pred_high:
                 in_band += 1
-        else:
-            # Old-style ForecastPoint: use high/low
-            fc_high = getattr(fc, "high", None)
-            fc_low = getattr(fc, "low", None)
-            if fc_high is not None and fc_low is not None:
-                if fc_low <= actual.close <= fc_high:
-                    in_band += 1
+            # q10/q50/q90 triple for pinball loss
+            quantile_triples.append([pred_low, pred_close, pred_high])
+            actual_closes.append(actual.close)
+            band_lows.append(pred_low)
+            band_highs.append(pred_high)
+        # Probabilistic direction (only when the model exposes p_up)
+        p_up = getattr(fc, "p_up", None)
+        if p_up is not None:
+            p_ups.append(p_up)
+            actual_ups.append(1 if actual.close > actual.open else 0)
+
+    model_version = str(
+        run.model_version.value if hasattr(run.model_version, "value") else run.model_version
+    )
 
     if count == 0:
         return ForecastEval(
             run_id=getattr(run, "run_id", None),
-            model_version=str(run.model_version.value if hasattr(run.model_version, "value") else run.model_version),
+            model_version=model_version,
             points_evaluated=0,
             mae=None,
             directional_accuracy=None,
@@ -131,11 +158,14 @@ def evaluate_forecast(
 
     return ForecastEval(
         run_id=getattr(run, "run_id", None),
-        model_version=str(run.model_version.value if hasattr(run.model_version, "value") else run.model_version),
+        model_version=model_version,
         points_evaluated=count,
         mae=sum(abs_errors, ZERO) / Decimal(count),
         directional_accuracy=Decimal(directional_hits) / Decimal(count),
         in_band_rate=Decimal(in_band) / Decimal(count),
+        pinball_loss=_pinball_loss(actual_closes, quantile_triples) if quantile_triples else None,
+        coverage=_interval_coverage(actual_closes, band_lows, band_highs) if band_lows else None,
+        brier=_brier_score(p_ups, actual_ups) if p_ups else None,
     )
 
 
@@ -151,20 +181,40 @@ class WalkForwardResult:
     b1_in_band: Optional[Decimal]
     b1_beats_b0: bool
     points_evaluated: int
+    # Block C additions — distributional skill against the B0 baseline
+    b0_pinball: Optional[float] = None
+    b1_pinball: Optional[float] = None
+    b0_brier: Optional[float] = None
+    b1_brier: Optional[float] = None
+    skill_mae: Optional[float] = None
+    skill_pinball: Optional[float] = None
+    b1_beats_b0_pinball: bool = False
 
 
 def walk_forward_compare(
     b0_eval: ForecastEval,
     b1_eval: ForecastEval,
 ) -> WalkForwardResult:
-    """Compare B1 vs B0 on the walk-forward statistic (MAE).
+    """Compare B1 vs B0 on the walk-forward statistics.
 
-    B1 beats B0 if its MAE is strictly lower.  If either MAE is ``None``
-    (no evaluable points), ``b1_beats_b0`` is ``False``.
+    ``b1_beats_b0`` keeps its historic MAE semantics (point-error regression),
+    while ``b1_beats_b0_pinball`` and the ``skill_*`` fields judge the *quantile*
+    forecast with proper scoring rules (block C, D8).  A skill score is
+    ``1 - b1/b0`` for a lower-is-better metric; positive means B1 is better.
     """
     b1_beats = False
     if b0_eval.mae is not None and b1_eval.mae is not None:
         b1_beats = b1_eval.mae < b0_eval.mae
+
+    skill_mae = None
+    if b0_eval.mae is not None and b1_eval.mae is not None:
+        skill_mae = _skill_score(float(b1_eval.mae), float(b0_eval.mae))
+
+    b1_beats_pinball = False
+    skill_pinball = None
+    if b0_eval.pinball_loss is not None and b1_eval.pinball_loss is not None:
+        b1_beats_pinball = b1_eval.pinball_loss < b0_eval.pinball_loss
+        skill_pinball = _skill_score(b1_eval.pinball_loss, b0_eval.pinball_loss)
 
     return WalkForwardResult(
         b0_mae=b0_eval.mae,
@@ -177,4 +227,11 @@ def walk_forward_compare(
         points_evaluated=max(
             b0_eval.points_evaluated, b1_eval.points_evaluated
         ),
+        b0_pinball=b0_eval.pinball_loss,
+        b1_pinball=b1_eval.pinball_loss,
+        b0_brier=b0_eval.brier,
+        b1_brier=b1_eval.brier,
+        skill_mae=skill_mae,
+        skill_pinball=skill_pinball,
+        b1_beats_b0_pinball=b1_beats_pinball,
     )

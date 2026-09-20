@@ -43,7 +43,7 @@ class EMA:
     first *period* closes.  Subsequent values are updated incrementally.
     """
 
-    __slots__ = ("_seed_buf", "_seeded", "_value", "alpha", "period")
+    __slots__ = ("_seed_buf", "_seeded", "_value", "_prev_value", "alpha", "period")
 
     def __init__(self, period: int) -> None:
         if period < 1:
@@ -51,6 +51,7 @@ class EMA:
         self.period = period
         self.alpha = TWO / Decimal(period + 1)
         self._value: Decimal | None = None
+        self._prev_value: Decimal | None = None
         self._seed_buf: list[Decimal] = []
         self._seeded = False
 
@@ -60,6 +61,15 @@ class EMA:
     def value(self) -> Decimal | None:
         """Current EMA value, or ``None`` if not yet seeded."""
         return self._value
+
+    @property
+    def prev_value(self) -> Decimal | None:
+        """EMA value as of the *previous* update, or ``None`` if unavailable.
+
+        Tracked explicitly (D11) rather than recovered by inverting the EMA
+        recurrence, which is unstable as ``alpha`` approaches 1.
+        """
+        return self._prev_value
 
     @property
     def ready(self) -> bool:
@@ -72,9 +82,11 @@ class EMA:
             self._seed_buf.append(price)
             if len(self._seed_buf) < self.period:
                 self._value = None
+                self._prev_value = None
                 return self._value  # type: ignore[return-value]
             sma = sum(self._seed_buf, Decimal(0)) / Decimal(self.period)
             self._value = sma
+            self._prev_value = None
             self._seeded = True
             self._seed_buf = []
             return self._value
@@ -82,11 +94,13 @@ class EMA:
         previous = self._value
         if previous is None:
             raise RuntimeError("EMA seeded without a previous value")
+        self._prev_value = previous
         self._value = self.alpha * price + (Decimal(1) - self.alpha) * previous
         return self._value
 
     def reset(self) -> None:
         self._value = None
+        self._prev_value = None
         self._seed_buf = []
         self._seeded = False
 
@@ -223,6 +237,9 @@ class BaselineV1Config:
     warmup_bars_1h: int = 50
     warmup_bars_15m: int = 50
     warmup_bars_1m: int = 50
+    # Self-learn block E: enable the mirrored short side (bearish regime).
+    enable_long: bool = True
+    enable_short: bool = True
 
 
 # ─── Strategy ──────────────────────────────────────────────────────────
@@ -329,6 +346,21 @@ class BaselineV1Strategy:
             return False
         return _dec(close_15m) > e20
 
+    def regime_bearish(self) -> bool:
+        """1h regime: EMA20 < EMA50 (both must be ready) — short side."""
+        e20 = self._ema20_1h.value
+        e50 = self._ema50_1h.value
+        if e20 is None or e50 is None:
+            return False
+        return e20 < e50
+
+    def confirm_15m_short(self, close_15m: Decimal) -> bool:
+        """15m confirmation for shorts: close < EMA20."""
+        e20 = self._ema20_15m.value
+        if e20 is None:
+            return False
+        return _dec(close_15m) < e20
+
     def evaluate(
         self,
         *,
@@ -366,12 +398,6 @@ class BaselineV1Strategy:
                 log.debug("strategy: no entries in last %d min of day", self.cfg.no_entry_last_minutes_of_day)
                 return None
 
-        # Regime + confirmation gates
-        if not self.regime_bullish():
-            return None
-        if close_15m is not None and not self.confirm_15m(close_15m):
-            return None
-
         # 1m trigger: need prev and current bar + EMA20 ready
         prev_bar = bars_1m[-2]
         last_bar = bars_1m[-1]
@@ -381,33 +407,46 @@ class BaselineV1Strategy:
             return None
 
         # We need the *previous* EMA20 value (EMA20 as of prev_bar close).
-        # Approximate: EMA20 before the last update = current EMA20 was
-        # computed from last_bar; the previous EMA20 is recovered by
-        # inverting the recurrence.
-        alpha = self._ema20_1m.alpha
-        # E_prev = (E_curr - alpha*price_last) / (1 - alpha)
-        denom = Decimal(1) - alpha
-        if denom == 0:
-            return None
-        prev_ema20 = (ema20_1m - alpha * last_bar.close) / denom
-
-        # Trigger conditions (long):
-        #   prev low <= prev EMA20
-        #   last close > last EMA20 (= current ema20_1m)
-        #   last close > prev high
-        if prev_bar.low > prev_ema20:
-            return None
-        if last_bar.close <= ema20_1m:
-            return None
-        if last_bar.close <= prev_bar.high:
+        # It is tracked explicitly by the accumulator (D11) rather than recovered
+        # by inverting the EMA recurrence, which is numerically unstable.
+        prev_ema20 = self._ema20_1m.prev_value
+        if prev_ema20 is None:
             return None
 
-        # All conditions met — build the signal
+        # ── LONG: 1h bullish regime + 15m up-confirm + 1m breakout trigger ──
+        if (self.cfg.enable_long and self.regime_bullish()
+                and (close_15m is None or self.confirm_15m(close_15m))
+                and prev_bar.low <= prev_ema20
+                and last_bar.close > ema20_1m
+                and last_bar.close > prev_bar.high):
+            return self._maybe_emit(
+                "long", last_bar, ema20_1m, atr_1m, bars_1m,
+                now_epoch, account_id, dedup_context,
+            )
+
+        # ── SHORT (block E): 1h bearish regime + 15m down-confirm + 1m
+        #    breakdown trigger — the exact mirror of the long conditions ──
+        if (self.cfg.enable_short and self.regime_bearish()
+                and (close_15m is None or self.confirm_15m_short(close_15m))
+                and prev_bar.high >= prev_ema20
+                and last_bar.close < ema20_1m
+                and last_bar.close < prev_bar.low):
+            return self._maybe_emit(
+                "short", last_bar, ema20_1m, atr_1m, bars_1m,
+                now_epoch, account_id, dedup_context,
+            )
+
+        return None
+
+    def _maybe_emit(
+        self, side, trigger_bar, ema20_at, atr_at, bars_1m, now_epoch, account_id, dedup_context,
+    ) -> Signal | None:
+        """Build a signal for *side* and apply the per-bar/account/side dedup."""
         signal = self._build_signal(
-            side="long",
-            trigger_bar=last_bar,
-            ema20_at_trigger=ema20_1m,
-            atr_at_trigger=atr_1m,
+            side=side,
+            trigger_bar=trigger_bar,
+            ema20_at_trigger=ema20_at,
+            atr_at_trigger=atr_at,
             bars_1m=bars_1m,
             now_epoch=now_epoch,
             account_id=account_id,
@@ -445,34 +484,44 @@ class BaselineV1Strategy:
         atr = atr_at_trigger
         frac = cfg.entry_atr_fraction
         sl_frac = cfg.sl_atr_fraction
+        fee_rate = Decimal("0.0006")
 
-        # Stop loss: min of last N lows minus 0.25 ATR
         lookback = bars_1m[-cfg.sl_lookback_bars:] if len(bars_1m) >= cfg.sl_lookback_bars else bars_1m
         if not lookback:
             return None
-        min_low = min((b.low for b in lookback), key=lambda x: x)
-        stop_loss = min_low - sl_frac * atr
 
-        # Take profit: 2R
-        risk = close_price - stop_loss
-        if risk <= 0:
-            log.debug("strategy: risk <= 0, skip")
-            return None
-        take_profit = close_price + cfg.tp_rr * risk
+        if side == "long":
+            # Stop below the recent swing low; TP at 2R above entry.
+            extreme = min((b.low for b in lookback), key=lambda x: x)
+            stop_loss = extreme - sl_frac * atr
+            risk = close_price - stop_loss
+            if risk <= 0:
+                log.debug("strategy: long risk <= 0, skip")
+                return None
+            take_profit = close_price + cfg.tp_rr * risk
+        else:  # short — mirror image
+            extreme = max((b.high for b in lookback), key=lambda x: x)
+            stop_loss = extreme + sl_frac * atr
+            risk = stop_loss - close_price
+            if risk <= 0:
+                log.debug("strategy: short risk <= 0, skip")
+                return None
+            take_profit = close_price - cfg.tp_rr * risk
 
-        # Entry zone: within 0.25 ATR of signal close
+        # Entry zone: within ``entry_atr_fraction`` ATR of the signal close.
         entry_zone_low = close_price - frac * atr
         entry_zone_high = close_price + frac * atr
 
-        # Net RR check (simplified: gross RR adjusted for hypothetical fees)
-        # Net RR = (TP - entry) / (entry - SL) minus fee drag approximation.
-        # Using 0.06% taker fee on both entry and exit (round-trip 0.12%).
-        fee_rate = Decimal("0.0006")
-        approx_entry = close_price  # worst case: enter at zone edge
-        fee_cost = approx_entry * fee_rate * Decimal(2)  # round-trip
-        gross_profit = take_profit - approx_entry
+        # Net RR (fee-aware round-trip on a hypothetical taker fill at ``close``).
+        approx_entry = close_price
+        fee_cost = approx_entry * fee_rate * Decimal(2)
+        if side == "long":
+            gross_profit = take_profit - approx_entry
+            net_risk = approx_entry - stop_loss
+        else:
+            gross_profit = approx_entry - take_profit
+            net_risk = stop_loss - approx_entry
         net_profit = gross_profit - fee_cost
-        net_risk = approx_entry - stop_loss
         if net_risk <= 0:
             return None
         net_rr = net_profit / net_risk

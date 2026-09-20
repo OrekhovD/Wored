@@ -1943,8 +1943,19 @@ async def trading_day_page(request: Request):
 
 
 @app.get("/healthz")
-async def liveness():
-    return {"alive": True}
+async def liveness(request: Request):
+    # Liveness stays dependency-free; candle_gap_count is best-effort so a Redis
+    # blip never turns a healthy process into a failed readiness probe.
+    payload = {"alive": True}
+    redis_client = getattr(request.app.state, "redis_client", None)
+    if redis_client is not None:
+        try:
+            raw = await redis_client.get("market:perpetual:htx:candle_gap_count")
+            if raw is not None:
+                payload["candle_gap_count"] = int(raw)
+        except Exception:
+            pass
+    return payload
 
 
 @app.get("/readyz")
@@ -2782,6 +2793,28 @@ async def api_strategy_positions(request: Request, limit: int = 20):
     return {"positions": positions}
 
 
+def _cumulative(pnls):
+    """Running cumulative sum as a list (float), used for the equity curve."""
+    out = []
+    run = 0.0
+    for p in pnls:
+        run += p
+        out.append(run)
+    return out
+
+
+def _current_max_leverage() -> int:
+    """Effective maximum leverage policy value (never a hard-coded 200).
+
+    Mirrors the single trading-math source of truth (ADR-04 ≤100x); falls back to
+    that constant if the package is not importable in this process."""
+    try:
+        from trading_math import MAX_LEVERAGE
+        return int(MAX_LEVERAGE)
+    except Exception:
+        return 100
+
+
 @app.post("/api/strategy/evaluate")
 async def api_strategy_evaluate(request: Request):
     """Run evaluation on sim_positions and generate new strategy rules."""
@@ -2790,37 +2823,38 @@ async def api_strategy_evaluate(request: Request):
     if not pool:
         return JSONResponse(status_code=503, content={"detail": "Postgres unavailable"})
 
-    # Compute metrics from real sim_positions
+    # Compute metrics from real sim_positions.  The evaluation window is the 100
+    # most recent closed/liquidated trades, but the drawdown must be walked in
+    # *chronological* order (oldest first) — a DESC walk yields a pseudo-drawdown
+    # (self-learn block C, D8).
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT status, realized_pnl, close_reason, leverage FROM sim_positions "
-            "WHERE status IN ('closed','liquidated') ORDER BY closed_at DESC LIMIT 100"
+            "SELECT status, realized_pnl, close_reason, leverage, realized_pnl FROM ("
+            "  SELECT id, status, realized_pnl, close_reason, leverage, closed_at"
+            "  FROM sim_positions WHERE status IN ('closed','liquidated')"
+            "  ORDER BY closed_at DESC LIMIT 100"
+            ") recent ORDER BY closed_at ASC"
         )
-    if len(rows) < 3:
+    if len(rows) < 30:
         return JSONResponse(status_code=400, content={
-            "ok": False, "message": f"Need 3+ closed positions, have {len(rows)}"
+            "ok": False, "message": f"Need 30+ closed positions, have {len(rows)}"
         })
+
+    from paper_trading.metrics import max_drawdown as _chronological_max_drawdown
 
     total = len(rows)
     wins = liquidations = 0
     pnl_list = []
-    cumulative = 0.0
-    peak = 0.0
-    max_dd = 0.0
-
     for r in rows:
         pnl = float(r["realized_pnl"] or 0)
-        cumulative += pnl
-        if cumulative > peak:
-            peak = cumulative
-        dd = peak - cumulative
-        if dd > max_dd:
-            max_dd = dd
         pnl_list.append(pnl)
         if pnl > 0:
             wins += 1
         if r["status"] == "liquidated" or r["close_reason"] == "liquidation":
             liquidations += 1
+
+    # Equity curve starts flat at 0 and accumulates in chronological order.
+    max_dd = float(_chronological_max_drawdown([0.0] + _cumulative(pnl_list)))
 
     winrate = (wins / total * 100) if total > 0 else 0
     avg_pnl = (sum(pnl_list) / total) if total > 0 else 0
@@ -2848,10 +2882,14 @@ async def api_strategy_evaluate(request: Request):
         )
         version = (current["version"] + 1) if current else 1
 
-    # Heuristic rules generation (no AI dependency in webui)
+    # Heuristic rules generation (no AI dependency in webui).  Leverage is
+    # reduced from the *actual* configured maximum, not a hard-coded 200
+    # (self-learn block C — the old value contradicted the ≤100x policy / ADR-04).
+    max_leverage = _current_max_leverage()
     adjustments = []
     if liq_rate > 20:
-        adjustments.append({"parameter": "max_leverage", "old": 200, "new": 150,
+        adjustments.append({"parameter": "max_leverage", "old": max_leverage,
+                           "new": max(1, max_leverage // 2),
                            "reason": f"Ликвидации {liq_rate:.0f}% > 20%, снизить плечо"})
     if winrate < 40:
         adjustments.append({"parameter": "rsi_entry_filter", "old": 50, "new": 60,

@@ -82,6 +82,21 @@ def _interval(candles: tuple[Candle, ...]) -> timedelta:
     return value
 
 
+def _band_confidence(band: Decimal, price: Decimal) -> Decimal:
+    """Derive confidence from observed dispersion instead of a constant.
+
+    A tighter predicted band relative to price means the recent series was
+    calmer, so the forecast is more trustworthy.  The map is monotone
+    decreasing in the relative band width and clipped into ``(0.05, 0.95)``.
+    (self-learn block E.3 — confidence is no longer the hardcoded 0.5/0.55).
+    """
+    if price <= ZERO:
+        return Decimal("0.5")
+    rel = band / price
+    conf = ONE / (ONE + rel * Decimal(100))
+    return max(Decimal("0.05"), min(Decimal("0.95"), conf))
+
+
 def run_baseline_forecast(
     candles: Sequence[Candle],
     *,
@@ -106,6 +121,7 @@ def run_baseline_forecast(
         drift = max(-MAX_DRIFT, min(MAX_DRIFT, drift))
     ranges = sorted((item.high - item.low for item in ordered[-14:]))
     band = ranges[len(ranges) // 2] if ranges else ZERO
+    confidence = _band_confidence(band, latest.close)
     points: list[ForecastPoint] = []
     prior_close = latest.close
     next_open = latest.close_time
@@ -123,7 +139,7 @@ def run_baseline_forecast(
                 high=high,
                 low=low,
                 close=close,
-                confidence=Decimal("0.5") if model_version == "B0" else Decimal("0.55"),
+                confidence=confidence,
             )
         )
         prior_close = close

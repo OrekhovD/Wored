@@ -95,8 +95,15 @@ async def run_strategy_learner(
     evaluation: dict,
     *,
     gateway: ProviderGateway | None = None,
+    run_meta: dict | None = None,
 ) -> dict:
-    """Generate and persist one candidate; never activate it."""
+    """Generate and persist one candidate; never activate it.
+
+    ``run_meta`` (optional) is populated in-place with the call metadata the
+    slow-ring reflector needs to book the run in ``trader_v1_agent_runs``
+    (provider, model, request id, token counts, gateway error).  Left ``None``
+    the behaviour is exactly as before, so existing callers/tests are unaffected.
+    """
     try:  # container PYTHONPATH=/app
         from storage.postgres_client import get_latest_strategy_rules, save_strategy_rules
     except ModuleNotFoundError:  # repository test imports can already own `storage`
@@ -131,6 +138,16 @@ async def run_strategy_learner(
         timeout_seconds=60,
     )
     response = await (gateway or ProviderGateway()).execute(request, _candidate_keys())
+    if run_meta is not None:
+        run_meta.update({
+            "provider": response.actual_provider,
+            "model": response.actual_model,
+            "request_id": response.request_id,
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens,
+            "error_code": response.error_code.value if response.error_code else None,
+            "candidate_keys": list(_candidate_keys()),
+        })
     evidence = {
         "evaluation_run_id": evaluation.get("evaluation_run_id"),
         "sample_size": int(evaluation.get("total", 0) or 0),

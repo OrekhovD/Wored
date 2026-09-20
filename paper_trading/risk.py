@@ -210,46 +210,30 @@ def calculate_liquidation_price(
     extra_margin: Decimal = Decimal(0),
     notional: Decimal | None = None,
 ) -> Decimal:
-    """Calculate V5 isolated-margin liquidation from the current risk tier.
+    """Isolated-margin liquidation price — delegates to :mod:`trading_math`.
 
-    ``d_liq = (isolated_margin + extra_margin) / notional - MMR - taker``.
-    When ``notional`` is omitted, the leverage-implied value is used.  This
-    keeps the public helper convenient while ensuring all callers use the
-    same fee-aware formula.
+    This thin wrapper exists so the paper-trading risk engine and the chatbot
+    simulator share exactly one definition of the formula (ADR-01).  The core
+    solves ``equity = maintenance`` (division form), which supersedes the earlier
+    additive approximation used here; the change makes the estimate slightly
+    stricter (lower long / higher short liquidation prices) and is recorded as an
+    ADR because it shifts a handful of exact-value risk tests.
+
+    ``notional`` defaults to ``entry_price`` for the leverage-implied case, so
+    ``margin_fraction`` becomes ``1/leverage`` when no explicit margin is given.
     """
-    if entry_price <= 0:
-        raise ValueError("entry_price: must be positive")
-    if leverage < 1:
-        raise ValueError("leverage: must be >= 1")
-    if maintenance_margin_rate < 0 or taker_fee_rate < 0:
-        raise ValueError("margin and fee rates must be non-negative")
-    if extra_margin < 0:
-        raise ValueError("extra_margin: must be non-negative")
+    from trading_math import liquidation_price as _core_liquidation_price
 
-    effective_notional = notional
-    if effective_notional is None:
-        effective_notional = entry_price
-    if effective_notional <= 0:
-        raise ValueError("notional: must be positive")
-    effective_margin = (
-        isolated_margin
-        if isolated_margin is not None
-        else effective_notional / Decimal(leverage)
+    return _core_liquidation_price(
+        entry_price,
+        leverage,
+        direction,
+        maintenance_margin_rate=maintenance_margin_rate,
+        taker_fee_rate=taker_fee_rate,
+        isolated_margin=isolated_margin,
+        extra_margin=extra_margin,
+        notional=notional if notional is not None or isolated_margin is None else entry_price,
     )
-    if effective_margin <= 0:
-        raise ValueError("isolated_margin: must be positive")
-    distance = (
-        (effective_margin + extra_margin) / effective_notional
-        - maintenance_margin_rate
-        - taker_fee_rate
-    )
-
-    d = direction.lower()
-    if d == "long":
-        return entry_price * (Decimal(1) - distance)
-    if d == "short":
-        return entry_price * (Decimal(1) + distance)
-    raise ValueError(f"direction: expected 'long' or 'short', got {direction!r}")
 
 
 # ---------------------------------------------------------------------------

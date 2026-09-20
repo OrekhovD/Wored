@@ -68,6 +68,11 @@ CREATE TABLE IF NOT EXISTS trader_v1_forecast_eval (
     evaluated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     mae NUMERIC(20,8),
     directional_accuracy NUMERIC(8,6),
+    -- Block C distributional metrics (self-learn D8): proper scoring rules and
+    -- calibration diagnostics, alongside the legacy point-error MAE.
+    pinball_loss NUMERIC(20,8),
+    coverage NUMERIC(8,6),
+    brier NUMERIC(8,6),
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 

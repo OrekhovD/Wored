@@ -88,11 +88,15 @@ CREATE TABLE IF NOT EXISTS sim_evaluations (
     total_positions INT DEFAULT 0,
     winrate DECIMAL(5,2) DEFAULT 0,
     avg_pnl DECIMAL(20,8) DEFAULT 0,
-    max_drawdown DECIMAL(5,2) DEFAULT 0,
+    max_drawdown DECIMAL(20,8) DEFAULT 0,
     liquidation_rate DECIMAL(5,2) DEFAULT 0,
     details JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- max_drawdown stores absolute USDT, not a percentage: the original DECIMAL(5,2)
+-- capped at 999.99 and silently rejected larger drawdowns (self-learn block C).
+ALTER TABLE sim_evaluations ALTER COLUMN max_drawdown TYPE DECIMAL(20,8);
 """
 
 
@@ -194,9 +198,18 @@ async def save_strategy_rules(
     *,
     status: str = "candidate",
     evidence: dict | None = None,
+    _promoted_via_gate: bool = False,
 ) -> bool:
     if status not in {"candidate", "validating", "approved", "active", "rejected"}:
         raise ValueError("invalid strategy status")
+    # Self-learn block E.5 / ТЗ §7.2: an ``active`` ruleset may only be written by
+    # the promotion path that has already cleared the block-D statistical gate.
+    # No webui / Telegram / manual call may activate a strategy directly.
+    if status == "active" and not _promoted_via_gate:
+        raise ValueError(
+            "status='active' is only settable through the gated promotion path "
+            "(paper_trading.promotion), never directly"
+        )
     pool = await get_pool()
     if not pool:
         return False

@@ -20,7 +20,17 @@ import httpx
 
 DEFAULT_BASE_URL = "https://api.hbdm.com"
 MAX_PAGE_SIZE = 2000
-PERIODS = {"1min": timedelta(minutes=1), "60min": timedelta(hours=1)}
+# Interval map covers every timeframe the store can serve.  Only ``1min`` is
+# fetched from HTX; 15m/60m/4h are derived from persisted 1m rows so every
+# timeframe agrees with the base series by construction (Block A, single
+# network timeframe).
+PERIODS = {
+    "1min": timedelta(minutes=1),
+    "15min": timedelta(minutes=15),
+    "60min": timedelta(hours=1),
+    "4hour": timedelta(hours=4),
+}
+NETWORK_PERIOD = "1min"
 CANDLE_KEY_PREFIX = "market:perpetual:htx:candles"
 log = logging.getLogger(__name__)
 
@@ -71,7 +81,7 @@ def parse_closed_candles(
     """Parse one HTX page, reject malformed rows, and discard open candles."""
     interval = PERIODS.get(period)
     if interval is None:
-        raise HistoryLoadError("period: expected 1min or 60min")
+        raise HistoryLoadError(f"period: expected one of {sorted(PERIODS)}")
     if payload.get("status") != "ok" or not isinstance(payload.get("data"), list):
         raise HistoryLoadError("history: HTX status is not ok")
     now = received_at.astimezone(timezone.utc)
@@ -140,7 +150,7 @@ class HtxHistoryLoader:
         received_at: datetime | None = None,
     ) -> list[PerpetualCandle]:
         if period not in PERIODS:
-            raise ValueError("period: expected 1min or 60min")
+            raise ValueError(f"period: expected one of {sorted(PERIODS)}")
         response = await client.get(
             self.base_url + "/linear-swap-ex/market/history/kline",
             params={"contract_code": contract_code, "period": period, "size": self.page_size},
@@ -181,11 +191,19 @@ def candle_payload(candles: Sequence[PerpetualCandle]) -> str:
 
 
 async def publish_closed_candles() -> None:
-    """Refresh bounded 1m/60m closed history for the deterministic runner."""
-    try:
+    """Refresh closed 1m history, persist it, and derive higher timeframes.
+
+    ``1min`` is the only timeframe fetched from HTX.  Every validated batch is
+    written to ``trader_v1_perp_candles`` and the 15m/60m/4h series are rebuilt
+    from the stored 1m rows, then republished onto the same Redis candle channel
+    the deterministic runner already reads.  Persistence is best-effort: a
+    database outage never breaks the live Redis refresh of the base 1m series.
+    """
+    try:  # container PYTHONPATH=/app
         from storage.redis_client import get_redis
-    except ModuleNotFoundError:
+    except ModuleNotFoundError:  # repository imports
         from collector.storage.redis_client import get_redis
+    persistence = _load_persistence()
     contracts = [item.strip().upper() for item in os.getenv("PAPER_CONTRACTS", "BTC-USDT").split(",") if item.strip()]
     try:
         poll_seconds = float(os.getenv("HTX_CANDLE_POLL_SECONDS", "60"))
@@ -200,14 +218,19 @@ async def publish_closed_candles() -> None:
         while True:
             try:
                 for contract_code in contracts or ["BTC-USDT"]:
-                    for period in PERIODS:
-                        candles = await loader.fetch_recent(
-                            client,
-                            contract_code=contract_code,
-                            period=period,
-                        )
-                        if candles:
-                            await redis.set(candle_key(contract_code, period), candle_payload(candles), ex=ttl)
+                    candles = await loader.fetch_recent(
+                        client,
+                        contract_code=contract_code,
+                        period=NETWORK_PERIOD,
+                    )
+                    if not candles:
+                        continue
+                    await redis.set(
+                        candle_key(contract_code, NETWORK_PERIOD),
+                        candle_payload(candles),
+                        ex=ttl,
+                    )
+                    await _persist_and_derive(persistence, contract_code, candles)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -215,3 +238,77 @@ async def publish_closed_candles() -> None:
                 # runner will fail closed once the key ages out.
                 log.warning("HTX closed-candle refresh rejected: %s", exc)
             await asyncio.sleep(poll_seconds)
+
+
+def _load_persistence() -> dict[str, Any] | None:
+    """Lazily import the perp store; return ``None`` when it is unavailable.
+
+    The collector must keep publishing the live 1m Redis channel even when the
+    trader_v1 tables or asyncpg are not present, so a missing import degrades to
+    "no persistence" rather than crashing the refresh loop.
+    """
+    try:
+        from storage.perp_candles import (  # container PYTHONPATH=/app
+            DERIVED_TIMEFRAMES,
+            aggregate_timeframe,
+            bulk_upsert_candles,
+            ensure_perp_schema,
+            load_recent_candles,
+        )
+        from storage.postgres_client import get_pool
+    except ImportError:
+        try:
+            from collector.storage.perp_candles import (  # repository imports
+                DERIVED_TIMEFRAMES,
+                aggregate_timeframe,
+                bulk_upsert_candles,
+                ensure_perp_schema,
+                load_recent_candles,
+            )
+            from collector.storage.postgres_client import get_pool
+        except ImportError:
+            log.warning("perp-candle persistence unavailable; continuing without DB write")
+            return None
+    return {
+        "ensure": ensure_perp_schema,
+        "upsert": bulk_upsert_candles,
+        "aggregate": aggregate_timeframe,
+        "load_recent": load_recent_candles,
+        "get_pool": get_pool,
+        "derived": DERIVED_TIMEFRAMES,
+    }
+
+
+async def _persist_and_derive(
+    persistence: dict[str, Any] | None,
+    contract_code: str,
+    candles: Sequence[PerpetualCandle],
+) -> None:
+    """Store validated 1m rows, rebuild derived TFs, and republish to Redis.
+
+    Any failure is logged and swallowed: the live 1m channel is already
+    published and must not be rolled back because a derivation is unavailable.
+    """
+    if persistence is None:
+        return
+    try:
+        redis = get_redis_for_persist()
+        pool = await persistence["get_pool"]()
+        await persistence["ensure"](pool)
+        await persistence["upsert"](pool, candles)
+        for timeframe in persistence["derived"]:
+            await persistence["aggregate"](pool, contract_code, timeframe)
+            recent = await persistence["load_recent"](pool, contract_code, timeframe)
+            if recent:
+                await redis.set(candle_key(contract_code, timeframe), candle_payload(recent), ex=300)
+    except Exception as exc:  # noqa: BLE001 - persistence is best-effort
+        log.warning("perp-candle persist/derive failed for %s: %s", contract_code, exc)
+
+
+def get_redis_for_persist():
+    try:  # container PYTHONPATH=/app
+        from storage.redis_client import get_redis
+    except ModuleNotFoundError:
+        from collector.storage.redis_client import get_redis
+    return get_redis()
+

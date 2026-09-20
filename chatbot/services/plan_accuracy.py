@@ -158,7 +158,12 @@ async def evaluate_pending_predictions():
             else:
                 tp_hit = low_1h <= tp1
 
-        # Accuracy score (0-100)
+        # Accuracy score (0-100) — DIAGNOSTIC ONLY (defect D9).
+        # This arbitrary 30+25+30+15 weighting is NOT the acceptance or
+        # promotion objective: it is uncorrelated with realised profit.  The
+        # learning loop is judged on risk-adjusted net PnL
+        # (``paper_trading.metrics.risk_adjusted_net_pnl``), enforced by the
+        # block-D statistical gate.  Kept here solely for the session summary UI.
         score = 0
         if direction_correct:
             score += 30
