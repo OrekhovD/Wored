@@ -1798,6 +1798,49 @@ async def clear_acknowledged_alerts(request: Request) -> int:
     return int(result.split()[-1])
 
 
+async def _bootstrap_postgres(app: FastAPI, db_url: str) -> None:
+    """Create the Postgres pool with bounded retries.
+
+    Runs as a background task so a slow or crash-recovering Postgres never
+    blocks HTTP startup, and the pool self-heals without a container restart.
+    """
+    delay = 1.0
+    for attempt in range(1, 31):
+        pool = None
+        try:
+            pool = await asyncpg.create_pool(dsn=db_url)
+            await ensure_prediction_schema(pool)
+            await pool.execute(FORECAST_QUEUE_SCHEMA)
+            from services.sim_engine import SIM_TABLES_SQL
+            await pool.execute(SIM_TABLES_SQL)
+            await pool.execute(PAPER_TABLES_SQL)
+        except asyncio.CancelledError:
+            if pool is not None:
+                await pool.close()
+            raise
+        except Exception as exc:
+            log.warning("Postgres pool bootstrap attempt %d failed: %s", attempt, exc)
+            if pool is not None:
+                try:
+                    await pool.close()
+                except Exception:
+                    pass
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 30.0)
+            continue
+
+        async def runner(request_id, payload, connection):
+            await run_prediction_request_async(app, request_id, **payload, connection=connection)
+
+        app.state.pg_pool = pool
+        app.state.forecast_worker = asyncio.create_task(
+            work_forecasts(pool, runner, redis_client=app.state.redis_client)
+        )
+        log.info("Postgres pool bootstrap complete (attempt %d)", attempt)
+        return
+    log.error("Postgres pool bootstrap gave up after %d attempts", attempt)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_auth_config()
@@ -1806,6 +1849,7 @@ async def lifespan(app: FastAPI):
     app.state.redis_client = None
     app.state.pg_pool = None
     app.state.forecast_worker = None
+    app.state.pg_bootstrap_task = None
 
     try:
         app.state.redis_client = redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379/0"), decode_responses=True)
@@ -1814,24 +1858,17 @@ async def lifespan(app: FastAPI):
 
     db_url = normalize_db_url(os.getenv("DATABASE_URL"))
     if db_url:
-        try:
-            app.state.pg_pool = await asyncpg.create_pool(dsn=db_url)
-            await ensure_prediction_schema(app.state.pg_pool)
-            await app.state.pg_pool.execute(FORECAST_QUEUE_SCHEMA)
-            from services.sim_engine import SIM_TABLES_SQL
-            await app.state.pg_pool.execute(SIM_TABLES_SQL)
-            await app.state.pg_pool.execute(PAPER_TABLES_SQL)
-            async def runner(request_id, payload, connection):
-                await run_prediction_request_async(app, request_id, **payload, connection=connection)
-            app.state.forecast_worker = asyncio.create_task(
-                work_forecasts(app.state.pg_pool, runner, redis_client=app.state.redis_client)
-            )
-        except Exception as exc:
-            log.warning("Postgres pool bootstrap failed: %s", exc)
+        app.state.pg_bootstrap_task = asyncio.create_task(_bootstrap_postgres(app, db_url))
 
     try:
         yield
     finally:
+        if app.state.pg_bootstrap_task is not None:
+            app.state.pg_bootstrap_task.cancel()
+            try:
+                await app.state.pg_bootstrap_task
+            except (asyncio.CancelledError, Exception):
+                pass
         await stop_worker(app.state.forecast_worker)
         if app.state.pg_pool is not None:
             await app.state.pg_pool.close()
