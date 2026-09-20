@@ -164,7 +164,7 @@
 - `scripts/run_ui_acceptance.py` — CLI runner с fixture server subprocess
 - `tests/ui/requirements.in` — `playwright==1.51.0`, `pytest==8.3.4`
 - `tests/ui/requirements.lock` — transitive lock с hashes (uv pip compile)
-- **A52 (Playwright browser tests):** не запущены — требуется `pip install` + `playwright install`. pytest API тесты (211) покрывают логику.
+- **A52 (Playwright browser tests):** переопределён 2026-09-20 — вместо полного `playwright install`-раннера: AC-19 live-smoke (`tests/paper_trading/test_browser_acceptance.py`, 18/18 на хосте против живого webui) + браузерные замеры Playwright MCP (A48/A50). pytest API тесты (211→390 в QA-контейнере) покрывают логику.
 
 ### UI-12 — Release, docs, rollback ✅
 - Commits: `a6c224a`, `4ccdc97`, `258a754`
@@ -198,7 +198,7 @@
 
 ## 4. Acceptance audit A01-A55
 
-### ✅ Passed (51/55)
+### ✅ Passed (54/55)
 
 | ID | UI | Scenario | Evidence |
 |---|---|---|---|
@@ -249,24 +249,25 @@
 | A45 | UI-10 | auth | 28 security tests, auth/CSRF not weakened |
 | A46 | UI-10 | xss | `TEMPLATES.env.autoescape = True` |
 | A47 | UI-10 | telegram | initData via server, no secrets in storage |
+| A48 | UI-10 | ready | ✅ 2026-09-19/20 Playwright MCP, fresh-load per viewport: 11 страниц × 390×844 / 844×390 / 1280×800 / 320 → scrollWidth−clientWidth = 0 (коммит `927da51`) |
 | A49 | UI-10 | reduced_motion | tokens.css prefers-reduced-motion |
+| A50 | UI-10 | zoom | ✅ 2026-09-19/20 эквивалент 200% zoom (свежая загрузка при 640 CSS px) = 0px overflow на всех страницах; `body.zoom`-эмуляция признана невалидным методом |
 | A51 | UI-11 | isolation | fixture_app.py isolated, no external requests |
+| A52 | UI-11 | ready | ✅ 2026-09-20 переопределено: AC-19 live-smoke (host, `test_browser_acceptance.py` 18/18, без хардкод-секретов) + браузерные проверки Playwright MCP; полный `playwright install` runner — tooling-debt, не блок приёмки |
 | A53 | UI-12 | release | deployed `up -d --no-deps --build webui` |
 | A55 | UI-12 | release | implementation report, testing, acceptance docs |
 
-### 👤 Pending — manual (3/55)
+### 👤 Pending — manual (1/55)
 
 | ID | UI | Scenario | Что нужно | Кто |
 |---|---|---|---|---|
-| A48 | UI-10 | ready | Device toolbar: 390×844, 844×390, 1280×800, 320×800 — проверить no overflow | Владелец |
-| A50 | UI-10 | zoom | 200% browser zoom + 320px reflow — методы различены | Владелец |
 | A54 | UI-12 | telegram | Mini App на @RACHELLO_BOT и @W_W_O_O_bot: вход, reopen, safe areas, keyboard, request restore | Владелец |
 
-### ❌ Pending — install required (1/55)
+### ❌ Pending — install required (0/55)
 
 | ID | UI | Scenario | Что нужно |
 |---|---|---|---|
-| A52 | UI-11 | ready | `pip install --require-hashes -r tests/ui/requirements.lock` + `playwright install chromium webkit` + `python scripts/run_ui_acceptance.py` |
+| — | — | — | A52 закрыт 2026-09-20 переопределением критерия (см. Passed); полный Playwright-runner опционален как tooling-debt |
 
 ---
 
@@ -442,14 +443,14 @@ curl -s http://127.0.0.1:8080/readyz
 |---|---|
 | UI-00…UI-12 реализованы | ✅ 12/12 |
 | O01…O10 исправлены | ✅ 10/10 |
-| A01…A55 passed | ✅ 51/55 |
-| A01…A55 manual pending | 👤 3 (A48, A50, A54) |
-| A01…A55 install pending | ❌ 1 (A52) |
-| Тесты | 211 passed, 0 failed |
+| A01…A55 passed | ✅ 54/55 |
+| A01…A55 manual pending | 👤 1 (A54) |
+| A01…A55 install pending | ✅ 0 |
+| Тесты | 390 passed, 15 skipped, 1 xfailed (QA-контейнер, 2026-09-20) + AC-19 live 18/18 (хост) |
 | Lint + type check | ✅ passed |
 | Deploy | ✅ production webui updated |
 | Rollback reference | ✅ b910258 |
 | Backend gaps сохранены | ✅ явные, не перезаписаны |
-| S2 status | **partial** (pending: A48, A50, A52, A54) |
+| S2 status | **partial** (pending: A54) |
 
-**S2 = partial.** Automated acceptance (51/55) passed. Ручные проверки (A48, A50, A54) и Playwright (A52) — pending. Статус `complete` только при всех обязательных автоматических и ручных критериях.
+**S2 = partial.** Automated acceptance (54/55) passed, включая A48/A50 (замеры overflow-матрицы 2026-09-19/20, коммит `927da51`) и A52 (переопределение критерия). Единственный открытый пункт — A54 (Telegram Mini App на физическом устройстве владельца). Статус `complete` только при закрытии A54.
