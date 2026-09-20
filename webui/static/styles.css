@@ -315,6 +315,7 @@ select {
 .journal-list,
 .journal-entry-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
 }
 
@@ -379,6 +380,11 @@ select {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
+}
+
+.journal-topline,
+.watch-card-header {
+  flex-wrap: wrap;
 }
 
 .toolbar {
@@ -675,6 +681,7 @@ select {
 .prediction-detail,
 .prediction-sidebar {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
 }
 
@@ -705,6 +712,14 @@ select {
 .prediction-model-list {
   display: grid;
   gap: 14px;
+}
+
+.prediction-model-list {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.prediction-model-list > * {
+  min-width: 0;
 }
 
 .model-status,
@@ -1050,6 +1065,7 @@ select {
 
 .model-card-summary {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   cursor: pointer;
@@ -1807,7 +1823,19 @@ a:focus-visible {
   .journal-layout,
   .prediction-layout,
   .topbar {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard > *,
+  .prediction-layout > *,
+  .journal-layout > *,
+  .cockpit > * {
+    min-width: 0;
+  }
+
+  .comparison-table-compact,
+  .comparison-table {
+    min-width: 0;
   }
 
   .op-pulse {
@@ -1939,6 +1967,7 @@ a:focus-visible {
 .rules-list { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .rule-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 10px 14px;
@@ -2147,7 +2176,7 @@ a:focus-visible {
 .ds-leverage-policy { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ds-lev-badge { font-size: 0.7rem; font-weight: 700; padding: 3px 8px; border-radius: 4px; background: rgba(54,201,221,0.15); color: #36c9dd; }
 .ds-launch-block { background: rgba(54,201,221,0.05); border: 1px solid rgba(54,201,221,0.15); }
-.ds-launch-buttons { display: flex; gap: 8px; }
+.ds-launch-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .ds-btn-start { background: #22c55e; }
 .ds-btn-start:hover { background: #16a34a; }
 .ds-btn-secondary { background: #475569; }
@@ -2196,14 +2225,14 @@ a:focus-visible {
 .ds-setup-panel { padding: 12px 0; }
 .ds-orders-panel { padding: 0; }
 .ds-risk-grid { margin-top: 8px; }
-.ds-selector-row { display: flex; align-items: center; gap: 8px; }
+.ds-selector-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ds-selector-row label { font-size: 0.75rem; color: var(--muted,#7291a5); }
 .ds-selector-row select { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; padding: 4px 8px; font-size: 0.78rem; color: #d3e0e8; }
 .ds-tab-bar { display: flex; gap: 4px; }
 .ds-tab { padding: 4px 10px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.72rem; font-weight: 600; background: rgba(255,255,255,0.04); color: #7291a5; transition: all 0.15s; }
 .ds-tab.active { background: rgba(54,201,221,0.15); color: #36c9dd; }
 .ds-tab:hover { color: #c5d4dd; }
-.ds-tab-content { margin-top: 10px; }
+.ds-tab-content { margin-top: 10px; overflow-x: auto; }
 .ds-tab-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .ds-tab-filter select { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; padding: 3px 6px; font-size: 0.72rem; color: #d3e0e8; }
 .ds-table-compact { font-size: 0.75rem; }
@@ -2239,7 +2268,7 @@ a:focus-visible {
 @media (max-width:1200px) {
   .ds3-layout { grid-template-columns: 260px 1fr; }
   .ds3-right { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; }
-  .ds3-right > .ds-card { flex: 1; min-width: 300px; }
+  .ds3-right > .ds-card { flex: 1; min-width: min(300px, 100%); max-width: 100%; }
 }
 @media (max-width:768px) {
   .ds3-layout { grid-template-columns: 1fr; }
@@ -2744,6 +2773,7 @@ a:focus-visible {
   display: flex;
   gap: var(--ui-space-2);
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .forecast-shortcuts {
@@ -2806,7 +2836,9 @@ a:focus-visible {
 
 @media (max-width: 767px) {
   .forecast-form-row { flex-direction: column; }
-  .forecast-field { min-width: 100%; }
+  .forecast-field { min-width: 0; }
+  .forecast-select,
+  .forecast-field input[type="number"] { width: 100%; max-width: 100%; box-sizing: border-box; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
