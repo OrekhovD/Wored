@@ -1,61 +1,142 @@
 """AC-19: Browser desktop/mobile acceptance tests.
 
-Tests the WebUI at 1440x900 (desktop) and 390x844 (mobile).
-Path: «Сегодня» → manual preview/open → auto status → «Итоги».
+Live smoke checks against a running WebUI (desktop 1440x900 / mobile 390x844
+acceptance profile). Path: «Сегодня» → manual preview/open → auto status → «Итоги».
 Checks: no overflow, preserved routes, charts, touch targets.
+
+Environment:
+  WEBUI_ACCEPTANCE_URL   base URL of a reachable webui (default 127.0.0.1:8080)
+  WEBUI_ADMIN_PASSWORD   admin password (NEVER hardcode; tests skip when unset)
+When the webui is unreachable or the password is unset the live checks skip —
+this module is meant for host-side runs against a compose stack, not for the
+isolated QA container.
 """
 from __future__ import annotations
 
-import subprocess
 import json
 import os
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import pytest
 
-WEBUI_URL = "http://127.0.0.1:8080"
+WEBUI_URL = os.getenv("WEBUI_ACCEPTANCE_URL", "http://127.0.0.1:8080")
+WEBUI_PASSWORD = os.getenv("WEBUI_ADMIN_PASSWORD", "")
 SCREENSHOTS_DIR = Path(__file__).parent / "fixtures" / "browser"
 SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: N802
+        return None
+
+
+def _reachable() -> bool:
+    try:
+        with urllib.request.urlopen(WEBUI_URL + "/healthz", timeout=2):
+            return True
+    except Exception:
+        return False
+
+
+def _require_live() -> None:
+    if not _reachable():
+        pytest.skip(f"live WebUI not reachable at {WEBUI_URL}")
+
+
 def _curl_status(route: str) -> int:
-    """Get HTTP status code for a route."""
-    r = subprocess.run(
-        ["curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", f"{WEBUI_URL}{route}"],
-        capture_output=True, text=True, timeout=5,
-    )
-    return int(r.stdout.strip()) if r.stdout.strip() else 0
+    """Get HTTP status code for a route (redirects not followed)."""
+    _require_live()
+    opener = urllib.request.build_opener(_NoRedirect())
+    try:
+        with opener.open(WEBUI_URL + route, timeout=5) as resp:
+            return resp.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except Exception:
+        return 0
 
 
 def _curl_login_and_get(route: str) -> str:
-    """Login and fetch a protected route's HTML."""
-    # Get CSRF token
-    r1 = subprocess.run(
-        ["curl", "-s", "-c", "/tmp/ac19_cookies.txt", f"{WEBUI_URL}/login"],
-        capture_output=True, text=True, timeout=5,
-    )
-    import re
-    match = re.search(r'csrf_token" value="([^"]+)"', r1.stdout)
+    """Login and fetch a protected route's HTML; '' when login unavailable.
+
+    Session cookie is managed manually (not via CookieJar): the webui marks it
+    Secure, and browsers exempt http://localhost while urllib does not.
+    """
+    if not WEBUI_PASSWORD:
+        pytest.skip("WEBUI_ADMIN_PASSWORD not set (live webui login required)")
+    _require_live()
+    opener = urllib.request.build_opener(_NoRedirect())
+    cookie: dict[str, str] = {}
+
+    def _cookie_header() -> str:
+        return "; ".join(f"{k}={v}" for k, v in cookie.items())
+
+    def _store(res) -> None:
+        raw = res.headers.get("Set-Cookie") or ""
+        if "=" in raw:
+            value, _, _attrs = raw.partition(";")
+            name, _, val = value.partition("=")
+            cookie[name.strip()] = val.strip()
+
+    try:
+        req = urllib.request.Request(WEBUI_URL + "/login", headers={"Cookie": _cookie_header()})
+        with opener.open(req, timeout=5) as resp:
+            page = resp.read().decode("utf-8", "replace")
+            _store(resp)
+    except urllib.error.HTTPError as exc:
+        _store(exc)
+        page = exc.read().decode("utf-8", "replace")
+    except Exception:
+        return ""
+    match = re.search(r'csrf_token" value="([^"]+)"', page)
     if not match:
         return ""
-    csrf = match.group(1)
-
-    # Login
-    subprocess.run(
-        ["curl", "-s", "-c", "/tmp/ac19_cookies.txt", "-b", "/tmp/ac19_cookies.txt",
-         "-X", "POST", f"{WEBUI_URL}/login",
-         "-H", "Content-Type: application/x-www-form-urlencoded",
-         "-d", f"username=admin&password=cgn9v7Sxh78DiFSQd2FHdM1LeDKA2ItT&next={route}&csrf_token={csrf}",
-         "-o", "/dev/null", "-w", "%{http_code}"],
-        capture_output=True, text=True, timeout=5,
-    )
-
-    # Fetch route
-    r2 = subprocess.run(
-        ["curl", "-s", "-b", "/tmp/ac19_cookies.txt", f"{WEBUI_URL}{route}"],
-        capture_output=True, text=True, timeout=5,
-    )
-    return r2.stdout
+    data = urllib.parse.urlencode({
+        "username": "admin",
+        "password": WEBUI_PASSWORD,
+        "next": route,
+        "csrf_token": match.group(1),
+    }).encode()
+    try:
+        req = urllib.request.Request(
+            WEBUI_URL + "/login", data=data,
+            headers={"Cookie": _cookie_header(), "Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with opener.open(req, timeout=5) as resp:
+            _store(resp)
+            location = resp.headers.get("location") or ""
+    except urllib.error.HTTPError as exc:
+        _store(exc)
+        location = exc.headers.get("location") or ""
+    except Exception:
+        return ""
+    # Follow the post-login redirect (303 → next) and then fetch the target.
+    target = location if location.startswith("/") else route
+    try:
+        req = urllib.request.Request(
+            WEBUI_URL + target,
+            headers={"Cookie": _cookie_header()},
+        )
+        with opener.open(req, timeout=5) as resp:
+            _store(resp)
+            if resp.status >= 400:
+                return ""
+            if "Web UI Login" in resp.read(2048).decode("utf-8", "replace"):
+                return ""  # still unauthenticated
+        req = urllib.request.Request(
+            WEBUI_URL + (route if target != route else target),
+            headers={"Cookie": _cookie_header()},
+        )
+        with opener.open(req, timeout=5) as resp:
+            if resp.status >= 400:
+                return ""
+            return resp.read().decode("utf-8", "replace")
+    except Exception:
+        return ""
 
 
 class TestBrowserRoutes:
