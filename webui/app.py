@@ -1693,11 +1693,19 @@ async def fetch_health_snapshot(request: Request) -> dict[str, Any]:
         except Exception:
             collector_ok = False
 
+    # The forecast worker is a task on app.state; report its liveness so that
+    # every consumer of this snapshot (System page, /api/health, ui_presenters)
+    # sees the same truth as /readyz — not just /readyz alone.
+    worker = getattr(request.app.state, "forecast_worker", None)
+    forecast_worker_ok = worker is not None and not worker.done()
+
     return {
         "generated_at": serialize_dt(datetime.now(timezone.utc)),
+        "as_of": serialize_dt(datetime.now(timezone.utc)),
         "redis": redis_ok,
         "postgres": postgres_ok,
         "collector_feed": collector_ok,
+        "forecast_worker": forecast_worker_ok,
         "last_journal_at": serialize_dt(last_journal_at),
         "last_journal_age_minutes": journal_age_minutes,
     }
@@ -1961,8 +1969,6 @@ async def liveness(request: Request):
 @app.get("/readyz")
 async def readiness(request: Request):
     health = await fetch_health_snapshot(request)
-    worker = getattr(request.app.state, "forecast_worker", None)
-    health["forecast_worker"] = worker is not None and not worker.done()
     ready = all(health[k] for k in ("redis", "postgres", "collector_feed", "forecast_worker"))
     return JSONResponse({**health, "ready": ready}, status_code=200 if ready else 503)
 

@@ -44,6 +44,8 @@ services:
       - ./webui:/webui:ro
       - ./config:/config:ro
       - ./paper_trading:/opt/paper_trading:ro
+      - ./trading_math:/opt/trading_math:ro
+      - ./forecast_engine:/opt/forecast_engine:ro
     environment:
       - PYTHONPATH=/app:/chatbot:/webui:/opt
       - TZ=Asia/Bangkok
@@ -63,6 +65,8 @@ services:
     volumes:
       - ./chatbot:/app
       - ./paper_trading:/opt/paper_trading:ro
+      - ./trading_math:/opt/trading_math:ro
+      - ./forecast_engine:/opt/forecast_engine:ro
       - ./config:/config:ro
     environment:
       - PYTHONPATH=/app:/opt
@@ -83,6 +87,8 @@ services:
     volumes:
       - ./chatbot:/app
       - ./paper_trading:/opt/paper_trading:ro
+      - ./trading_math:/opt/trading_math:ro
+      - ./forecast_engine:/opt/forecast_engine:ro
       - ./config:/config:ro
     environment:
       - PYTHONPATH=/app:/opt
@@ -106,6 +112,8 @@ services:
       - ./webui:/app
       - ./chatbot:/chatbot:ro
       - ./paper_trading:/opt/paper_trading:ro
+      - ./trading_math:/opt/trading_math:ro
+      - ./forecast_engine:/opt/forecast_engine:ro
       - ./config:/config:ro
     environment:
       - PYTHONPATH=/app:/chatbot:/opt
