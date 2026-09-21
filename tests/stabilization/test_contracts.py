@@ -351,5 +351,54 @@ class LocalModelRoleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cloud.await_count, 1)
 
 
+class ConfidenceCalibrationTests(unittest.IsolatedAsyncioTestCase):
+    """Calibration must actually run, and must not leak an unawaited coroutine.
+
+    Regression for _calibrate_confidence, which used to call run_until_complete
+    on the already-running loop it had just grabbed: the call always raised, was
+    swallowed, and left the coroutine never awaited - so historical accuracy was
+    silently ignored for every stored forecast.
+    """
+
+    RAW = json.dumps({"summary": "flat", "points": [
+        {"step": 1, "price": 101.0, "change_pct": 1.0, "confidence": 50}]})
+
+    def _confidence(self, role, accuracy):
+        from prediction_engine import parse_prediction_payload
+        _, points = parse_prediction_payload(
+            self.RAW, horizon_steps=1, base_price=100.0, role=role, historical_accuracy=accuracy)
+        return points[0].confidence
+
+    def test_poor_history_damps_confidence(self):
+        # accuracy 40 -> damp 0.7 + 0.3*0.4 = 0.82 -> 50 becomes 41
+        self.assertEqual(self._confidence("bull", 40.0), 41.0)
+
+    def test_no_history_or_strong_history_leaves_confidence_alone(self):
+        self.assertEqual(self._confidence("bull", None), 50.0)
+        self.assertEqual(self._confidence("bull", 75.0), 50.0)
+        self.assertEqual(self._confidence(None, 40.0), 50.0)
+
+    async def test_async_role_call_awaits_accuracy_once_and_applies_it(self):
+        import os
+        import prediction_engine
+        from prediction_engine import MODEL_CONFIGS, generate_model_prediction
+        fetch = AsyncMock(return_value=40.0)
+        env = {k: "" for k in os.environ if k.startswith(("OLLAMA_", "NVIDIA_", "LOCAL_LLM_"))}
+        env["OLLAMA_API_KEY"] = "test-token"
+        with patch.dict(os.environ, env, clear=False), \
+            patch.object(prediction_engine, "_fetch_role_accuracy", fetch), \
+            patch.object(prediction_engine, "_ollama_chat",
+                         AsyncMock(return_value=self.RAW)):
+            result = await generate_model_prediction(
+                MODEL_CONFIGS["analyst"],
+                {"horizon_steps": 1, "base_price": 100.0, "symbol": "btcusdt"},
+                role="bull",
+            )
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.points[0].confidence, 41.0)
+        # One aggregate query per role call, not one per candidate attempt.
+        fetch.assert_awaited_once_with("bull")
+
+
 if __name__ == "__main__":
     unittest.main()

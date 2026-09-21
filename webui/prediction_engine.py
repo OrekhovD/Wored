@@ -271,18 +271,25 @@ def _extract_json_payload(raw_text: str) -> dict[str, Any] | list[Any]:
     raise ValueError("Model response does not contain a JSON object or array")
 
 
-def _calibrate_confidence(confidence: float | None, role: str | None) -> float | None:
-    """Damp confidence for historically poor roles (runs in async caller)."""
-    if confidence is None or role is None:
+def _calibrate_confidence(
+    confidence: float | None,
+    role: str | None,
+    historical_accuracy: float | None = None,
+) -> float | None:
+    """Damp confidence for historically poor roles.
+
+    Pure and synchronous on purpose. The previous version called
+    ``loop.run_until_complete`` on the loop it had just obtained from
+    ``asyncio.get_running_loop()`` - the only loop that cannot run a nested
+    completion - so it raised, was swallowed, and left the coroutine unawaited.
+    Calibration therefore never applied on either path. The caller that already
+    has an event loop fetches the accuracy and passes it in.
+    """
+    if confidence is None or role is None or historical_accuracy is None:
         return confidence
-    try:
-        loop = asyncio.get_running_loop()
-        historical_accuracy = loop.run_until_complete(_fetch_role_accuracy(role))
-        if historical_accuracy is not None and historical_accuracy < 50.0:
-            damp = 0.7 + 0.3 * (historical_accuracy / 100.0)
-            return round(confidence * damp, 2)
-    except Exception:
-        pass
+    if historical_accuracy < 50.0:
+        damp = 0.7 + 0.3 * (historical_accuracy / 100.0)
+        return round(confidence * damp, 2)
     return confidence
 
 
@@ -318,7 +325,7 @@ async def _fetch_role_accuracy(role: str) -> float | None:
         return None
 
 
-def parse_prediction_payload(raw_text: str, horizon_steps: int, base_price: float, step_minutes: int = 60, role: str | None = None) -> tuple[str, list[PredictionPoint]]:
+def parse_prediction_payload(raw_text: str, horizon_steps: int, base_price: float, step_minutes: int = 60, role: str | None = None, historical_accuracy: float | None = None) -> tuple[str, list[PredictionPoint]]:
     payload = _extract_json_payload(raw_text)
     if isinstance(payload, list):
         summary = ""
@@ -364,7 +371,7 @@ def parse_prediction_payload(raw_text: str, horizon_steps: int, base_price: floa
         confidence = _coerce_float(item.get("confidence"))
         if confidence is not None:
             confidence = max(0.0, min(100.0, confidence))
-            confidence = _calibrate_confidence(confidence, role)
+            confidence = _calibrate_confidence(confidence, role, historical_accuracy)
 
         predicted_low = _coerce_float(item.get("low", item.get("predicted_low")))
         predicted_high = _coerce_float(item.get("high", item.get("predicted_high")))
@@ -920,6 +927,9 @@ async def generate_model_prediction(
     system_prompt = _role_system_prompt(role)
     horizon_steps = int(context_payload.get("horizon_steps", context_payload.get("horizon_hours", 4)))
     step_minutes = int(context_payload.get("step_minutes", 60))
+    # Fetched once per role call, here, because this is the only level that has a
+    # usable event loop; parse_prediction_payload itself stays pure/synchronous.
+    role_accuracy = await _fetch_role_accuracy(role) if role else None
 
     for candidate in runtime_candidates:
         if not _candidate_is_available(candidate, strict_nvapi=strict_nvapi):
@@ -945,6 +955,7 @@ async def generate_model_prediction(
                     base_price=float(context_payload["base_price"]),
                     step_minutes=step_minutes,
                     role=role,
+                    historical_accuracy=role_accuracy,
                 )
                 return ModelPredictionResult(
                     key=config.key,
