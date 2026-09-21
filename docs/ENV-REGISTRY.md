@@ -36,6 +36,16 @@ Each key has: type, default, required/optional, service consumers, and secrecy l
 | `LLM_REGISTRY_PATH` | string | `/config/provider_registry.json` | required | runtime gateway | no |
 | `OLLAMA_BASE_URL` | string | — | required | provider_adapters | **yes** |
 | `OLLAMA_API_KEY` | string | — | required | provider_adapters | **yes** |
+| `LOCAL_LLM_ROLES` | string (comma-separated model keys, or `all`) | empty (disabled) | optional | webui prediction_engine | no |
+| `LOCAL_LLM_MODEL` | string | `bonsai-27b` | optional | webui prediction_engine | no |
+| `LOCAL_LLM_BASE_URL` | string (URL origin) | `http://127.0.0.1:8088` | optional | webui prediction_engine | no |
+| `LOCAL_LLM_TIMEOUT` | float (seconds) | `120` | optional | webui prediction_engine | no |
+
+`LOCAL_LLM_*` point at a workstation `ollama serve` (port 8088), not at Ollama
+Cloud. A local candidate leads the chain of the named role and the cloud chain
+stays behind it as fallback. Inside Docker `127.0.0.1` is the container itself:
+use `http://host.docker.internal:8088` and start the server on a routable
+interface, which publishes an unauthenticated endpoint to the local network.
 
 ## Telegram Bots
 
