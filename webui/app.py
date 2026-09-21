@@ -52,6 +52,7 @@ from forecast_queue import (
     EXPIRED,
     PARTIAL,
 )
+from forecast_refresh import AUTO_SOURCE, forecast_refresh_loop
 from access_control import verify_telegram, verify_telegram_multi, allowed_origin, safe_next_url
 from principal import Principal, create_from_cookie, create_from_telegram, create_from_internal_token
 from services.market_data import fresh_ticker
@@ -299,9 +300,16 @@ def pop_flash(request: Request) -> dict[str, str] | None:
 
 
 class _FakeRequest:
-    """Minimal request-like object for background tasks that only access app.state."""
+    """Minimal request-like object for background tasks that only access app.state.
+
+    ``headers``/``session`` exist because background paths reuse request-level
+    helpers (idempotency, actor attribution); they stay empty for system callers.
+    """
+
     def __init__(self, app: Any) -> None:
         self.app = app
+        self.headers: dict[str, str] = {}
+        self.session: dict[str, Any] = {}
 
 
 def build_login_redirect(request: Request) -> RedirectResponse | None:
@@ -1844,6 +1852,18 @@ async def _bootstrap_postgres(app: FastAPI, db_url: str) -> None:
         app.state.forecast_worker = asyncio.create_task(
             work_forecasts(pool, runner, redis_client=app.state.redis_client)
         )
+
+        # Session forecast producer: keeps the Trader Deck forecast covered
+        # instead of letting the newest completed request silently age out.
+        async def enqueue_session_forecast(symbol, horizon_steps, base_timeframe, depth):
+            return await queue_prediction(
+                _FakeRequest(app), symbol, horizon_steps,
+                "hermes-session-refresh", AUTO_SOURCE, base_timeframe, depth,
+            )
+
+        app.state.forecast_refresher = asyncio.create_task(
+            forecast_refresh_loop(app, enqueue_session_forecast)
+        )
         log.info("Postgres pool bootstrap complete (attempt %d)", attempt)
         return
     log.error("Postgres pool bootstrap gave up after %d attempts", attempt)
@@ -1857,6 +1877,7 @@ async def lifespan(app: FastAPI):
     app.state.redis_client = None
     app.state.pg_pool = None
     app.state.forecast_worker = None
+    app.state.forecast_refresher = None
     app.state.pg_bootstrap_task = None
 
     try:
@@ -1878,6 +1899,7 @@ async def lifespan(app: FastAPI):
             except (asyncio.CancelledError, Exception):
                 pass
         await stop_worker(app.state.forecast_worker)
+        await stop_worker(getattr(app.state, "forecast_refresher", None))
         if app.state.pg_pool is not None:
             await app.state.pg_pool.close()
         if app.state.redis_client is not None:

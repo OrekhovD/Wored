@@ -76,6 +76,26 @@ For host tests, pass the full path: `LLM_REGISTRY_PATH=D:/WORED_STAGING_20260908
 
 Registry entries include: `registry_version`, `verified_at`, `provider`, `model_id`, `endpoint_type`, `enabled`, `cost_class`, `capabilities`, `context_tokens`, `max_output_tokens`, `pricing`, `validation_gate_id`.
 
+## Session Forecast Auto-Refresh (FORECAST_AUTO_REFRESH_* — Trader Deck)
+
+| Key | Type | Default | Required | Consumers | Secret |
+|-----|------|---------|----------|-----------|--------|
+| `FORECAST_AUTO_REFRESH` | bool | `true` | optional | webui | no |
+| `FORECAST_AUTO_REFRESH_SYMBOL` | string | `btcusdt` | optional | webui | no |
+| `FORECAST_AUTO_REFRESH_HOURS` | int | `4` | optional | webui | no |
+| `FORECAST_AUTO_REFRESH_TIMEFRAME` | string | `60min` | optional | webui | no |
+| `FORECAST_AUTO_REFRESH_DEPTH` | int | `3` | optional | webui | no |
+| `FORECAST_AUTO_REFRESH_INTERVAL` | int (seconds) | `60` | optional | webui | no |
+| `FORECAST_AUTO_REFRESH_MAX_PER_DAY` | int | `6` | optional | webui | no |
+| `FORECAST_AUTO_REFRESH_COOLDOWN` | int (seconds) | `900` | optional | webui | no |
+
+The loop in `webui/forecast_refresh.py` enqueues a forecast only when the newest
+completed one no longer covers a future step, and it is bounded by the per-day
+budget plus cooldown. Requests it creates carry `source='auto-trader-session'`,
+which is what the budget guard counts — operator-triggered forecasts never
+consume that budget. Set `FORECAST_AUTO_REFRESH=false` to stop AI spend entirely
+(the Trader Deck then shows `прогноз просрочен` instead of inventing data).
+
 ## Paper Trading Engine (PAPER_* keys — new in HERMES-ACTIVE-PAPER-TRADING-V1)
 
 These are technical limits, not user-facing risk settings. User risk is stored in DB settings.
