@@ -228,5 +228,128 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
                     await _ollama_chat(candidate, MODEL_CONFIGS["analyst"], context)
 
 
+VALID_FORECAST_JSON = json.dumps({
+    "summary": "flat",
+    "points": [{"step": 1, "price": 101.0, "change_pct": 1.0,
+                "confidence": 50, "low": 100.0, "high": 102.0}],
+})
+
+
+class LocalModelRoleTests(unittest.IsolatedAsyncioTestCase):
+    """The workstation Ollama branch: opt-in chain, thinking off, no cloud keys."""
+
+    def setUp(self):
+        import os
+        self.context = {"horizon_steps": 1, "base_price": 100, "symbol": "btcusdt"}
+        # Cloud keys are cleared so a test cannot pass by silently using them.
+        self.no_cloud = {k: "" for k in os.environ if k.startswith(("OLLAMA_", "NVIDIA_"))}
+        self.no_cloud["LOCAL_LLM_ROLES"] = ""
+
+    def _candidates(self, key, roles=""):
+        import os
+        from prediction_engine import MODEL_CONFIGS, _build_runtime_candidates
+        env = dict(self.no_cloud, LOCAL_LLM_ROLES=roles)
+        with patch.dict(os.environ, env, clear=False):
+            return _build_runtime_candidates(MODEL_CONFIGS[key])
+
+    def test_local_chain_is_off_by_default(self):
+        self.assertNotIn("ollama_local", [c.provider for c in self._candidates("analyst")])
+
+    def test_local_candidate_leads_only_the_configured_role(self):
+        analyst = self._candidates("analyst", roles="analyst")
+        premium = self._candidates("premium", roles="analyst")
+        self.assertEqual(analyst[0].provider, "ollama_local")
+        self.assertEqual(analyst[0].model_id, "bonsai-27b")
+        self.assertEqual(analyst[0].timeout, 120.0)
+        # The cloud chain of the same role must stay behind it, untouched.
+        self.assertNotIn("ollama_local", [c.provider for c in analyst[1:]])
+        self.assertNotIn("ollama_local", [c.provider for c in premium])
+
+    def test_local_candidate_leads_every_role_for_all(self):
+        providers = {key: self._candidates(key, roles="all")[0].provider
+                     for key in ("worker", "analyst", "premium", "minimax")}
+        self.assertEqual(providers, {"worker": "ollama_local", "analyst": "ollama_local",
+                                     "premium": "ollama_local", "minimax": "ollama_local"})
+
+    async def test_local_adapter_forces_thinking_off_and_appends_schema(self):
+        import os
+        import httpx
+        from prediction_engine import MODEL_CONFIGS, _local_ollama_chat
+        candidate = self._candidates("analyst", roles="analyst")[0]
+        body = {"done": True, "done_reason": "stop", "message": {"content": VALID_FORECAST_JSON}}
+        client = AsyncMock()
+        client.post.return_value = httpx.Response(
+            200, json=body, request=httpx.Request("POST", "http://127.0.0.1:8088/api/chat"))
+        manager = AsyncMock()
+        manager.__aenter__.return_value = client
+        env = dict(self.no_cloud, LOCAL_LLM_ROLES="analyst",
+                   LOCAL_LLM_BASE_URL="http://127.0.0.1:8088/v1")
+        with patch.dict(os.environ, env, clear=False), patch("httpx.AsyncClient", return_value=manager):
+            content = await _local_ollama_chat(candidate, MODEL_CONFIGS["analyst"], self.context)
+        self.assertEqual(content, VALID_FORECAST_JSON)
+
+        args, kwargs = client.post.call_args
+        # A "/v1" base URL must not produce "/v1/api/chat".
+        self.assertEqual(args[0], "http://127.0.0.1:8088/api/chat")
+        payload = kwargs["json"]
+        self.assertIs(payload["think"], False)
+        self.assertEqual(payload["options"]["num_predict"], MODEL_CONFIGS["analyst"].max_tokens)
+        # The workstation server has no auth; sending a bearer token would be noise.
+        self.assertNotIn("Authorization", kwargs["headers"])
+        user_text = payload["messages"][-1]["content"]
+        self.assertGreater(user_text.find("Output ONLY one JSON object"), user_text.find("btcusdt"))
+
+    def _candidates_local_first(self, key):
+        return self._candidates(key, roles=key)[0]
+
+    async def test_local_adapter_rejects_empty_and_incomplete_content(self):
+        import os
+        import httpx
+        from prediction_engine import MODEL_CONFIGS, _local_ollama_chat
+        candidate = self._candidates_local_first("analyst")
+        for body in (
+            {"done": True, "done_reason": "stop", "message": {"thinking": "private"}},
+            {"done": False, "done_reason": "length", "message": {"content": VALID_FORECAST_JSON}},
+        ):
+            client = AsyncMock()
+            client.post.return_value = httpx.Response(
+                200, json=body, request=httpx.Request("POST", "http://127.0.0.1:8088/api/chat"))
+            manager = AsyncMock()
+            manager.__aenter__.return_value = client
+            with patch.dict(os.environ, self.no_cloud, clear=False), patch("httpx.AsyncClient", return_value=manager):
+                with self.assertRaises(ValueError):
+                    await _local_ollama_chat(candidate, MODEL_CONFIGS["analyst"], self.context)
+
+    def test_local_candidate_gets_a_single_attempt(self):
+        import os
+        from prediction_engine import MODEL_CONFIGS, _candidate_attempt_schedule
+        local = self._candidates_local_first("analyst")
+        cloud = next(c for c in self._candidates("analyst") if c.provider != "ollama_local")
+        self.assertEqual(_candidate_attempt_schedule(MODEL_CONFIGS["analyst"], local), (0.0,))
+        self.assertEqual(len(_candidate_attempt_schedule(MODEL_CONFIGS["analyst"], cloud)), 3)
+
+    def test_local_candidate_is_available_without_api_key(self):
+        import os
+        from prediction_engine import _candidate_is_available
+        local = self._candidates_local_first("analyst")
+        with patch.dict(os.environ, self.no_cloud, clear=False):
+            self.assertTrue(_candidate_is_available(local))
+
+    async def test_local_failure_falls_back_to_the_cloud_chain(self):
+        import os
+        import prediction_engine
+        from prediction_engine import MODEL_CONFIGS, generate_model_prediction
+        env = dict(self.no_cloud, LOCAL_LLM_ROLES="analyst", OLLAMA_API_KEY="test-token")
+        with patch.dict(os.environ, env, clear=False):
+            with patch.object(prediction_engine, "_local_ollama_chat",
+                              AsyncMock(side_effect=RuntimeError("connection refused"))), \
+                 patch.object(prediction_engine, "_ollama_chat",
+                              AsyncMock(return_value=VALID_FORECAST_JSON)) as cloud:
+                result = await generate_model_prediction(MODEL_CONFIGS["analyst"], self.context, role="bull")
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.model_id, "glm-5.1")
+        self.assertEqual(cloud.await_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,14 @@ GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+# Workstation-local inference server: a separate `ollama serve`, unrelated to the
+# Ollama Cloud path above. Disabled unless LOCAL_LLM_ROLES names a role chain, and
+# read per call so the opt-in can be toggled without reimporting the module.
+LOCAL_LLM_BASE_URL_DEFAULT = "http://127.0.0.1:8088"
+LOCAL_LLM_MODEL_DEFAULT = "bonsai-27b"
+# A cold 27B load costs ~11 s and one forecast ~20 s, which does not fit the
+# 20-90 s cloud role timeouts, so local candidates carry their own budget.
+LOCAL_LLM_TIMEOUT_DEFAULT = 120.0
 
 PREDICTION_SYSTEM_PROMPT = """
 You are a crypto market forecasting agent inside a model-vs-model evaluation lab.
@@ -122,7 +130,8 @@ class RuntimeModelCandidate:
     base_url: str
     api_key_env: str
     timeout: float
-    provider: str = "ollama"  # "ollama" (native /api/chat) or "nvidia" (OpenAI /v1/chat/completions)
+    provider: str = "ollama"  # "ollama" (cloud /api/chat), "nvidia" (OpenAI /v1/chat/completions),
+    # "ollama_local" (workstation /api/chat, no auth, thinking forced off)
 
 
 @dataclass(frozen=True)
@@ -436,7 +445,37 @@ def _is_missing_model_error(exc: Exception) -> bool:
     return "404" in message and ("not found" in message or "unsupported" in message)
 
 
+def _local_llm_candidate(config: PredictionModelConfig) -> RuntimeModelCandidate | None:
+    """Local candidate for the roles listed in LOCAL_LLM_ROLES, or None when off."""
+    roles = _parse_model_csv(os.getenv("LOCAL_LLM_ROLES", ""))
+    model = os.getenv("LOCAL_LLM_MODEL", LOCAL_LLM_MODEL_DEFAULT).strip()
+    if not roles or not model:
+        return None
+    if config.key not in roles and "all" not in roles:
+        return None
+    base_url = os.getenv("LOCAL_LLM_BASE_URL", LOCAL_LLM_BASE_URL_DEFAULT).strip()
+    try:
+        timeout = float(os.getenv("LOCAL_LLM_TIMEOUT", str(LOCAL_LLM_TIMEOUT_DEFAULT)))
+    except (TypeError, ValueError):
+        timeout = LOCAL_LLM_TIMEOUT_DEFAULT
+    return RuntimeModelCandidate(
+        cache_key=f"local:{model}",
+        model_id=model,
+        base_url=base_url,
+        api_key_env="",
+        timeout=timeout,
+        provider="ollama_local",
+    )
+
+
 def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeModelCandidate]:
+    """Candidate chain for a role; the local model leads the chain when opted in."""
+    candidates = _cloud_runtime_candidates(config)
+    local = _local_llm_candidate(config)
+    return [local, *candidates] if local else candidates
+
+
+def _cloud_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeModelCandidate]:
     if config.key == "worker":
         candidates: list[RuntimeModelCandidate] = []
         ollama_primary = os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4-flash").strip()
@@ -565,6 +604,9 @@ def _build_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
 
 
 def _candidate_is_available(candidate: RuntimeModelCandidate, strict_nvapi: bool = False) -> bool:
+    if candidate.provider == "ollama_local":
+        # The workstation server has no auth; availability is proven by the call.
+        return True
     api_key = os.getenv(candidate.api_key_env, "").strip()
     if not api_key:
         return False
@@ -701,6 +743,81 @@ async def _ollama_chat(
     return content
 
 
+def _local_schema_tail(context_payload: dict[str, Any]) -> str:
+    """The JSON contract restated after the context, not instead of it.
+
+    Measured on the local 27B model: with the schema living only in the system
+    prompt (i.e. before the context) the model echoes the input JSON back and
+    burns the budget - done_reason=length and points that fail to parse. A short
+    restatement after the data turns that into a clean parse every run.
+    """
+    try:
+        steps = int(context_payload.get("horizon_steps") or context_payload.get("horizon_hours") or 4)
+    except (TypeError, ValueError):
+        steps = 4
+    try:
+        base_price = float(context_payload.get("base_price") or 0.0)
+    except (TypeError, ValueError):
+        base_price = 0.0
+    return (
+        "\n\nOutput ONLY one JSON object and nothing else, with exactly two keys:"
+        f' "summary" (short string) and "points" (array of {steps} objects).'
+        f' Each point must have "step" (1..{steps}), "price" (number near {base_price:.0f}),'
+        ' "change_pct" (number), "confidence" (0-100), "low" (number), "high" (number).'
+        " Do not repeat the input context."
+    )
+
+
+async def _local_ollama_chat(
+    candidate: RuntimeModelCandidate,
+    config: PredictionModelConfig,
+    context_payload: dict[str, Any],
+    system_prompt: str | None = None,
+    peer_outputs: list[dict[str, Any]] | None = None,
+) -> str:
+    """Call the workstation's own Ollama server via native /api/chat.
+
+    Two differences from the cloud path, both measured on this server:
+    thinking must be disabled with a top-level ``think`` field (in ``options``
+    it is ignored, and ``reasoning_effort`` does nothing for this model - without
+    the field the whole budget goes to reasoning and ``content`` comes back
+    empty), and the output contract has to be restated after the context.
+    """
+    import httpx
+
+    base = candidate.base_url.rstrip("/").removesuffix("/v1")
+    url = f"{base}/api/chat"
+
+    messages = _build_prediction_messages(context_payload, system_prompt, peer_outputs)
+    messages[-1] = {
+        **messages[-1],
+        "content": messages[-1]["content"] + _local_schema_tail(context_payload),
+    }
+
+    payload = {
+        "model": candidate.model_id,
+        "messages": messages,
+        "stream": False,
+        "think": False,
+        "options": {
+            "temperature": config.temperature,
+            "num_predict": config.max_tokens,
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=candidate.timeout) as hc:
+        resp = await hc.post(url, json=payload, headers={"Content-Type": "application/json"})
+        resp.raise_for_status()
+        data = resp.json()
+
+    if data.get("done") is not True or data.get("done_reason") not in (None, "stop", "length"):
+        raise ValueError("Local model response is incomplete")
+    content = (data.get("message", {}).get("content", "") or "").strip()
+    if not content:
+        raise ValueError("Local model returned no final content")
+    return content
+
+
 async def _nvidia_chat(
     candidate: RuntimeModelCandidate,
     config: PredictionModelConfig,
@@ -761,6 +878,19 @@ def _attempt_schedule(config: PredictionModelConfig) -> tuple[float, ...]:
     return (0.0, *RETRY_BACKOFF_SECONDS)
 
 
+def _candidate_attempt_schedule(
+    config: PredictionModelConfig, candidate: RuntimeModelCandidate
+) -> tuple[float, ...]:
+    """Retries are per candidate: a 120 s local call must not be retried in-place.
+
+    The queue kills an attempt past ATTEMPT_TIMEOUT_SECONDS (300 s), so three
+    local retries would be killed mid-flight and lose the cloud fallback too.
+    """
+    if candidate.provider == "ollama_local":
+        return (0.0,)
+    return _attempt_schedule(config)
+
+
 async def generate_model_prediction(
     config: PredictionModelConfig,
     context_payload: dict[str, Any],
@@ -795,7 +925,7 @@ async def generate_model_prediction(
         if not _candidate_is_available(candidate, strict_nvapi=strict_nvapi):
             continue
 
-        attempt_schedule = _attempt_schedule(config)
+        attempt_schedule = _candidate_attempt_schedule(config, candidate)
         for attempt, backoff in enumerate(attempt_schedule, start=1):
             if backoff:
                 await asyncio.sleep(backoff)
@@ -804,6 +934,8 @@ async def generate_model_prediction(
                 last_model_id = candidate.model_id
                 if candidate.provider == "nvidia":
                     content = await _nvidia_chat(candidate, config, context_payload, system_prompt, peer_outputs)
+                elif candidate.provider == "ollama_local":
+                    content = await _local_ollama_chat(candidate, config, context_payload, system_prompt, peer_outputs)
                 else:
                     content = await _ollama_chat(candidate, config, context_payload, system_prompt, peer_outputs)
 
