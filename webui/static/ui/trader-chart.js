@@ -32,7 +32,7 @@
   var chart, candles, fcSeries, q90Series, q10Series;
   var volSeries, macdHist, macdDif, macdDea, kSeries, dSeries, jSeries;
   var overlayState = {};
-  var chartData = { bars: [], forecast: [], positions: [] };
+  var chartData = { bars: [], forecast: [], positions: [], sources: { candles: 'none', forecast: 'none', positions: 'none', forecastStale: 0 } };
 
   // ── indicator math ──────────────────────────────────────────────
   function sma(a, n) {
@@ -440,16 +440,18 @@
       var resp = await fetch('/api/trader/candles?symbol=btcusdt&period=60min&size=200', { credentials: 'same-origin' });
       if (resp.ok) {
         var data = await resp.json();
+        chartData.sources.candles = data.source || 'unknown';
         chartData.bars = (data.candles || []).map(function (c) {
           return { time: c.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume };
         });
       }
-    } catch (e) { console.error('[trader-chart] candles fetch failed', e); }
+    } catch (e) { chartData.sources.candles = 'error'; console.error('[trader-chart] candles fetch failed', e); }
 
     try {
       var resp2 = await fetch('/api/trader/forecast?symbol=btcusdt', { credentials: 'same-origin' });
       if (resp2.ok) {
         var fcData = await resp2.json();
+        chartData.sources.forecast = fcData.source || 'unknown';
         chartData.forecast = (fcData.steps || []).map(function (f) {
           return {
             time: f.time, step: f.step, open: f.open, close: f.close,
@@ -458,15 +460,30 @@
           };
         });
       }
-    } catch (e) { console.error('[trader-chart] forecast fetch failed', e); }
+    } catch (e) { chartData.sources.forecast = 'error'; chartData.forecast = []; console.error('[trader-chart] forecast fetch failed', e); }
 
     try {
       var resp3 = await fetch('/api/trader/positions', { credentials: 'same-origin' });
       if (resp3.ok) {
         var posData = await resp3.json();
+        chartData.sources.positions = posData.source || 'unknown';
         chartData.positions = posData.positions || [];
       }
-    } catch (e) { console.error('[trader-chart] positions fetch failed', e); }
+    } catch (e) { chartData.sources.positions = 'error'; chartData.positions = []; console.error('[trader-chart] positions fetch failed', e); }
+
+    // Expired forecast points must never reach the chart: every series here is
+    // time-ascending and the band series are anchored at the last real candle,
+    // so a stale step (target already in the past) makes Lightweight Charts
+    // throw and blanks the whole deck. Degrade to "no forecast" instead.
+    if (chartData.bars.length && chartData.forecast.length) {
+      var lastBarTime = chartData.bars[chartData.bars.length - 1].time;
+      var fresh = chartData.forecast.filter(function (f) { return f.time > lastBarTime; });
+      chartData.sources.forecastStale = chartData.forecast.length - fresh.length;
+      chartData.forecast = fresh;
+      if (!fresh.length && chartData.sources.forecast !== 'unavailable') {
+        chartData.sources.forecast = 'expired';
+      }
+    }
 
     // Build extended bars for indicator computation
     chartData.extBars = chartData.bars.concat(chartData.forecast.map(function (f) {
@@ -476,6 +493,42 @@
     updateChart();
     updateTopBar();
     updateSideCards();
+    updateSourceBadge();
+  }
+
+  // ── data provenance ─────────────────────────────────────────────
+  // The deck must never look "live" while the API returned nothing real.
+  var SOURCE_LABELS = {
+    'htx-rest': 'HTX · REST',
+    'redis': 'HTX · CACHE',
+    'postgres': 'DB · FORECAST',
+    'expired': 'ПРОГНОЗ ПРОСРОЧЕН',
+    'paper_v2': 'DB · PAPER_V2',
+    'unavailable': 'НЕТ ДАННЫХ',
+    'skeleton': 'ЗАГОТОВКА',
+    'mock': 'ДЕМО · MOCK',
+    'error': 'ОШИБКА ЗАПРОСА',
+    'unknown': 'НЕИЗВЕСТНО',
+    'none': '—'
+  };
+
+  function updateSourceBadge() {
+    var s = chartData.sources.candles;
+    var bad = (s !== 'htx-rest' && s !== 'redis');
+    var el = document.getElementById('trSourceBadge');
+    if (el) {
+      el.textContent = 'свечи: ' + (SOURCE_LABELS[s] || s)
+        + (chartData.sources.forecast === 'expired' ? ' · прогноз просрочен' : '');
+      el.className = 'tr-pill ' + (bad ? 'tr-risk' : 'tr-live');
+      el.title = 'candles=' + s
+        + ' · forecast=' + chartData.sources.forecast
+        + ' · позиций=' + chartData.sources.positions
+        + ' · просрочено шагов=' + chartData.sources.forecastStale;
+    }
+    var live = document.getElementById('trLiveBadge');
+    if (live) live.textContent = bad ? 'NO DATA' : 'LIVE';
+    var livePill = live ? live.closest('.tr-pill') : null;
+    if (livePill) livePill.className = 'tr-pill ' + (bad ? 'tr-neutral' : 'tr-live');
   }
 
   function updateTopBar() {

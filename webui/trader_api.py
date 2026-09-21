@@ -5,8 +5,10 @@ Provides REST endpoints for the Trader Deck UI:
   - mode switching with idempotency
   - SSE stream placeholder
 
-When Redis/Postgres are unavailable, endpoints return mock data
-matching the Trader Deck mockup structure so the UI is always functional.
+Data policy (self-learn review, item A): endpoints serve real upstream data
+only. When Redis/Postgres/HTX cannot answer, they return an honest empty payload
+labelled ``source="unavailable"`` — never a fabricated chart, price path or
+position table. The Trader Deck UI surfaces that provenance as a badge.
 """
 from __future__ import annotations
 
@@ -66,84 +68,19 @@ def _require_api_auth(request: Request) -> None:
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
-# ─── Mock data generators ─────────────────────────────────────────────────
+# ─── Trader Deck layout skeleton ──────────────────────────────────────────
 
 def _now_ts() -> int:
     return int(time.time())
 
 
-def _mock_candles(count: int = 200) -> list[dict[str, Any]]:
-    """Generate realistic OHLCV candles for BTC-USDT perpetual."""
-    import random
-    random.seed(42)  # deterministic for tests
-    base_ts = _now_ts() - count * 3600
-    price = 75000.0
-    candles: list[dict[str, Any]] = []
-    for i in range(count):
-        ts = base_ts + i * 3600
-        vol = random.uniform(50, 400)
-        op = price
-        change = random.gauss(0, 0.008) * price
-        close = max(50000, op + change)
-        high = max(op, close) + random.uniform(10, 200)
-        low = min(op, close) - random.uniform(10, 200)
-        amount = vol
-        candles.append({
-            "time": ts,
-            "open": round(op, 1),
-            "high": round(high, 1),
-            "low": round(low, 1),
-            "close": round(close, 1),
-            "volume": round(amount, 2),
-        })
-        price = close
-    return candles
-
-
-def _mock_forecast() -> dict[str, Any]:
-    """Generate mock forecast matching the Trader Deck forecast card structure."""
-    candles = _mock_candles(50)
-    last_close = candles[-1]["close"]
-    last_time = candles[-1]["time"]
-    steps: list[dict[str, Any]] = []
-    price = last_close
-    for k in range(1, 4):
-        ts = last_time + k * 3600
-        sigma = 0.008
-        c50 = price * (1 + 0.0002)
-        c10 = price * (1 - 1.2816 * sigma)
-        c90 = price * (1 + 1.2816 * sigma)
-        hi = max(price, c50) * (1 + 0.55 * sigma)
-        lo = min(price, c50) * (1 - 0.55 * sigma)
-        steps.append({
-            "step": k,
-            "time": ts,
-            "open": round(price, 1),
-            "close": round(c50, 1),
-            "high": round(hi, 1),
-            "low": round(lo, 1),
-            "c10": round(c10, 1),
-            "c90": round(c90, 1),
-            "h90": round(max(price, c90) * (1 + 0.9 * sigma), 1),
-            "l10": round(min(price, c10) * (1 - 0.9 * sigma), 1),
-            "vol": 150.0,
-            "p_up": 0.55,
-            "sigma": sigma,
-        })
-        price = c50
-    return {
-        "request_id": 0,
-        "symbol": "btcusdt",
-        "base_price": round(last_close, 1),
-        "base_time": last_time,
-        "horizon_steps": 3,
-        "steps": steps,
-        "source": "mock",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-
 def _mock_state() -> dict[str, Any]:
+    """Decorative Trader Deck skeleton (roster/limits) — not market data.
+
+    Only ``mode``/``reason``/``plan_*`` are overwritten from real state by the
+    callers; the agent roster and budget numbers are layout placeholders and are
+    labelled ``source="skeleton"`` whenever no ``paper_v2_days`` row backs them.
+    """
     now = datetime.now(timezone.utc)
     plan_valid = now.replace(minute=0, second=0, microsecond=0)
     from datetime import timedelta
@@ -178,111 +115,8 @@ def _mock_state() -> dict[str, Any]:
             "requests_today": 171,
             "requests_peak": 400,
         },
-        "source": "mock",
+        "source": "skeleton",
     }
-
-
-def _mock_positions() -> list[dict[str, Any]]:
-    """Generate mock positions matching the Trader Deck table structure."""
-    candles = _mock_candles(200)
-    first_ts = candles[0]["time"]
-    last_ts = candles[-1]["time"]
-    span = last_ts - first_ts
-    # Distribute positions evenly across the visible candle range
-    profiles = {
-        "P0": {"L": 50, "tp": 0.006, "sl": 0.006},
-        "P1": {"L": 100, "tp": 0.006, "sl": 0.006},
-        "P2": {"L": 150, "tp": 0.0025, "sl": 0.0025},
-        "P3": {"L": 200, "tp": 0.001512, "sl": 0.0012},
-    }
-    # 8 positions spread across 15%-85% of the candle range
-    offsets = [0.15, 0.24, 0.33, 0.42, 0.51, 0.60, 0.70, 0.80]
-    plan = [
-        ("long", "P1", "tp"),
-        ("long", "P2", "sl"),
-        ("short", "P2", "tp"),
-        ("short", "P1", "timeout"),
-        ("short", "P3", "liq"),
-        ("long", "P3", "tp"),
-        ("long", "P0", "sl"),
-        ("long", "P1", "open"),
-    ]
-    positions: list[dict[str, Any]] = []
-    for idx, (side, prof, status) in enumerate(plan):
-        t = int(first_ts + span * offsets[idx])
-        p = profiles[prof]
-        # Use actual candle close at that time as entry price
-        nearest = min(candles, key=lambda c: abs(c["time"] - t))
-        entry = nearest["close"]
-        dir_val = 1 if side == "long" else -1
-        tp = entry * (1 + dir_val * p["tp"])
-        sl = entry * (1 - dir_val * p["sl"])
-        liq = entry * (1 - dir_val * 0.0034)
-        if status == "open":
-            exit_price = 75500
-            gross = dir_val * (exit_price - entry) * 10 * 0.001
-            net = gross - 2 * entry * 10 * 0.001 * 0.0006
-            exit_time = None
-        elif status == "liq":
-            exit_price = liq
-            gross = -(10 * p["L"] / 100)
-            net = gross
-            exit_time = t + 1800
-        elif status == "tp":
-            exit_price = tp
-            gross = dir_val * (exit_price - entry) * 10 * 0.001
-            net = gross - 2 * entry * 10 * 0.001 * 0.0006
-            exit_time = t + 1800
-        elif status == "sl":
-            exit_price = sl
-            gross = dir_val * (exit_price - entry) * 10 * 0.001
-            net = gross - 2 * entry * 10 * 0.001 * 0.0006
-            exit_time = t + 1800
-        else:  # timeout
-            exit_price = entry + dir_val * 20
-            gross = dir_val * (exit_price - entry) * 10 * 0.001
-            net = gross - 2 * entry * 10 * 0.001 * 0.0006
-            exit_time = t + 3600
-
-        fees = abs(2 * entry * 10 * 0.001 * 0.0006)
-        positions.append({
-            "id": idx + 1,
-            "open_time": t,
-            "exit_time": exit_time,
-            "account": f"auto_{prof.lower()}",
-            "profile": prof,
-            "side": side,
-            "leverage": p["L"],
-            "margin": round(10 * p["L"] / 100, 2),
-            "extra_margin": 0,
-            "size": round(10 * 0.001, 4),
-            "contracts": 10,
-            "entry": round(entry, 1),
-            "exit": round(exit_price, 1),
-            "liq": round(liq, 1),
-            "tp": round(tp, 1),
-            "sl": round(sl, 1),
-            "status": status,
-            "reason": status,
-            "gross": round(gross, 2),
-            "fees": round(fees, 2),
-            "net": round(net, 2),
-            "duration_min": 240 if status != "open" else None,
-        })
-    return positions
-
-
-def _mock_activity() -> list[dict[str, Any]]:
-    now = _now_ts()
-    return [
-        {"time": now - 60, "who": "Entry-Gate", "text": "allow · long: p_up × 0.90 = 0.68 ≥ 0.65", "color": "up"},
-        {"time": now - 120, "who": "Planner", "text": "План v3: trade, P1, обе стороны, до 6 входов", "color": "accent"},
-        {"time": now - 180, "who": "Forecast-Critic", "text": "Множитель ×0.90: объём ниже медианы часа", "color": "info"},
-        {"time": now - 240, "who": "Market-Scout", "text": "Режим range; ликвидации за час: long 0.4 млн $", "color": "info"},
-        {"time": now - 300, "who": "Runner", "text": "Long auto_p1 10 cont @ 75050 · TP 75500 · SL 74600", "color": "info"},
-        {"time": now - 600, "who": "Risk engine", "text": "Ликвидация auto_p3 short 200x · −10.00 $ маржи", "color": "down"},
-        {"time": now - 900, "who": "Hermes", "text": "Отчёт дня отправлен в Telegram", "color": "accent"},
-    ]
 
 
 # ─── Redis helpers ────────────────────────────────────────────────────────
@@ -312,7 +146,7 @@ async def _redis_set(request: Request, key: str, value: str, ttl: int = 300) -> 
 
 @router.get("/candles")
 async def get_candles(request: Request, symbol: str = "btcusdt", period: str = "60min", size: int = 200):
-    """Return recent OHLCV candles from Redis cache or mock data."""
+    """Return recent OHLCV candles from Redis cache or HTX spot REST (empty if neither answers)."""
     _require_api_auth(request)
     size = max(30, min(size, 500))
 
@@ -353,13 +187,19 @@ async def get_candles(request: Request, symbol: str = "btcusdt", period: str = "
         except Exception as exc:
             log.warning("HTX kline fetch failed: %s", exc)
 
-    # Fallback to mock
-    return {"symbol": symbol, "period": period, "candles": _mock_candles(size), "source": "mock"}
+    # No real upstream answered. An honest empty series is returned instead of a
+    # fabricated chart: invented candles on a trading deck are a safety hazard
+    # (self-learn review, item A).
+    log.warning(
+        "trader candles unavailable for %s/%s (redis miss, HTX REST failed or no http client)",
+        symbol, period,
+    )
+    return {"symbol": symbol, "period": period, "candles": [], "source": "unavailable"}
 
 
 @router.get("/forecast")
 async def get_forecast(request: Request, symbol: str = "btcusdt"):
-    """Return latest forecast from forecast_requests/forecast_points or mock."""
+    """Return latest completed forecast from forecast_requests/forecast_points (empty if none)."""
     _require_api_auth(request)
 
     # 1. Try PostgreSQL — forecast_requests + forecast_points
@@ -454,13 +294,21 @@ async def get_forecast(request: Request, symbol: str = "btcusdt"):
         except (json.JSONDecodeError, KeyError):
             pass
 
-    # 3. Fallback to mock
-    return _mock_forecast()
+    # 3. Nothing in Postgres or cache — return an honest empty forecast rather
+    # than a made-up price path (self-learn review, item A).
+    log.warning("trader forecast unavailable for %s (postgres/cache miss)", symbol)
+    return {
+        "symbol": symbol,
+        "request_id": None,
+        "steps": [],
+        "horizon_steps": 0,
+        "source": "unavailable",
+    }
 
 
 @router.get("/state")
 async def get_state(request: Request):
-    """Return current trading state from paper_v2_days or mock."""
+    """Return current trading state from paper_v2_days (skeleton-labelled without a row)."""
     _require_api_auth(request)
 
     global _current_mode, _mode_reason
@@ -507,6 +355,9 @@ async def get_state(request: Request):
     state = _mock_state()
     state["mode"] = _current_mode
     state["reason"] = _mode_reason
+    # mode/reason are real (in-process + Redis), the rest of the skeleton is
+    # decorative — say so instead of pretending the whole card is live state.
+    state["source"] = "skeleton"
     return state
 
 
@@ -531,16 +382,15 @@ async def get_positions(request: Request, status: str | None = None):
         except Exception as exc:
             log.warning("paper_v2 positions fetch failed: %s", exc)
 
-    # Fallback to mock only if DB unavailable
-    positions = _mock_positions()
-    if status and status != "all":
-        positions = [p for p in positions if p.get("status") == status]
-    return {"positions": positions, "source": "mock", "count": len(positions)}
+    # DB unavailable — the positions table is trading state, so we never
+    # synthesize it (self-learn review, item A).
+    log.warning("trader positions unavailable (no postgres pool or query failed)")
+    return {"positions": [], "source": "unavailable", "count": 0}
 
 
 @router.get("/activity")
 async def get_activity(request: Request, limit: int = 20):
-    """Return recent activity feed from paper_v2_events or mock."""
+    """Return recent activity feed from paper_v2_events (empty if none)."""
     _require_api_auth(request)
     limit = max(1, min(limit, 100))
 
@@ -578,8 +428,9 @@ async def get_activity(request: Request, limit: int = 20):
         except (json.JSONDecodeError, KeyError):
             pass
 
-    # Fallback to mock
-    return {"items": _mock_activity()[:limit], "source": "mock"}
+    # No events and no cache — an empty feed, not an invented one
+    # (self-learn review, item A).
+    return {"items": [], "source": "unavailable"}
 
 
 @router.post("/mode")

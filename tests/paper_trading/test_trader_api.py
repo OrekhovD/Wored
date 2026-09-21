@@ -1,15 +1,21 @@
 """API contract tests for the Trader API — WORED Trader V0.1 Phase 5.
 
+Contract under test (self-learn review, item A): every Trader endpoint serves
+real upstream data only.  When the upstream is missing or fails, the response is
+an honest empty with ``source="unavailable"`` — never a fabricated candle series,
+price path or position table.
+
 Tests cover:
-  - GET /api/trader/candles returns 200 with candle array
-  - GET /api/trader/state returns 200 with mode field
-  - GET /api/trader/positions returns 200 with array
+  - GET /api/trader/candles returns HTX candles, and empty on upstream failure
+  - GET /api/trader/state returns 200 with mode field, labelled "skeleton"
+  - GET /api/trader/positions returns 200 with array (empty without DB)
+  - GET /api/trader/forecast + /activity return empty without data
   - POST /api/trader/mode returns 200 with idempotency_key
   - POST /api/trader/mode duplicate key returns 200 with applied=false
   - Auth required (401 without session)
   - /trader route returns 200 (or 303 redirect to login)
 
-Uses FastAPI TestClient with mock data (no Redis/Postgres needed).
+Uses FastAPI TestClient with stub state (no Redis/Postgres needed).
 """
 from __future__ import annotations
 
@@ -104,23 +110,73 @@ def auth_client(client):
     return client
 
 
-class TestTraderCandles:
-    """GET /api/trader/candles"""
+class _StubResponse:
+    def __init__(self, payload):
+        self._payload = payload
 
-    def test_returns_200_with_candle_array(self, auth_client):
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+class _StubHttpClient:
+    """Minimal stand-in for app.state.http_client (HTX spot REST)."""
+
+    def __init__(self, payload):
+        self._payload = payload
+        self.calls = []
+
+    async def get(self, url, params=None):
+        self.calls.append((url, params))
+        return _StubResponse(self._payload)
+
+
+def _htx_klines(closes):
+    """HTX returns newest bar first."""
+    return {
+        "status": "ok",
+        "data": [
+            {"id": 1760000000 + i, "open": c, "high": c + 1, "low": c - 1,
+             "close": c, "vol": 10.0, "amount": 10.0}
+            for i, c in enumerate(reversed(closes))
+        ],
+    }
+
+
+class TestTraderCandles:
+    """GET /api/trader/candles — real upstream only, never fabricated."""
+
+    def test_returns_real_htx_candles(self, auth_client, app):
+        closes = [111.0, 222.0, 333.0, 444.0]
+        app.state.http_client = _StubHttpClient(_htx_klines(closes))
         resp = auth_client.get("/api/trader/candles")
         assert resp.status_code == 200
         data = resp.json()
-        assert "candles" in data
-        assert isinstance(data["candles"], list)
-        assert len(data["candles"]) > 0
+        assert data["source"] == "htx-rest"
+        assert [c["close"] for c in data["candles"]] == closes  # oldest → newest
         candle = data["candles"][0]
-        assert "time" in candle
-        assert "open" in candle
-        assert "high" in candle
-        assert "low" in candle
-        assert "close" in candle
-        assert "volume" in candle
+        for key in ("time", "open", "high", "low", "close", "volume"):
+            assert key in candle
+
+    def test_no_upstream_returns_empty_not_mock(self, auth_client):
+        resp = auth_client.get("/api/trader/candles")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["source"] == "unavailable"
+        assert data["candles"] == []
+
+    def test_upstream_error_returns_empty_not_mock(self, auth_client, app):
+        class _Failing:
+            async def get(self, url, params=None):
+                raise RuntimeError("HTX down")
+
+        app.state.http_client = _Failing()
+        resp = auth_client.get("/api/trader/candles")
+        assert resp.status_code == 200
+        assert resp.json()["source"] == "unavailable"
+        assert resp.json()["candles"] == []
 
     def test_unauthenticated_returns_401(self, client):
         resp = client.get("/api/trader/candles")
@@ -137,6 +193,11 @@ class TestTraderState:
         assert "mode" in data
         assert data["mode"] in ("trade", "reduce_only", "pause")
 
+    def test_no_db_marks_state_as_skeleton(self, auth_client):
+        """Roster/budget layout placeholders must not claim to be live state."""
+        data = auth_client.get("/api/trader/state").json()
+        assert data["source"] == "skeleton"
+
     def test_unauthenticated_returns_401(self, client):
         resp = client.get("/api/trader/state")
         assert resp.status_code == 401
@@ -151,6 +212,14 @@ class TestTraderPositions:
         data = resp.json()
         assert "positions" in data
         assert isinstance(data["positions"], list)
+
+    def test_no_db_returns_empty_not_mock(self, auth_client):
+        """Trading state is never synthesized — an empty table is honest."""
+        resp = auth_client.get("/api/trader/positions")
+        data = resp.json()
+        assert data["source"] == "unavailable"
+        assert data["positions"] == []
+        assert data["count"] == 0
 
     def test_unauthenticated_returns_401(self, client):
         resp = client.get("/api/trader/positions")
@@ -216,6 +285,12 @@ class TestTraderForecast:
         assert "steps" in data
         assert isinstance(data["steps"], list)
 
+    def test_no_forecast_in_db_returns_empty_not_mock(self, auth_client):
+        data = auth_client.get("/api/trader/forecast").json()
+        assert data["source"] == "unavailable"
+        assert data["steps"] == []
+        assert data["horizon_steps"] == 0
+
     def test_unauthenticated_returns_401(self, client):
         resp = client.get("/api/trader/forecast")
         assert resp.status_code == 401
@@ -230,6 +305,11 @@ class TestTraderActivity:
         data = resp.json()
         assert "items" in data
         assert isinstance(data["items"], list)
+
+    def test_no_events_returns_empty_not_mock(self, auth_client):
+        data = auth_client.get("/api/trader/activity").json()
+        assert data["source"] == "unavailable"
+        assert data["items"] == []
 
 
 class TestTraderStream:
@@ -252,3 +332,10 @@ class TestTraderPage:
         resp = auth_client.get("/trader", follow_redirects=False)
         assert resp.status_code == 200
         assert "Trader" in resp.text or "trader" in resp.text
+
+    def test_page_exposes_provenance_badge(self, auth_client):
+        """Item A: the deck must show where the candles come from (self-learn review)."""
+        resp = auth_client.get("/trader")
+        assert resp.status_code == 200
+        assert 'id="trSourceBadge"' in resp.text
+        assert "ui/trader-chart.js" in resp.text
