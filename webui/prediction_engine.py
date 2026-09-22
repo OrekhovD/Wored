@@ -8,7 +8,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 from openai import AsyncOpenAI
 
@@ -523,6 +523,85 @@ def _is_missing_model_error(exc: Exception) -> bool:
     return "404" in message and ("not found" in message or "unsupported" in message)
 
 
+def _nvidia_tier_enabled() -> bool:
+    """NVIDIA NIM is an opt-in tier, off by default.
+
+    The code comment used to claim "Ollama-only now" while every chain still
+    appended an NVIDIA candidate whenever its key was set, and the webui
+    container has ~37 of those keys. Measured against forecast_model_runs the
+    tier is not degraded but dead: 24 runs, 24 failures, zero successes
+    (minimaxai/minimax-m3 15/15, deepseek-ai/deepseek-v4-pro-0813 6/6,
+    moonshotai/kimi-k3 3/3), each one `410 Gone` from
+    integrate.api.nvidia.com. 410 is permanent, so the tail of every chain cost
+    an HTTP round-trip, log noise and - since 92233a4 attributes a failed run to
+    its chain primary - a failure that no longer names the provider that caused
+    it. Set NVIDIA_NIM_ENABLED=1 to bring the tier back.
+    """
+    return os.getenv("NVIDIA_NIM_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _nvidia_candidate(
+    cache_prefix: str,
+    model_env: str,
+    default_model: str,
+    api_key_env: str,
+    timeout: float,
+) -> RuntimeModelCandidate | None:
+    """The chain tail, only when the tier is explicitly switched on."""
+    if not _nvidia_tier_enabled():
+        return None
+    model_id = os.getenv(model_env, default_model).strip()
+    if not model_id or not os.getenv(api_key_env, "").strip():
+        return None
+    return RuntimeModelCandidate(
+        cache_key=f"{cache_prefix}:nvidia:{model_id}",
+        model_id=model_id,
+        base_url=NVIDIA_BASE_URL,
+        api_key_env=api_key_env,
+        timeout=timeout,
+        provider="nvidia",
+    )
+
+
+def _bundle_distinct_chain(
+    candidates: list[RuntimeModelCandidate],
+    used_models: Iterable[str] | None,
+    role: str | None,
+) -> tuple[list[RuntimeModelCandidate], set[str]]:
+    """Order a chain so models another role answered with are tried last, never dropped.
+
+    The arbiter's fallback was the analyst's primary, so on a fallback event the
+    same model wrote both a bull position and the "independent" arbitration
+    (5 such requests in forecast_model_runs). An overlapping chain is not a
+    second opinion, so distinct candidates go first.
+
+    Shared candidates stay at the end of the chain rather than being removed:
+    cutting them would drop the role outright as soon as its distinct candidates
+    fail, and a missing role silently narrows the forecast band, which is worse
+    than a duplicated opinion that the log names as duplicated.
+    """
+    used = {str(model_id) for model_id in (used_models or ()) if str(model_id)}
+    distinct = [c for c in candidates if c.model_id not in used]
+    shared = [c.model_id for c in candidates if c.model_id in used]
+    if not shared:
+        return candidates, set()
+    if not distinct:
+        log.warning(
+            "Prediction role %s has no model left that another role in this bundle has not "
+            "already answered with; any answer from %s duplicates an existing opinion",
+            role or "neutral",
+            ", ".join(shared),
+        )
+    else:
+        log.info(
+            "Prediction role %s prefers its own models; %s is kept only as a last resort "
+            "because another role in this bundle already answered with it",
+            role or "neutral",
+            ", ".join(shared),
+        )
+    return [*distinct, *[c for c in candidates if c.model_id in set(shared)]], set(shared)
+
+
 def _local_llm_candidate(config: PredictionModelConfig) -> RuntimeModelCandidate | None:
     """Local candidate for the roles listed in LOCAL_LLM_ROLES, or None when off."""
     roles = _parse_model_csv(os.getenv("LOCAL_LLM_ROLES", ""))
@@ -569,20 +648,11 @@ def _cloud_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                         timeout=config.timeout,
                     )
                 )
-        # NVIDIA NIM fallback for worker role
-        nvidia_model = os.getenv("NVIDIA_WORKER_MODEL", "deepseek-ai/deepseek-v4-flash-0731").strip()
-        nvidia_key = os.getenv("NVIDIA_DEEPSEEK_V4_FLASH_API_KEY", "").strip()
-        if nvidia_model and nvidia_key:
-            candidates.append(
-                RuntimeModelCandidate(
-                    cache_key=f"worker:nvidia:{nvidia_model}",
-                    model_id=nvidia_model,
-                    base_url=NVIDIA_BASE_URL,
-                    api_key_env="NVIDIA_DEEPSEEK_V4_FLASH_API_KEY",
-                    timeout=config.timeout,
-                    provider="nvidia",
-                )
-            )
+        nvidia = _nvidia_candidate(
+            "worker", "NVIDIA_WORKER_MODEL", "deepseek-ai/deepseek-v4-flash-0731",
+            "NVIDIA_DEEPSEEK_V4_FLASH_API_KEY", config.timeout)
+        if nvidia:
+            candidates.append(nvidia)
         return candidates
 
     if config.key == "analyst":
@@ -601,20 +671,11 @@ def _cloud_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                         timeout=config.timeout,
                     )
                 )
-        # NVIDIA NIM fallback for analyst role
-        nvidia_model = os.getenv("NVIDIA_ANALYST_MODEL", "deepseek-ai/deepseek-v4-pro-0813").strip()
-        nvidia_key = os.getenv("NVIDIA_DEEPSEEK_V4_PRO_API_KEY", "").strip()
-        if nvidia_model and nvidia_key:
-            candidates.append(
-                RuntimeModelCandidate(
-                    cache_key=f"analyst:nvidia:{nvidia_model}",
-                    model_id=nvidia_model,
-                    base_url=NVIDIA_BASE_URL,
-                    api_key_env="NVIDIA_DEEPSEEK_V4_PRO_API_KEY",
-                    timeout=config.timeout,
-                    provider="nvidia",
-                )
-            )
+        nvidia = _nvidia_candidate(
+            "analyst", "NVIDIA_ANALYST_MODEL", "deepseek-ai/deepseek-v4-pro-0813",
+            "NVIDIA_DEEPSEEK_V4_PRO_API_KEY", config.timeout)
+        if nvidia:
+            candidates.append(nvidia)
         return candidates
 
     if config.key == "premium":
@@ -633,20 +694,11 @@ def _cloud_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                         timeout=config.timeout,
                     )
                 )
-        # NVIDIA NIM fallback for premium role
-        nvidia_model = os.getenv("NVIDIA_PREMIUM_MODEL", "moonshotai/kimi-k3").strip()
-        nvidia_key = os.getenv("NVIDIA_KIMI_K3_API_KEY", "").strip()
-        if nvidia_model and nvidia_key:
-            candidates.append(
-                RuntimeModelCandidate(
-                    cache_key=f"premium:nvidia:{nvidia_model}",
-                    model_id=nvidia_model,
-                    base_url=NVIDIA_BASE_URL,
-                    api_key_env="NVIDIA_KIMI_K3_API_KEY",
-                    timeout=config.timeout,
-                    provider="nvidia",
-                )
-            )
+        nvidia = _nvidia_candidate(
+            "premium", "NVIDIA_PREMIUM_MODEL", "moonshotai/kimi-k3",
+            "NVIDIA_KIMI_K3_API_KEY", config.timeout)
+        if nvidia:
+            candidates.append(nvidia)
         return candidates
 
     # Oracle — Ollama only: minimax-m3 → glm-5.1 (structured content models)
@@ -664,20 +716,11 @@ def _cloud_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                     timeout=config.timeout,
                 )
             )
-    # NVIDIA NIM fallback for oracle role
-    nvidia_model = os.getenv("NVIDIA_ORACLE_MODEL", "minimaxai/minimax-m3").strip()
-    nvidia_key = os.getenv("NVIDIA_MINIMAX_M3_API_KEY", "").strip()
-    if nvidia_model and nvidia_key:
-        candidates.append(
-            RuntimeModelCandidate(
-                cache_key=f"minimax:nvidia:{nvidia_model}",
-                model_id=nvidia_model,
-                base_url=NVIDIA_BASE_URL,
-                api_key_env="NVIDIA_MINIMAX_M3_API_KEY",
-                timeout=config.timeout,
-                provider="nvidia",
-            )
-        )
+    nvidia = _nvidia_candidate(
+        "minimax", "NVIDIA_ORACLE_MODEL", "minimaxai/minimax-m3",
+        "NVIDIA_MINIMAX_M3_API_KEY", config.timeout)
+    if nvidia:
+        candidates.append(nvidia)
     return candidates
 
 
@@ -974,15 +1017,14 @@ async def generate_model_prediction(
     context_payload: dict[str, Any],
     role: str | None = None,
     peer_outputs: list[dict[str, Any]] | None = None,
+    used_models: Iterable[str] | None = None,
 ) -> ModelPredictionResult:
-    runtime_candidates = _build_runtime_candidates(config)
-    strict_nvapi = False  # Ollama-only now, no NVIDIA NIM strict check
+    chain, last_resort_models = _bundle_distinct_chain(
+        _build_runtime_candidates(config), used_models, role)
+    runtime_candidates = chain
     chain_switch_enabled = config.key in {"worker", "analyst", "premium", "minimax"}
 
-    if not any(
-        _candidate_is_available(candidate, strict_nvapi=(strict_nvapi and candidate.api_key_env != "OLLAMA_API_KEY"))
-        for candidate in runtime_candidates
-    ):
+    if not any(_candidate_is_available(candidate) for candidate in runtime_candidates):
         model_status = next(item for item in list_prediction_models() if item["key"] == config.key)
         return ModelPredictionResult(
             key=config.key,
@@ -1006,7 +1048,7 @@ async def generate_model_prediction(
     role_started = time.monotonic()
 
     for candidate in runtime_candidates:
-        if not _candidate_is_available(candidate, strict_nvapi=strict_nvapi):
+        if not _candidate_is_available(candidate):
             continue
 
         if not attempted:
@@ -1035,6 +1077,16 @@ async def generate_model_prediction(
                     role=role,
                     historical_accuracy=role_accuracy,
                 )
+                if candidate.model_id in last_resort_models:
+                    # The bundle is complete but one of its "independent" voices
+                    # is the same model speaking twice; say so where it is read.
+                    log.warning(
+                        "Prediction role %s answered with %s only after its own models failed; "
+                        "another role in this bundle already answered with it, so this is not an "
+                        "independent opinion",
+                        role or "neutral",
+                        candidate.model_id,
+                    )
                 return ModelPredictionResult(
                     key=config.key,
                     name=config.name,
@@ -1162,6 +1214,9 @@ async def generate_role_prediction_bundle(
     ]
     role_results: dict[str, ModelPredictionResult] = {}
     peer_outputs: list[dict[str, Any]] = []
+    # Models that already gave an answer in this bundle; a later role must not
+    # pass one of them off as an independent opinion.
+    answered_with: list[str] = []
 
     for key, role in role_map:
         config = MODEL_CONFIGS.get(key)
@@ -1170,9 +1225,16 @@ async def generate_role_prediction_bundle(
         # small cooldown between roles
         if role != "bull":
             await asyncio.sleep(PROVIDER_COOLDOWN_SECONDS.get(_provider_group(config), 1.0))
-        result = await generate_model_prediction(config, context_payload, role=role, peer_outputs=peer_outputs if role == "arbiter" else None)
+        result = await generate_model_prediction(
+            config,
+            context_payload,
+            role=role,
+            peer_outputs=peer_outputs if role == "arbiter" else None,
+            used_models=answered_with,
+        )
         role_results[role] = result
         if result.status == "completed":
+            answered_with.append(result.model_id)
             peer_outputs.append({
                 "role": role,
                 "model": result.model_id,

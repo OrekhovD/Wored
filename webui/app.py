@@ -1514,7 +1514,17 @@ async def finalize_oracle_prediction(
                 "You are the Arbiter (Scales). Review the bull and short arguments above. "
                 "Return a balanced, evidence-based forecast with per-step price, low, high, confidence, and a brief rationale."
             )
-        result = await generate_model_prediction(MODEL_CONFIGS.get("minimax"), arbiter_context, role="arbiter")
+        # The arbiter must not answer with a model that already wrote one of the
+        # arguments it is judging, otherwise the "second opinion" is that same
+        # model twice (see _bundle_distinct_chain in prediction_engine).
+        answered_with = [
+            result.model_id
+            for result in (primary_results or [])
+            if getattr(result, "status", None) == "completed"
+            and getattr(result, "agent_role", None) != "arbiter"
+        ]
+        result = await generate_model_prediction(
+            MODEL_CONFIGS.get("minimax"), arbiter_context, role="arbiter", used_models=answered_with)
         await append_prediction_model_result(pool, request_id, result)
     except Exception as exc:
         log.warning("Background Oracle/Arbiter prediction failed for request %s: %s", request_id, exc)

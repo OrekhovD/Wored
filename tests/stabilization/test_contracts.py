@@ -503,6 +503,136 @@ class ErrorCauseAndRoleAttributionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.attempted_models, [c.model_id for c in chain])
 
 
+class ChainHygieneTests(unittest.IsolatedAsyncioTestCase):
+    """P3 of the role-fallback review: M4 (dead chain tail) and M6 (shared models).
+
+    Evidence for M4: forecast_model_runs holds 24 runs on NVIDIA candidates and
+    24 failures - minimaxai/minimax-m3 15/15, deepseek-ai/deepseek-v4-pro-0813
+    6/6, moonshotai/kimi-k3 3/3 - every one `410 Gone`, a permanent status. The
+    tier is therefore off unless NVIDIA_NIM_ENABLED says otherwise.
+    Evidence for M6: 5 requests had one model answer for two different roles, so
+    the arbiter's "second opinion" was the bull's model speaking twice.
+    """
+
+    def setUp(self):
+        import os
+        # Cloud keys are cleared so a chain cannot pass on a real provider key.
+        self.base = {k: "" for k in os.environ if k.startswith(("OLLAMA_", "NVIDIA_", "LOCAL_LLM_"))}
+        self.base["OLLAMA_API_KEY"] = "test-token"
+        self.context = {"horizon_steps": 1, "base_price": 100.0, "symbol": "btcusdt"}
+
+    def _chains(self):
+        import os
+        from prediction_engine import MODEL_CONFIGS, _build_runtime_candidates
+        with patch.dict(os.environ, self.base, clear=False):
+            return {key: _build_runtime_candidates(MODEL_CONFIGS[key])
+                    for key in ("worker", "analyst", "premium", "minimax")}
+
+    def _role_bundle_env(self, **overrides):
+        return dict(self.base, OLLAMA_ANALYST_MODEL="glm-5.1", OLLAMA_PREMIUM_MODEL="glm-5.2", **overrides)
+
+    def test_keys_present_do_not_revive_the_410_gone_tail(self):
+        self.base["NVIDIA_DEEPSEEK_V4_PRO_API_KEY"] = "nvapi-test"
+        self.base["NVIDIA_MINIMAX_M3_API_KEY"] = "nvapi-test"
+        for key, chain in self._chains().items():
+            self.assertNotIn("nvidia", [c.provider for c in chain],
+                             f"{key} chain still ends on the permanently gone tier")
+
+    def test_nvidia_tail_returns_only_when_the_tier_is_opted_in(self):
+        self.base["NVIDIA_NIM_ENABLED"] = "1"
+        self.base["NVIDIA_MINIMAX_M3_API_KEY"] = "nvapi-test"
+        chain = self._chains()["minimax"]
+        self.assertEqual(chain[-1].provider, "nvidia")
+        self.assertEqual(chain[-1].model_id, "minimaxai/minimax-m3")
+
+    def test_opted_in_tier_still_needs_its_key(self):
+        self.base["NVIDIA_NIM_ENABLED"] = "1"
+        chain = self._chains()["minimax"]
+        self.assertNotIn("nvidia", [c.provider for c in chain])
+
+    async def test_role_bundle_skips_a_model_another_role_answered_with(self):
+        import os
+        import prediction_engine
+        from prediction_engine import generate_role_prediction_bundle
+        # The oracle chain deliberately starts on the bull's model.
+        env = self._role_bundle_env(OLLAMA_ORACLE_MODEL="glm-5.1",
+                                    OLLAMA_ORACLE_FALLBACK_MODEL="kimi-k2.6")
+        asked: list[str] = []
+
+        async def chat(candidate, config, context_payload, system_prompt=None, peer_outputs=None):
+            asked.append(candidate.model_id)
+            return VALID_FORECAST_JSON
+
+        with patch.dict(os.environ, env, clear=False), \
+            patch.object(prediction_engine, "_ollama_chat", side_effect=chat), \
+            patch.object(prediction_engine, "_fetch_role_accuracy", AsyncMock(return_value=None)), \
+                patch("asyncio.sleep", AsyncMock()):
+            bundle = await generate_role_prediction_bundle(self.context)
+
+        self.assertEqual([bundle[r].status for r in ("bull", "bear", "arbiter")],
+                         ["completed", "completed", "completed"])
+        # glm-5.1 is asked once, by the bull; the arbiter goes straight to its
+        # own distinct fallback instead of echoing the bull.
+        self.assertEqual(asked, ["glm-5.1", "glm-5.2", "kimi-k2.6"])
+        self.assertEqual(bundle["arbiter"].model_id, "kimi-k2.6")
+        self.assertEqual(len(set(asked)), len(asked))
+
+    async def test_bundle_falls_back_to_a_shared_model_instead_of_dropping_the_role(self):
+        import os
+        import httpx
+        import prediction_engine
+        from prediction_engine import generate_role_prediction_bundle
+        env = self._role_bundle_env(OLLAMA_ORACLE_MODEL="minimax-m3",
+                                    OLLAMA_ORACLE_FALLBACK_MODEL="glm-5.1")
+
+        async def chat(candidate, config, context_payload, system_prompt=None, peer_outputs=None):
+            if candidate.model_id == "minimax-m3":
+                raise httpx.ReadTimeout("")
+            return VALID_FORECAST_JSON
+
+        with patch.dict(os.environ, env, clear=False), \
+            patch.object(prediction_engine, "_ollama_chat", side_effect=chat), \
+            patch.object(prediction_engine, "_fetch_role_accuracy", AsyncMock(return_value=None)), \
+            patch("asyncio.sleep", AsyncMock()), \
+                self.assertLogs("webui.prediction_engine", level="WARNING") as logged:
+            bundle = await generate_role_prediction_bundle(self.context)
+
+        # Removing the shared candidate would have lost the arbiter entirely once
+        # minimax-m3 timed out, and a missing role silently narrows the forecast
+        # band. The role is kept and the duplication is named in the log instead.
+        self.assertEqual(bundle["arbiter"].status, "completed")
+        self.assertEqual(bundle["arbiter"].model_id, "glm-5.1")
+        self.assertIn("not an independent opinion", "\n".join(logged.output))
+
+    def test_chain_reorders_shared_models_last_without_removing_them(self):
+        from prediction_engine import RuntimeModelCandidate, _bundle_distinct_chain
+        chain = [
+            RuntimeModelCandidate(cache_key="a", model_id="minimax-m3", base_url="u",
+                                  api_key_env="OLLAMA_API_KEY", timeout=60.0),
+            RuntimeModelCandidate(cache_key="b", model_id="glm-5.1", base_url="u",
+                                  api_key_env="OLLAMA_API_KEY", timeout=60.0),
+        ]
+        with self.assertLogs("webui.prediction_engine", level="INFO") as logged:
+            ordered, last_resort = _bundle_distinct_chain(chain, ["glm-5.1", "glm-5.2"], "arbiter")
+        self.assertEqual([c.model_id for c in ordered], ["minimax-m3", "glm-5.1"])
+        self.assertEqual(last_resort, {"glm-5.1"})
+        self.assertIn("last resort", "\n".join(logged.output))
+
+    def test_role_whose_every_model_is_shared_is_kept_and_flagged(self):
+        from prediction_engine import RuntimeModelCandidate, _bundle_distinct_chain
+        chain = [
+            RuntimeModelCandidate(cache_key="a", model_id="glm-5.1", base_url="u",
+                                  api_key_env="OLLAMA_API_KEY", timeout=60.0),
+            RuntimeModelCandidate(cache_key="b", model_id="glm-5.2", base_url="u",
+                                  api_key_env="OLLAMA_API_KEY", timeout=60.0),
+        ]
+        with self.assertLogs("webui.prediction_engine", level="WARNING") as logged:
+            ordered, last_resort = _bundle_distinct_chain(chain, ["glm-5.1", "glm-5.2"], "arbiter")
+        self.assertEqual([c.model_id for c in ordered], ["glm-5.1", "glm-5.2"])
+        self.assertEqual(last_resort, {"glm-5.1", "glm-5.2"})
+        self.assertIn("no model left", "\n".join(logged.output))
+
+
 def _schedule_for_analyst():
     from prediction_engine import MODEL_CONFIGS, _attempt_schedule
     return _attempt_schedule(MODEL_CONFIGS["analyst"])
