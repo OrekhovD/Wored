@@ -59,3 +59,7 @@ venv/
 scratch/
 # Duplicated source snapshots inside TASOCHKI bundles
 TASOCHKI/**/payload/
+
+# Runtime output of local services and supervisors (Ollama guard, hermes workers).
+# Regenerated on disk, not source: never history these.
+/logs/
