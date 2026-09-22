@@ -139,9 +139,17 @@ shell (в его окружении `OLLAMA_MODELS=C:\Users\dolum\.ollama\models
 | `selected_model` | `bonsai-27b` |
 
 HKCU `OLLAMA_MODELS` при этом корректен (`C:\Users\dolum\.ollama\models`), HKLM пуст.
-Лечится сменой Model location в UI приложения (не перезапуском и не `.env`); после
-смены — проверить `powershell -File scripts\bonsai_health.ps1 -Port 11434`, ожидаемый
-код 2 → 0. `bonsai_guard.ps1` такую ситуацию чинить не пытается: он возвращает код 2
+Лечится сменой Model location в UI приложения (не перезапуском и не `.env`).
+
+Сделано и проверено 23.09.2026: владелец сменил Model location в UI;
+`bonsai_health.ps1 -Port 11434` → 0 и `models: bonsai-27b:latest`;
+`bonsai_health.ps1 -Port 8088` → 0 (сервер WORED за эпизод не тронут, PID 30588);
+`nvidia-smi` → 482/8192 MiB, модель выгружена до первого запроса. Пустой
+`D:\WORED\manifests` (0 файлов) остался как мусор эпизода и ждёт решения об удалении.
+Проверка после любой следующей смены хранилища одна:
+`powershell -File scripts\bonsai_health.ps1 -Port 11434`.
+
+`bonsai_guard.ps1` такую ситуацию чинить не пытается: он возвращает код 2
 и пишет действие в лог, потому что поднятый им сервер всё равно читал бы своё
 хранилище, а дублировать настройку другого приложения — два источника правды.
 
