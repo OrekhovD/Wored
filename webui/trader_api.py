@@ -165,6 +165,21 @@ def _as_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _as_wick(value: Any, fallback: float) -> float:
+    """A missing wick degrades to the close, never to zero.
+
+    340 of 855 production points have NULL ``predicted_high``/``predicted_low``.
+    Coercing them through ``float(x or 0)`` - what the command deck does - puts a
+    literal 0 into ``min(lows)`` and draws a candle falling to the floor.
+    """
+    if value is None:
+        return fallback
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
 def _role_votes(rows: list[Any]) -> dict[int, dict[str, dict[str, Any]]]:
     """Group forecast points per step into one vote per agent role.
 
@@ -191,13 +206,14 @@ def _role_votes(rows: list[Any]) -> dict[int, dict[str, dict[str, Any]]]:
         previous = votes[step_index].get(key)
         if previous is not None and previous["run_id"] > run_id:
             continue
+        price = _as_float(row["predicted_price"])
         votes[step_index][key] = {
             "run_id": run_id,
             "role": str(agent_role or "neutral"),
             "model_id": str(row["model_id"] or ""),
-            "price": _as_float(row["predicted_price"]),
-            "high": _as_float(row["predicted_high"]),
-            "low": _as_float(row["predicted_low"]),
+            "price": price,
+            "high": _as_wick(row["predicted_high"], price),
+            "low": _as_wick(row["predicted_low"], price),
             "conf": _as_float(row["confidence"]),
             "has_conf": row["confidence"] is not None,
             "change_pct": _as_float(row["predicted_change_pct"]),

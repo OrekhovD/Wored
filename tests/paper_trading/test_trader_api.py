@@ -422,6 +422,16 @@ class TestForecastRoleAggregation:
         assert coverage["neutral_steps"] == 1
         assert steps[0]["samples"] == 2
 
+    def test_null_wicks_do_not_drag_the_band_to_zero(self):
+        # 340 of 855 production points have NULL predicted_high/predicted_low.
+        votes = trader_api._role_votes([
+            _point(1, 80, "bull", "glm-5.2", 111000, None, None, 1.2),
+            _point(1, 81, "bear", "glm-5.2", 110000, None, None, -0.4),
+        ])
+        steps, _coverage = trader_api.aggregate_forecast_steps(votes)
+        assert steps[0]["low"] == 110000.0
+        assert steps[0]["high"] == 111000.0
+
     def test_null_confidence_does_not_erase_the_forecast(self):
         # forecast_points.confidence is nullable (14 of 855 production rows); a
         # bare float(None) used to blow up the whole endpoint into "unavailable".
