@@ -63,7 +63,7 @@
     <aside class="tr-side">
       {# Forecast card #}
       <section class="tr-panel tr-card">
-        <div class="tr-card-t"><h3>Прогноз t+1</h3><span class="tr-pill tr-demo">демо-модель</span></div>
+        <div class="tr-card-t"><h3>Прогноз t+1</h3><span class="tr-pill tr-neutral" id="trFcCoverage" title="Покрытие ролей бандла: кто реально ответил">роли —</span></div>
         <div class="tr-prob"><span class="tr-big tr-num" id="trPUp">—</span><div class="tr-prob-bar"><i id="trPUpMark"></i></div></div>
         <dl class="tr-kv" id="trFcKv"></dl>
       </section>
@@ -312,7 +312,7 @@ tr.liq td { background:rgba(239,68,68,.05); }
 @media (prefers-reduced-motion:reduce) { * { transition:none!important; animation:none!important; } }
 </style>
 
-<script type="module" src="/static/ui/trader-chart.js?v=20260921-2"></script>
+<script type="module" src="/static/ui/trader-chart.js?v=20260922-1"></script>
 <script type="module" src="/static/ui/trader-positions.js?v=20260918-5"></script>
 <script type="module" src="/static/ui/trader-mode.js?v=20260918-5"></script>
 {% endblock %}

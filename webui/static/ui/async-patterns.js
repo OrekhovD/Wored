@@ -258,7 +258,10 @@ async function pollJobStatus(url, { onUpdate = null, onTerminal = null, deadline
     if (data) {
       const es = data.execution_state || null;
       const legacy = data.status || null;
-      const isTerminal = ['completed', 'failed', 'expired'].includes(es) ||
+      // 'partial' is terminal too: a bundle that lost a role has finished and its
+      // remaining points are already stored. Leaving it out made this poller spin
+      // until the deadline on exactly the requests the deck must warn about.
+      const isTerminal = ['completed', 'partial', 'failed', 'expired'].includes(es) ||
                          (es === null && ['active', 'completed', 'failed'].includes(legacy));
       if (onUpdate) onUpdate(data);
 

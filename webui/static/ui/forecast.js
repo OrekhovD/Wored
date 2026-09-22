@@ -4,7 +4,7 @@
  * Depends on: core.js (WORED), async-patterns.js (pollJobStatus)
  */
 import WORED from './core.js?v=20260910-1';
-import { pollJobStatus, showBlockError, clearBlockError } from './async-patterns.js';
+import { pollJobStatus, showBlockError, clearBlockError } from './async-patterns.js?v=20260922-1';
 
 const STORAGE_KEY = 'wored.ui.forecast.v1';
 
@@ -171,6 +171,12 @@ function pollPendingForecast(requestId, deadlineAt) {
       if (es === 'completed' || (!es && data.status === 'active')) {
         WORED.clearPendingForecast();
         resultEl.innerHTML = '<div class="ui-text-success">Прогноз #' + requestId + ' готов. <a href="/predictions/' + requestId + '">Открыть</a></div>';
+      } else if (es === 'partial') {
+        // A role of the bundle failed: the forecast exists but the band rests on
+        // fewer voices than the deck implies. Saying "готов" here would repeat the
+        // lie the status column used to carry (review M7).
+        WORED.clearPendingForecast();
+        resultEl.innerHTML = '<div class="ui-text-accent">Прогноз #' + requestId + ' готов частично: ' + describeRoleGaps(data.roles) + '. <a href="/predictions/' + requestId + '">Открыть</a></div>';
       } else if (es === 'failed') {
         WORED.clearPendingForecast();
         resultEl.innerHTML = '<div class="ui-text-danger">Прогноз #' + requestId + ' завершился ошибкой: ' + (data.failure_code || 'нет результата') + '</div>'
@@ -202,7 +208,28 @@ function pollPendingForecast(requestId, deadlineAt) {
   });
 }
 
-// ── Auto-init on DOM ready ─────────────────────────────────────────────────────
+// ── Role coverage wording ───────────────────────────────────────────────────
+
+const ROLE_VOCABULARY = { bull: 'Bull', bear: 'Bear', arbiter: 'арбитр' };
+
+/** Human-readable summary of which bundle voices actually answered. */
+function describeRoleGaps(roles) {
+  if (!Array.isArray(roles) || !roles.length) return 'часть голосов бандла не ответила';
+  const byRole = {};
+  roles.forEach(function (r) { if (r && r.role) byRole[r.role] = r; });
+  const names = Object.keys(ROLE_VOCABULARY);
+  // A role with no run row at all never answered; a run that completed without
+  // points is not an opinion either - both are gaps.
+  const missing = names.filter(function (r) {
+    return !byRole[r] || byRole[r].state !== 'completed';
+  });
+  if (!missing.length) return 'ответили все три голоса';
+  const answered = names.length - missing.length;
+  const missingLabels = missing.map(function (r) { return ROLE_VOCABULARY[r]; }).join(', ');
+  return 'ответили ' + answered + ' голоса из ' + names.length + ', нет: ' + missingLabels;
+}
+
+// ── Auto-init on DOM ready ───────────────────────────────────────────────────
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initForecastForm);

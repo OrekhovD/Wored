@@ -210,10 +210,17 @@ async def process_one(
                     "WHERE request_id=$1",
                     request_id,
                 )
+                # `status` is the lifecycle column and becomes 'completed'. The
+                # quality column must not be overwritten here: the runner already
+                # declared it (app.py writes PARTIAL when a role of the bundle
+                # failed), and forcing 'completed' erased that - requests
+                # 127/133/134/137 carry failed runs and still reported a clean
+                # completion, while 'partial' never appeared once in 132 requests.
                 await connection.execute(
-                    "UPDATE forecast_requests SET execution_state='completed', "
-                    "status='completed', updated_at=NOW() WHERE id=$1",
-                    request_id,
+                    "UPDATE forecast_requests SET status='completed', "
+                    "execution_state=COALESCE(execution_state, $2), updated_at=NOW() "
+                    "WHERE id=$1",
+                    request_id, COMPLETED,
                 )
     return True
 

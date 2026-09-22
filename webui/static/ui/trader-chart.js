@@ -32,7 +32,7 @@
   var chart, candles, fcSeries, q90Series, q10Series;
   var volSeries, macdHist, macdDif, macdDea, kSeries, dSeries, jSeries;
   var overlayState = {};
-  var chartData = { bars: [], forecast: [], positions: [], sources: { candles: 'none', forecast: 'none', positions: 'none', forecastStale: 0 } };
+  var chartData = { bars: [], forecast: [], positions: [], sources: { candles: 'none', forecast: 'none', positions: 'none', forecastStale: 0 }, forecastCoverage: null, forecastExecution: null };
 
   // ── indicator math ──────────────────────────────────────────────
   function sma(a, n) {
@@ -452,15 +452,20 @@
       if (resp2.ok) {
         var fcData = await resp2.json();
         chartData.sources.forecast = fcData.source || 'unknown';
+        // Who actually answered the bundle. The band is drawn from whatever points
+        // exist, so without this the deck cannot tell a three-voice opinion from
+        // two voices (or one voice quoted twice) - review M7.
+        chartData.forecastCoverage = fcData.coverage || null;
+        chartData.forecastExecution = fcData.execution_state || null;
         chartData.forecast = (fcData.steps || []).map(function (f) {
           return {
             time: f.time, step: f.step, open: f.open, close: f.close,
             high: f.high, low: f.low, c10: f.c10, c90: f.c90, h90: f.h90, l10: f.l10,
-            vol: f.vol, p_up: f.p_up, sigma: f.sigma
+            vol: f.vol, p_up: f.p_up, sigma: f.sigma, samples: f.samples
           };
         });
       }
-    } catch (e) { chartData.sources.forecast = 'error'; chartData.forecast = []; console.error('[trader-chart] forecast fetch failed', e); }
+    } catch (e) { chartData.sources.forecast = 'error'; chartData.forecast = []; chartData.forecastCoverage = null; console.error('[trader-chart] forecast fetch failed', e); }
 
     try {
       var resp3 = await fetch('/api/trader/positions', { credentials: 'same-origin' });
@@ -567,15 +572,65 @@
         ['Close q50', fmt(f1.close)],
         ['Диапазон q10–q90', fmt(f1.c10, 0) + ' – ' + fmt(f1.c90, 0)],
         ['Фитили H q90 / L q10', fmt(f1.h90, 0) + ' / ' + fmt(f1.l10, 0)],
-        ['σ часа (EWMA)', (f1.sigma * 100).toFixed(3) + '%']
+        // Not "σ часа (EWMA)": the old value was a hardcoded 0.008. This one is
+        // the spread between the roles that answered, and there is no spread to
+        // measure behind a single voice.
+        ['Разброс ролей', f1.sigma == null ? '—' : (f1.sigma * 100).toFixed(3) + '%'],
+        ['Голосов на шаг', (f1.samples == null ? '—' : f1.samples) + ' / 3']
       ].map(function (r) { return '<dt>' + r[0] + '</dt><dd class="tr-num">' + r[1] + '</dd>'; }).join('');
     }
+
+    updateForecastBadge();
 
     // Positions summary
     var openCount = chartData.positions.filter(function (t) { return t.status === 'open'; }).length;
     var total = chartData.positions.length;
     var posSummary = document.getElementById('trPosSummary');
     if (posSummary) posSummary.textContent = openCount + ' / ' + total;
+  }
+
+  // ── forecast provenance ───────────────────────────────────────────
+  // The band is always drawn, so the deck has to say how many independent
+  // voices are behind it: "2/3" with the missing role named is honest, a bare
+  // "postgres" badge is not (review M7).
+  var COVERAGE_CLASSES = {
+    'three-roles': 'tr-live',
+    'two-roles': 'tr-demo',
+    'single-role': 'tr-risk',
+    'legacy-no-roles': 'tr-neutral'
+  };
+
+  function updateForecastBadge() {
+    var el = document.getElementById('trFcCoverage');
+    if (!el) return;
+    var cov = chartData.forecastCoverage;
+    if (!cov || !chartData.forecast.length) {
+      var nothing = chartData.sources.forecast === 'unavailable' || chartData.sources.forecast === 'expired';
+      el.textContent = nothing ? 'прогноз не дан' : 'роли —';
+      el.className = 'tr-pill ' + (nothing ? 'tr-neutral' : 'tr-risk');
+      el.title = 'Покрытие ролей бандла недоступно: источник=' + chartData.sources.forecast;
+      return;
+    }
+    var present = (cov.roles_present || []).length;
+    var basis = cov.band_basis || 'legacy-no-roles';
+    var label = 'роли ' + present + '/3';
+    var cls = COVERAGE_CLASSES[basis] || 'tr-neutral';
+    // Three votes from two models is not three opinions (review M6).
+    if (basis === 'three-roles' && cov.min_models_per_step != null && cov.min_models_per_step < 3) {
+      label = 'роли 3/3 · модели ' + cov.min_models_per_step + '/3';
+      cls = 'tr-demo';
+    }
+    if (chartData.forecastExecution === 'partial' && cls === 'tr-live') cls = 'tr-demo';
+    var roleLines = ['bull', 'bear', 'arbiter'].map(function (r) {
+      var info = (cov.roles || {})[r] || {};
+      return r + ': ' + (info.present ? (info.model_id || 'без модели') : 'нет ответа');
+    });
+    el.textContent = label;
+    el.className = 'tr-pill ' + cls;
+    el.title = roleLines.join(' · ')
+      + ' · сэмплов на шаг ' + cov.min_samples_per_step + '–' + cov.max_samples_per_step
+      + ' · execution_state=' + (chartData.forecastExecution || '—');
+    el.dataset.executionState = chartData.forecastExecution || '';
   }
 
   // ── init ────────────────────────────────────────────────────────

@@ -15,7 +15,9 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import statistics
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -27,6 +29,10 @@ log = logging.getLogger("trader_api")
 router = APIRouter(prefix="/api/trader", tags=["trader"])
 
 ALLOWED_MODES = {"trade", "reduce_only", "pause"}
+
+# The three voices a role bundle is supposed to answer with. They are the voters
+# in the q10/q50/q90 band below, which is why a missing one has to be reported.
+BUNDLE_ROLES: tuple[str, ...] = ("bull", "bear", "arbiter")
 
 # ─── In-process idempotency store (sufficient for single-process mode) ────
 _idempotency_store: dict[str, dict[str, Any]] = {}
@@ -142,6 +148,166 @@ async def _redis_set(request: Request, key: str, value: str, ttl: int = 300) -> 
         log.warning("Redis SET %s failed: %s", key, exc)
 
 
+# ─── Forecast aggregation ─────────────────────────────────────────────────
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    """Coerce a DB numeric to float without letting one NULL blank the card.
+
+    ``forecast_points.confidence`` is nullable and 14 of 855 production rows have
+    it NULL; ``float(None)`` used to raise here, the endpoint caught it as a
+    generic fetch failure and dropped the whole forecast to ``unavailable``.
+    """
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _role_votes(rows: list[Any]) -> dict[int, dict[str, dict[str, Any]]]:
+    """Group forecast points per step into one vote per agent role.
+
+    The q10/q50/q90 band is only as honest as the number of independent voices
+    behind it, so the role of the model run that produced each point is part of
+    the aggregation, not just decoration:
+
+    * a role that answered the same step twice (retries) contributes a single
+      vote — the newest run wins, otherwise a retry would overweight one voice;
+    * points whose run carries no role come from before the role bundle existed
+      (47 such runs in production). They keep their own sample each, because
+      without a role there is no evidence they are the same voice, and they can
+      never make the coverage look like a real bundle - see ``band_basis``.
+    """
+    votes: dict[int, dict[str, dict[str, Any]]] = defaultdict(dict)
+    for row in rows:
+        step_index = int(row["step_index"])
+        run_id = int(row["run_id"] or 0)
+        agent_role = row["agent_role"]
+        if agent_role:
+            key = str(agent_role)
+        else:
+            key = f"neutral:{run_id}"
+        previous = votes[step_index].get(key)
+        if previous is not None and previous["run_id"] > run_id:
+            continue
+        votes[step_index][key] = {
+            "run_id": run_id,
+            "role": str(agent_role or "neutral"),
+            "model_id": str(row["model_id"] or ""),
+            "price": _as_float(row["predicted_price"]),
+            "high": _as_float(row["predicted_high"]),
+            "low": _as_float(row["predicted_low"]),
+            "conf": _as_float(row["confidence"]),
+            "has_conf": row["confidence"] is not None,
+            "change_pct": _as_float(row["predicted_change_pct"]),
+            "target_time": row["target_time"],
+        }
+    return dict(votes)
+
+
+def aggregate_forecast_steps(
+    votes: dict[int, dict[str, dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Turn per-role votes into chart steps plus an honest coverage report.
+
+    Returns ``(steps, coverage)``. ``coverage`` is what the Trader Deck badge
+    reads: a two-role band, or a three-role band where two roles quoted the same
+    model (#139: bull and arbiter both answered ``glm-5.1``), is not a three
+    voice opinion and must not be drawn as one.
+    """
+    steps: list[dict[str, Any]] = []
+    role_steps: dict[str, set[int]] = defaultdict(set)
+    role_models: dict[str, list[str]] = defaultdict(list)
+    samples_per_step: list[int] = []
+    models_per_step: list[int] = []
+
+    for step_index in sorted(votes):
+        votes_by_role = votes[step_index]
+        if not votes_by_role:
+            continue
+        sample = list(votes_by_role.values())
+        prices = sorted(v["price"] for v in sample)
+        n = len(prices)
+        c50 = statistics.median(prices)
+        c10 = prices[max(0, int(n * 0.1) - 1)] if n > 1 else prices[0]
+        c90 = prices[min(n - 1, int(n * 0.9))] if n > 1 else prices[0]
+        h90 = max(v["high"] for v in sample)
+        l10 = min(v["low"] for v in sample)
+        p_up = sum(1 for v in sample if v["change_pct"] > 0) / n
+        confidences = [v["conf"] for v in sample if v["has_conf"]]
+        target_time = sample[0]["target_time"]
+        # Spread of the roles' percentage calls, in decimal. This replaces the
+        # old hardcoded ``sigma: 0.008`` that the deck printed as "σ часа
+        # (EWMA)": a constant was presented as a measured quantity. It is a
+        # disagreement measure across voices, not a forecast error, so it is
+        # None when there is a single voice - one opinion has no spread.
+        change_pcts = [v["change_pct"] / 100.0 for v in sample]
+        sigma = round(statistics.pstdev(change_pcts), 5) if n > 1 else None
+
+        distinct_models = {v["model_id"] for v in sample if v["model_id"]}
+        samples_per_step.append(n)
+        models_per_step.append(len(distinct_models) or 1)
+        for role, vote in votes_by_role.items():
+            role_key = role if role in BUNDLE_ROLES else "neutral"
+            role_steps[role_key].add(step_index)
+            if vote["model_id"] and vote["model_id"] not in role_models[role_key]:
+                role_models[role_key].append(vote["model_id"])
+
+        steps.append({
+            "step": step_index,
+            "time": (
+                int(target_time.replace(tzinfo=timezone.utc).timestamp())
+                if target_time.tzinfo is None
+                else int(target_time.timestamp())
+            ),
+            "open": round(c50, 1),
+            "close": round(c50, 1),
+            "high": round(h90, 1),
+            "low": round(l10, 1),
+            "c10": round(c10, 1),
+            "c90": round(c90, 1),
+            "h90": round(h90, 1),
+            "l10": round(l10, 1),
+            "vol": 0.0,
+            "p_up": round(p_up, 2),
+            "sigma": sigma,
+            "confidence": round(sum(confidences) / len(confidences), 1) if confidences else None,
+            "samples": n,
+        })
+
+    present = [role for role in BUNDLE_ROLES if role in role_steps]
+    missing = [role for role in BUNDLE_ROLES if role not in role_steps]
+    if not present:
+        band_basis = "legacy-no-roles"
+    elif len(present) == 1:
+        band_basis = "single-role"
+    elif len(present) == 2:
+        band_basis = "two-roles"
+    else:
+        band_basis = "three-roles"
+
+    coverage = {
+        "roles": {
+            role: {
+                "present": role in role_steps,
+                "model_id": "+".join(role_models.get(role, [])) or None,
+                "steps": len(role_steps.get(role, ())),
+            }
+            for role in BUNDLE_ROLES
+        },
+        "roles_present": present,
+        "roles_missing": missing,
+        "neutral_steps": len(role_steps.get("neutral", ())),
+        "band_basis": band_basis,
+        "min_samples_per_step": min(samples_per_step) if samples_per_step else 0,
+        "max_samples_per_step": max(samples_per_step) if samples_per_step else 0,
+        "min_models_per_step": min(models_per_step) if models_per_step else 0,
+        "max_models_per_step": max(models_per_step) if models_per_step else 0,
+    }
+    return steps, coverage
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────
 
 @router.get("/candles")
@@ -209,66 +375,26 @@ async def get_forecast(request: Request, symbol: str = "btcusdt"):
             async with pool.acquire() as conn:
                 # Latest completed forecast request
                 row = await conn.fetchrow(
-                    "SELECT id, symbol, base_price, horizon_hours, base_timeframe, created_at "
+                    "SELECT id, symbol, base_price, horizon_hours, base_timeframe, created_at, "
+                    "execution_state "
                     "FROM forecast_requests WHERE symbol = $1 AND status = 'completed' "
                     "ORDER BY created_at DESC LIMIT 1",
                     symbol,
                 )
                 if row:
-                    # Get all forecast points for this request, grouped by step
+                    # Every point carries the model run that produced it, and the
+                    # run carries the role: that is what makes a band three voices
+                    # instead of one voice quoted three times.
                     points = await conn.fetch(
-                        "SELECT step_index, target_time, predicted_price, predicted_high, "
-                        "predicted_low, confidence, predicted_change_pct "
-                        "FROM forecast_points WHERE request_id = $1 ORDER BY step_index",
+                        "SELECT p.step_index, p.target_time, p.predicted_price, p.predicted_high, "
+                        "p.predicted_low, p.confidence, p.predicted_change_pct, "
+                        "p.model_run_id AS run_id, r.agent_role, r.model_id "
+                        "FROM forecast_points p "
+                        "LEFT JOIN forecast_model_runs r ON r.id = p.model_run_id "
+                        "WHERE p.request_id = $1 ORDER BY p.step_index, p.model_run_id",
                         row["id"],
                     )
-                    # Group by step_index, aggregate into q10/q50/q90
-                    from collections import defaultdict
-                    import statistics
-                    steps_map: dict[int, list[dict]] = defaultdict(list)
-                    for pt in points:
-                        steps_map[pt["step_index"]].append({
-                            "price": float(pt["predicted_price"]),
-                            "high": float(pt["predicted_high"]),
-                            "low": float(pt["predicted_low"]),
-                            "conf": float(pt["confidence"]),
-                            "change_pct": float(pt["predicted_change_pct"]),
-                            "target_time": pt["target_time"],
-                        })
-
-                    steps = []
-                    for step_idx in sorted(steps_map.keys()):
-                        pts = steps_map[step_idx]
-                        prices = [p["price"] for p in pts]
-                        highs = [p["high"] for p in pts]
-                        lows = [p["low"] for p in pts]
-                        n = len(prices)
-                        if n == 0:
-                            continue
-                        c50 = statistics.median(prices)
-                        c10 = sorted(prices)[max(0, int(n * 0.1) - 1)] if n > 1 else prices[0]
-                        c90 = sorted(prices)[min(n - 1, int(n * 0.9))] if n > 1 else prices[0]
-                        h90 = max(highs)
-                        l10 = min(lows)
-                        p_up = sum(1 for p in pts if p["change_pct"] > 0) / n
-                        avg_conf = sum(p["conf"] for p in pts) / n
-                        target_ts = pts[0]["target_time"]
-                        steps.append({
-                            "step": step_idx,
-                            "time": int(target_ts.replace(tzinfo=timezone.utc).timestamp()) if target_ts.tzinfo is None else int(target_ts.timestamp()),
-                            "open": round(c50, 1),
-                            "close": round(c50, 1),
-                            "high": round(h90, 1),
-                            "low": round(l10, 1),
-                            "c10": round(c10, 1),
-                            "c90": round(c90, 1),
-                            "h90": round(h90, 1),
-                            "l10": round(l10, 1),
-                            "vol": 0.0,
-                            "p_up": round(p_up, 2),
-                            "sigma": 0.008,
-                            "confidence": round(avg_conf, 1),
-                        })
+                    steps, coverage = aggregate_forecast_steps(_role_votes(list(points)))
 
                     if steps:
                         return {
@@ -280,6 +406,8 @@ async def get_forecast(request: Request, symbol: str = "btcusdt"):
                             "steps": steps,
                             "source": "postgres",
                             "generated_at": row["created_at"].isoformat(),
+                            "execution_state": row["execution_state"],
+                            "coverage": coverage,
                         }
         except Exception as exc:
             log.warning("forecast_requests fetch failed: %s", exc)

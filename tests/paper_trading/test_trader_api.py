@@ -10,6 +10,7 @@ Tests cover:
   - GET /api/trader/state returns 200 with mode field, labelled "skeleton"
   - GET /api/trader/positions returns 200 with array (empty without DB)
   - GET /api/trader/forecast + /activity return empty without data
+  - forecast band aggregation is role-aware and reports bundle coverage (review M7)
   - POST /api/trader/mode returns 200 with idempotency_key
   - POST /api/trader/mode duplicate key returns 200 with applied=false
   - Auth required (401 without session)
@@ -20,6 +21,7 @@ Uses FastAPI TestClient with stub state (no Redis/Postgres needed).
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -35,6 +37,7 @@ if str(WEBUI_DIR) not in sys.path:
     sys.path.insert(0, str(WEBUI_DIR))
 
 from trader_api import router as trader_router  # noqa: E402
+import trader_api  # noqa: E402
 
 BASE_DIR = WEBUI_DIR
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -312,6 +315,154 @@ class TestTraderActivity:
         assert data["items"] == []
 
 
+def _point(step, run_id, role, model, price, high, low, change_pct, confidence=70.0):
+    """One row of the joined forecast_points/forecast_model_runs query."""
+    return {
+        "step_index": step,
+        "target_time": datetime(2026, 9, 22, 12, 0),
+        "predicted_price": price,
+        "predicted_high": high,
+        "predicted_low": low,
+        "confidence": confidence,
+        "predicted_change_pct": change_pct,
+        "run_id": run_id,
+        "agent_role": role,
+        "model_id": model,
+    }
+
+
+class _StubConnection:
+    def __init__(self, request_row, points):
+        self._request_row = request_row
+        self._points = points
+
+    async def fetchrow(self, query, *args):
+        return self._request_row
+
+    async def fetch(self, query, *args):
+        return self._points
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _StubPool:
+    def __init__(self, request_row, points):
+        self._connection = _StubConnection(request_row, points)
+
+    def acquire(self):
+        return self._connection
+
+
+class TestForecastRoleAggregation:
+    """Role-aware band aggregation — review M7.
+
+    The q10/q50/q90 band is drawn from whatever points exist, so the API has to
+    say how many independent voices are behind it.
+    """
+
+    def test_missing_arbiter_is_reported_not_hidden(self):
+        votes = trader_api._role_votes([
+            _point(1, 10, "bull", "deepseek-v4-pro", 111000, 112000, 110000, 1.2),
+            _point(1, 20, "bear", "glm-5.2", 110000, 111500, 109500, -0.4),
+        ])
+        steps, coverage = trader_api.aggregate_forecast_steps(votes)
+        assert coverage["band_basis"] == "two-roles"
+        assert coverage["roles_missing"] == ["arbiter"]
+        assert coverage["roles"]["arbiter"]["present"] is False
+        assert steps[0]["samples"] == 2
+
+    def test_retry_of_a_role_counts_as_one_voice(self):
+        votes = trader_api._role_votes([
+            _point(1, 10, "bull", "deepseek-v4-pro", 111000, 112000, 110000, 1.2),
+            _point(1, 14, "bull", "deepseek-v4-pro", 120000, 121000, 119000, 9.0),
+            _point(1, 20, "bear", "glm-5.2", 110000, 111500, 109500, -0.4),
+        ])
+        steps, coverage = trader_api.aggregate_forecast_steps(votes)
+        # The newest bull run wins, and one voice replayed is still one voice:
+        # the band sits between 110000 (bear) and 120000 (bull retry), not between
+        # three samples where the bull would be quoted twice.
+        assert steps[0]["samples"] == 2
+        assert coverage["max_samples_per_step"] == 2
+        assert steps[0]["close"] == 115000.0
+        assert steps[0]["c10"] == 110000.0
+        assert steps[0]["c90"] == 120000.0
+
+    def test_single_voice_gets_no_invented_certainty(self):
+        votes = trader_api._role_votes([
+            _point(1, 10, "bull", "deepseek-v4-pro", 111000, 112000, 110000, 1.2),
+        ])
+        steps, coverage = trader_api.aggregate_forecast_steps(votes)
+        assert coverage["band_basis"] == "single-role"
+        # One opinion has no spread: sigma is absent rather than fabricated.
+        assert steps[0]["sigma"] is None
+        assert steps[0]["c10"] == steps[0]["c90"]
+
+    def test_three_roles_on_two_models_are_not_three_opinions(self):
+        # Production request #139: bull and arbiter both answered glm-5.1.
+        votes = trader_api._role_votes([
+            _point(1, 30, "bull", "glm-5.1", 111000, 112000, 110000, 1.2),
+            _point(1, 40, "bear", "glm-5.2", 110000, 111500, 109500, -0.4),
+            _point(1, 50, "arbiter", "glm-5.1", 110500, 111800, 109800, 0.3),
+        ])
+        steps, coverage = trader_api.aggregate_forecast_steps(votes)
+        assert coverage["band_basis"] == "three-roles"
+        assert coverage["min_models_per_step"] == 2
+
+    def test_legacy_points_without_roles_stay_separate_samples(self):
+        votes = trader_api._role_votes([
+            _point(1, 60, None, "kimi-k2.6", 111000, 112000, 110000, 1.2),
+            _point(1, 61, None, "glm-5.2", 110000, 111500, 109500, -0.4),
+        ])
+        steps, coverage = trader_api.aggregate_forecast_steps(votes)
+        assert coverage["band_basis"] == "legacy-no-roles"
+        assert coverage["neutral_steps"] == 1
+        assert steps[0]["samples"] == 2
+
+    def test_null_confidence_does_not_erase_the_forecast(self):
+        # forecast_points.confidence is nullable (14 of 855 production rows); a
+        # bare float(None) used to blow up the whole endpoint into "unavailable".
+        votes = trader_api._role_votes([
+            _point(1, 70, "bull", "glm-5.2", 111000, 112000, 110000, 1.2, confidence=None),
+            _point(1, 71, "bear", "glm-5.2", 110000, 111500, 109500, -0.4, confidence=None),
+        ])
+        steps, _coverage = trader_api.aggregate_forecast_steps(votes)
+        assert steps[0]["confidence"] is None
+        assert steps[0]["close"] == 110500.0
+
+
+class TestTraderForecastEndpointCoverage:
+    """GET /api/trader/forecast must carry provenance through to the deck."""
+
+    def test_response_exposes_execution_state_and_coverage(self, auth_client, app):
+        app.state.pg_pool = _StubPool(
+            {
+                "id": 137,
+                "symbol": "btcusdt",
+                "base_price": 110000,
+                "horizon_hours": 4,
+                "base_timeframe": "60min",
+                "created_at": datetime(2026, 9, 21, 10, 0),
+                "execution_state": "partial",
+            },
+            [
+                _point(1, 10, "bull", "deepseek-v4-pro", 111000, 112000, 110000, 1.2),
+                _point(1, 20, "bear", "glm-5.2", 110000, 111500, 109500, -0.4),
+            ],
+        )
+        data = auth_client.get("/api/trader/forecast").json()
+        assert data["source"] == "postgres"
+        assert data["execution_state"] == "partial"
+        assert data["coverage"]["roles_missing"] == ["arbiter"]
+        step = data["steps"][0]
+        for key in ("step", "time", "open", "close", "high", "low",
+                    "c10", "c90", "h90", "l10", "vol", "p_up", "sigma", "samples"):
+            assert key in step
+
+
 class TestTraderStream:
     """GET /api/trader/stream — SSE placeholder"""
 
@@ -339,3 +490,9 @@ class TestTraderPage:
         assert resp.status_code == 200
         assert 'id="trSourceBadge"' in resp.text
         assert "ui/trader-chart.js" in resp.text
+
+    def test_page_exposes_bundle_coverage_badge(self, auth_client):
+        """Review M7: the forecast card has to show how many roles answered it."""
+        resp = auth_client.get("/trader")
+        assert resp.status_code == 200
+        assert 'id="trFcCoverage"' in resp.text

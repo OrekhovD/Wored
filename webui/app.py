@@ -2032,6 +2032,13 @@ async def forecast_status(request: Request, request_id: int):
     exec_state = row["execution_state"]
     completed_or_failed = db_state in ("completed", "failed")
     resolved = resolve_execution_state(db_state, exec_state, heartbeat_alive, completed_or_failed)
+    # Role coverage is only meaningful once the bundle has finished, and this
+    # endpoint is polled every couple of seconds while it runs - so the extra
+    # query is made on the terminal read only. Without it a `partial` answer had
+    # no way to say which voice is missing (review M7).
+    roles = None
+    if completed_or_failed:
+        roles = await _forecast_bundle_roles(pool, request_id)
     # Legacy status stays as-is for backward compatibility
     return {
         "id": row["id"],
@@ -2042,7 +2049,47 @@ async def forecast_status(request: Request, request_id: int):
         "as_of": serialize_dt(row["as_of"]),
         "valid_until": serialize_dt(row["valid_until"]),
         "deadline_at": serialize_dt(row["deadline_at"] or row["job_deadline_at"]),
+        "roles": roles,
     }
+
+
+async def _forecast_bundle_roles(pool, request_id: int) -> list[dict[str, Any]]:
+    """Per-role outcome of one forecast request: who really answered.
+
+    Shaped as a list of ``{role, model_id, state, points, failed_runs}`` because
+    that is the vocabulary the command deck already uses for bundle roles. A role
+    counts as ``completed`` only when its run finished *and* left points - a run
+    that returned text nobody could parse is a failure, not an opinion, and it
+    must not disappear from the answer (review M7).
+    """
+    rows = await pool.fetch(
+        "SELECT r.agent_role, r.status, r.model_id, count(p.id) AS points "
+        "FROM forecast_model_runs r "
+        "LEFT JOIN forecast_points p ON p.model_run_id = r.id "
+        "WHERE r.request_id = $1 "
+        "GROUP BY r.agent_role, r.status, r.model_id "
+        "ORDER BY r.agent_role, r.status, r.model_id",
+        request_id,
+    )
+    by_role: dict[str, dict[str, Any]] = {}
+    for item in rows:
+        key = str(item["agent_role"] or "neutral")
+        entry = by_role.setdefault(
+            key,
+            {"role": key, "model_id": None, "state": "missing", "points": 0, "failed_runs": 0},
+        )
+        if item["status"] == "completed" and int(item["points"]) > 0:
+            entry["state"] = "completed"
+            entry["points"] += int(item["points"])
+            model_id = str(item["model_id"] or "")
+            if model_id and model_id not in (entry["model_id"] or ""):
+                entry["model_id"] = f"{entry['model_id']}+{model_id}" if entry["model_id"] else model_id
+        elif item["status"] == "failed":
+            entry["failed_runs"] += 1
+    # Fixed order keeps the UI wording stable; the bundle roles come first and the
+    # pre-bundle legacy runs land under 'neutral' at the end.
+    order = {"bull": 0, "bear": 1, "arbiter": 2, "neutral": 9}
+    return sorted(by_role.values(), key=lambda r: (order.get(r["role"], 5), r["role"]))
 
 
 

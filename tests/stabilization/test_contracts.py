@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / "webui"), str(ROOT / "chatbot")]
 from access_control import allowed_origin, verify_telegram, safe_next_url
-from forecast_queue import process_one
+from forecast_queue import COMPLETED, process_one
 from services.market_data import calculate_closed_indicators, fresh_ticker, read_market_context, timestamp_age
 from services.sim_math import preview, settlement, validate_order
 
@@ -200,6 +200,26 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
         timeout_calls = [call for call in execute_calls
                           if len(call.args) > 2 and call.args[2] == "TimeoutError"]
         self.assertTrue(len(timeout_calls) > 0, "Expected TimeoutError as error_code")
+
+    async def test_success_keeps_the_quality_state_the_runner_declared(self):
+        """`status` is lifecycle, `execution_state` is quality - review M7.
+
+        The runner writes 'partial' when a role of the bundle failed. Overwriting
+        it with 'completed' on success is what made requests 127/133/134/137 report
+        a clean completion while carrying failed runs.
+        """
+        pool = self.pool()
+        await process_one(pool, AsyncMock())
+        updates = [call for call in pool.connection.execute.call_args_list
+                   if "UPDATE forecast_requests" in str(call.args[0])
+                   and "status='completed'" in str(call.args[0])]
+        self.assertEqual(len(updates), 1, "Expected exactly one completion update")
+        sql = updates[0].args[0]
+        self.assertIn("execution_state=COALESCE(execution_state", sql)
+        # The only write to the quality column must be the COALESCE above.
+        self.assertNotIn("execution_state", sql.replace("execution_state=COALESCE(execution_state", ""))
+        self.assertEqual(updates[0].args[1], 7)
+        self.assertEqual(updates[0].args[2], COMPLETED)
 
     async def test_shutdown_does_not_acknowledge_job(self):
         pool = self.pool()
