@@ -38,7 +38,7 @@ docker compose -f docker-compose.qa.yml -p wored-qa run --rm checks \
 
 ## 2. Реестр известных отказов
 
-Базовая линия после `c2fe3bf`: **829 passed, 20 skipped, 1 xfailed, 5 failed**.
+Базовая линия после `92233a4`: **836 passed, 20 skipped, 1 xfailed, 5 failed**.
 Все пять разобраны; первый — единственный настоящий.
 
 | Отказ | Природа |
