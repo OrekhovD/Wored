@@ -118,6 +118,12 @@ services:
     environment:
       - PYTHONPATH=/app:/chatbot:/opt
       - TZ=Asia/Bangkok
+      # Inside the container 127.0.0.1 is the container itself, so the .env value
+      # (correct for host-side runs) cannot be used here. Docker Desktop proxies
+      # host.docker.internal to the host loopback, so the bonsai-27b server keeps
+      # its 127.0.0.1:8088 bind and no unauthenticated endpoint is published to
+      # the LAN. Measured 23.09.2026: /api/tags answers from inside this service.
+      - LOCAL_LLM_BASE_URL=http://host.docker.internal:8088
     command: uvicorn app:app --host 0.0.0.0 --port 8000
     ports:
       - '127.0.0.1:${WEBUI_PORT:-8080}:8000'
