@@ -15,7 +15,14 @@ docker compose -f docker-compose.qa.yml -p wored-qa run --rm --build checks \
 ```
 
 Точка входа — `pytest tests/`. `make test` в репозитории нет, `webui/tests/`
-в гейт не входит.
+в гейт не входит. Практическое следствие: контрактный тест в
+`webui/tests/test_prediction_engine.py` (`test_nvidia_fallback_requires_its_own_credential`)
+не запускается гейтом вообще, и его расхождение с кодом обнаружилось только
+ручной прогоном — правки в `webui/tests/` надо запускать отдельно:
+
+```bash
+python -m pytest webui/tests/test_prediction_engine.py -q
+```
 
 ### Как понять, что гейт проверял не тот код
 
@@ -38,12 +45,12 @@ docker compose -f docker-compose.qa.yml -p wored-qa run --rm checks \
 
 ## 2. Реестр известных отказов
 
-Базовая линия после `92233a4`: **836 passed, 20 skipped, 1 xfailed, 5 failed**.
+Базовая линия после `f5ffabf`: **843 passed, 20 skipped, 1 xfailed, 5 failed**.
 Все пять разобраны; первый — единственный настоящий.
 
 | Отказ | Природа |
 |---|---|
-| `test_contracts.py::ProviderTests::test_native_adapter_rejects_thinking_only_and_truncated_response` | **Реальный разрыв контракта**: `ValueError` не бросается на thinking-only/обрезанном ответе. Открыт в очереди как Q-2 |
+| `test_contracts.py::ProviderTests::test_native_adapter_rejects_thinking_only_and_truncated_response` | **Реальный разрыв контракта**: `ValueError` не бросается на thinking-only/обрезанном ответе. Открыт в очереди как X-1 |
 | `test_documentation.py::TestEnvExample::test_env_example_exists` | Артефакт сборки: `.dockerignore` содержит `.env*`. Файл на хосте есть |
 | `test_documentation.py::TestEnvExample::test_env_wored_example_exists` | То же |
 | `test_documentation.py::TestDocumentationFiles::test_required_docs_exist` | Артефакт: `.dockerignore` содержит `*.md`, markdown в образ отсутствует целиком |
