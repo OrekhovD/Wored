@@ -5,6 +5,12 @@
 **Статус:** diagnostic-only. По решению владельца ни один из пунктов в этом раунде **не исправлен**.
 Код не менялся; изменяющие статус проверки не производилось.
 
+**Обновление 2026-09-22:** ниже — исторический снимок диагноза, он не переписывается.
+Фактическое состояние: **H3 (P2) исправлен** — `_calibrate_confidence` стала чистой
+функцией, точность роли запрашивается в `generate_model_prediction` (коммит `c2fe3bf`,
+регрессии в `tests/stabilization/test_contracts.py`). Остальные пункты открыты,
+навигация по очереди — в `docs/TASKS-QUEUE.md`.
+
 ---
 
 ## 1. Как ставился диагноз
@@ -195,8 +201,11 @@ docker compose exec -T webui sh -lc "printenv OLLAMA_ANALYST_MODEL OLLAMA_ANALYS
 
 Регрессия-тесты на момент обзора: локально `python -m pytest tests/paper_trading -q
 -p no:cacheprovider`; полный Docker-набор `docker compose -f docker-compose.qa.yml
--p wored-qa run --rm checks pytest tests/ -q -p no:cacheprovider` — baseline
+-p wored-qa run --rm --build checks pytest tests/ -q -p no:cacheprovider` — baseline
 **818 passed / 5 documented pre-existing failures**.
+`--build` здесь обязателен: QA-образ копирует репозиторий на сборке, без него
+прогоняются тесты предыдущего кода (стоило 2026-09-22 отдать «зелёный» результат
+на коде до правок; см. `docs/OPERATIONAL-PROCESS.md` §1).
 
 ## 4. Приоритеты на следующий заход
 
