@@ -12,9 +12,10 @@ Decision table, driven by the exit code of scripts\bonsai_health.ps1:
   0  healthy   -> no action; the state file is updated and nothing is logged
   1  down      -> start the server through scripts\start-local-bonsai.ps1, re-check
   2  wrong store -> DO NOT start anything. A process already owns the port and reads
-                    another OLLAMA_MODELS; starting a second one cannot bind the port
-                    and would only hide the real problem (a bad environment inherited
-                    from whatever launched Ollama). Logged as an action item.
+                    another model store (for the desktop app that is its own Model
+                    location setting, not an environment variable). Starting a second
+                    server cannot bind the port and would only hide the real problem.
+                    Logged as an action item.
 
 This script NEVER kills or restarts a foreign process. Killing the process that owns
 the port is a human decision, so it is reported, not performed.

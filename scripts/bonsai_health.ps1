@@ -12,9 +12,11 @@ the scheduled task, so keep it stable:
   2  model missing      - server answers but does not list the model (wrong store)
 
 Exit code 2 is the interesting one on this workstation: two `ollama serve` processes
-can coexist, and the one started from a shell that carried OLLAMA_MODELS=<somewhere
-else> answers /api/version happily while listing zero models. That is a store
-mismatch, not a dead server, and restarting the server does not fix it.
+can coexist, and the desktop app's server reads whatever its own Model location
+setting says (measured 2026-09-23: `%LOCALAPPDATA%\Ollama\db.sqlite` ->
+settings.models = D:\WORED, i.e. a repository directory as model store). Such a
+server answers /api/version happily while listing zero models. That is a store
+mismatch, not a dead server: restarting the process does not fix it, the setting does.
 
 .PARAMETER Port
 Port of the dedicated server. Default 8088, chosen so it cannot collide with the
@@ -100,8 +102,9 @@ try {
 
     if (-not ($lines['models'] | Where-Object { $_ -like "$Model*" })) {
         $lines['notes'] += "server is up but does not list '$Model': it reads a different"
-        $lines['notes'] += "OLLAMA_MODELS than $ModelsDir - restarting it will not help,"
-        $lines['notes'] += "the environment of its parent process must be fixed"
+        $lines['notes'] += "OLLAMA_MODELS than $ModelsDir. For the desktop app that is"
+        $lines['notes'] += "its own Model location setting (db.sqlite -> settings.models),"
+        $lines['notes'] += "not the shell environment: restarting the process will not help"
         if ($CheckAppPort -gt 0) {
             try {
                 $app = Invoke-RestMethod -Uri "http://127.0.0.1:$CheckAppPort/api/tags" -TimeoutSec $TimeoutSec
