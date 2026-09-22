@@ -6,6 +6,7 @@ import math
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -20,6 +21,12 @@ DEFAULT_PREMIUM_QWEN_MODEL = "qwen3.6-27b"
 DEFAULT_WORKER_GEMINI_MODEL = "gemini-3-flash-preview"
 PROVIDER_COOLDOWN_SECONDS = {"ollama": 1.0, "glm": 1.8, "gemini": 1.0, "dashscope": 1.4, "minimax": 1.0}
 RETRY_BACKOFF_SECONDS = (2.0, 5.0)
+# A retry is only affordable while the next attempt still fits the role's share of
+# the queue's wall-clock budget: forecast_queue wraps a whole role bundle in
+# asyncio.wait_for(ATTEMPT_TIMEOUT_SECONDS = 300) inside one transaction, so a role
+# that spends 3x60 s on backoff gets the entire job cancelled and rolled back -
+# including the roles that answered fine. 300 s / 3 roles = 100 s per role.
+ROLE_ATTEMPT_BUDGET_SECONDS = 100.0
 GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
@@ -157,6 +164,10 @@ class ModelPredictionResult:
     error_message: str | None = None
     points: list[PredictionPoint] = field(default_factory=list)
     agent_role: str | None = None
+    # Models actually tried, in order. A failed run used to report only the last
+    # candidate that touched the network, which blamed NVIDIA for a minimax
+    # timeout; the whole trail belongs to the role that asked for the forecast.
+    attempted_models: list[str] = field(default_factory=list)
 
 
 MODEL_ORDER = ["analyst", "premium", "minimax"]
@@ -443,8 +454,68 @@ def _is_rate_limit_error(exc: Exception) -> bool:
 
 
 def _is_timeout_error(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return "timed out" in message or "timeout" in message
+    """Timeout or connection failure - by exception type, not by message.
+
+    Every classifier in this module used to read ``str(exc)`` only. httpx 0.28
+    raises ``ReadTimeout('')`` with an empty message, so a real timeout matched
+    nothing: ``RETRY_BACKOFF_SECONDS`` never applied, the "switching after
+    retryable exhaustion" branch never logged, and the persisted cause came out
+    empty. Type identity is authoritative here; the substring check is kept only
+    because some providers report a text body without a typed exception.
+    """
+    types = _retryable_exception_types()
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    for _ in range(5):
+        if current is None or id(current) in seen:
+            break
+        seen.add(id(current))
+        if isinstance(current, types):
+            return True
+        message = str(current).lower()
+        if "timed out" in message or "timeout" in message:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _retryable_exception_types() -> tuple[type[BaseException], ...]:
+    """Exception classes that mean "the model never answered in time"."""
+    global _RETRYABLE_EXCEPTION_TYPES
+    if _RETRYABLE_EXCEPTION_TYPES is None:
+        resolved: list[type[BaseException]] = [TimeoutError]
+        try:
+            import httpx
+
+            resolved += [httpx.TimeoutException, httpx.ConnectError]
+        except Exception:  # pragma: no cover - httpx is a hard runtime dep
+            pass
+        try:
+            import openai
+
+            resolved += [openai.APITimeoutError, openai.APIConnectionError]
+        except Exception:  # pragma: no cover - openai is a hard runtime dep
+            pass
+        _RETRYABLE_EXCEPTION_TYPES = tuple(resolved)
+    return _RETRYABLE_EXCEPTION_TYPES
+
+
+_RETRYABLE_EXCEPTION_TYPES: tuple[type[BaseException], ...] | None = None
+
+
+def _describe_error(exc: BaseException | None) -> str:
+    """A cause string that survives an exception whose message is empty.
+
+    ``httpx.ReadTimeout('')`` renders as ``""``, and an empty
+    ``forecast_model_runs.error_message`` destroys the only evidence of why a
+    role failed. The type name is always present.
+    """
+    if exc is None:
+        return "Prediction request failed"
+    text = str(exc).strip()
+    if text:
+        return f"{type(exc).__name__}: {text[:280]}"
+    return f"{type(exc).__name__}: {exc!r}"
 
 
 def _is_missing_model_error(exc: Exception) -> bool:
@@ -920,20 +991,26 @@ async def generate_model_prediction(
             tier=config.tier,
             status="failed",
             error_message=model_status["reason"] or "Model is not configured",
+            agent_role=role,
         )
 
     last_error: Exception | None = None
-    last_model_id = runtime_candidates[0].model_id if runtime_candidates else config.model_id
+    chain_primary_model_id = runtime_candidates[0].model_id if runtime_candidates else config.model_id
+    attempted: list[str] = []
     system_prompt = _role_system_prompt(role)
     horizon_steps = int(context_payload.get("horizon_steps", context_payload.get("horizon_hours", 4)))
     step_minutes = int(context_payload.get("step_minutes", 60))
     # Fetched once per role call, here, because this is the only level that has a
     # usable event loop; parse_prediction_payload itself stays pure/synchronous.
     role_accuracy = await _fetch_role_accuracy(role) if role else None
+    role_started = time.monotonic()
 
     for candidate in runtime_candidates:
         if not _candidate_is_available(candidate, strict_nvapi=strict_nvapi):
             continue
+
+        if not attempted:
+            chain_primary_model_id = candidate.model_id
 
         attempt_schedule = _candidate_attempt_schedule(config, candidate)
         for attempt, backoff in enumerate(attempt_schedule, start=1):
@@ -941,7 +1018,8 @@ async def generate_model_prediction(
                 await asyncio.sleep(backoff)
 
             try:
-                last_model_id = candidate.model_id
+                if not attempted or attempted[-1] != candidate.model_id:
+                    attempted.append(candidate.model_id)
                 if candidate.provider == "nvidia":
                     content = await _nvidia_chat(candidate, config, context_payload, system_prompt, peer_outputs)
                 elif candidate.provider == "ollama_local":
@@ -966,6 +1044,7 @@ async def generate_model_prediction(
                     summary=summary,
                     points=points,
                     agent_role=role,
+                    attempted_models=list(attempted),
                 )
             except Exception as exc:
                 last_error = exc
@@ -979,36 +1058,67 @@ async def generate_model_prediction(
                         "Prediction %s switching from %s to next candidate after terminal error: %s",
                         config.key,
                         candidate.model_id,
-                        exc,
+                        _describe_error(exc),
                     )
                     break
-                if (_is_rate_limit_error(exc) or _is_timeout_error(exc)) and attempt < len(attempt_schedule):
+                retryable = _is_rate_limit_error(exc) or _is_timeout_error(exc)
+                # The next attempt is only worth taking if it can still finish
+                # inside this role's slice of the queue's job timeout.
+                affordable = (
+                    time.monotonic() - role_started + candidate.timeout
+                    <= ROLE_ATTEMPT_BUDGET_SECONDS
+                )
+                if retryable and attempt < len(attempt_schedule) and affordable:
                     log.warning(
                         "Prediction model %s attempt %s hit retryable error on %s: %s",
                         config.key,
                         attempt,
                         candidate.model_id,
-                        exc,
+                        _describe_error(exc),
                     )
                     continue
-                if chain_switch_enabled and (_is_rate_limit_error(exc) or _is_timeout_error(exc)):
+                if retryable and attempt < len(attempt_schedule) and not affordable:
+                    log.warning(
+                        "Prediction model %s skips attempt %s on %s after %0.1fs: %s "
+                        "would not fit the %0.0fs role budget",
+                        config.key,
+                        attempt + 1,
+                        candidate.model_id,
+                        time.monotonic() - role_started,
+                        _describe_error(exc),
+                        ROLE_ATTEMPT_BUDGET_SECONDS,
+                    )
+                if chain_switch_enabled and retryable:
                     log.warning(
                         "Prediction %s switching from %s after retryable exhaustion: %s",
                         config.key,
                         candidate.model_id,
-                        exc,
+                        _describe_error(exc),
                     )
                     break
-                log.warning("Prediction model %s failed on %s: %s", config.key, candidate.model_id, exc)
+                log.warning(
+                    "Prediction model %s failed on %s: %s",
+                    config.key,
+                    candidate.model_id,
+                    _describe_error(exc),
+                )
                 break
 
+    # A failed run keeps the identity of the role that asked for it and of the
+    # model that chain started from. Reporting "last candidate that touched the
+    # network" blamed NVIDIA for a minimax timeout and left agent_role NULL, so
+    # role failures never counted against that role's accuracy. The full trail
+    # goes into the persisted cause instead of into model_id.
+    trail = ", ".join(attempted) if attempted else "no candidate attempted"
     return ModelPredictionResult(
         key=config.key,
         name=config.name,
-        model_id=last_model_id,
+        model_id=chain_primary_model_id,
         tier=config.tier,
         status="failed",
-        error_message=str(last_error) if last_error else "Prediction request failed",
+        error_message=f"{_describe_error(last_error)} (after: {trail})",
+        agent_role=role,
+        attempted_models=list(attempted),
     )
 
 

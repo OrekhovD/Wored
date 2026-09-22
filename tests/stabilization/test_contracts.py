@@ -400,5 +400,113 @@ class ConfidenceCalibrationTests(unittest.IsolatedAsyncioTestCase):
         fetch.assert_awaited_once_with("bull")
 
 
+class ErrorCauseAndRoleAttributionTests(unittest.IsolatedAsyncioTestCase):
+    """P1 of the role-fallback review: H1 (blind timeout classifiers) and H2 (lost role).
+
+    httpx 0.28 raises ReadTimeout('') - an empty message - and every classifier
+    used to read str(exc) only, so a real timeout was typed as "other error":
+    no backoff, no chain-switch log, and an empty cause in
+    forecast_model_runs.error_message. Failed runs also carried no agent_role,
+    so role failures never counted against that role's accuracy.
+    """
+
+    def setUp(self):
+        import os
+        self.cloud = {k: "" for k in os.environ if k.startswith(("OLLAMA_", "NVIDIA_", "LOCAL_LLM_"))}
+        self.cloud["OLLAMA_API_KEY"] = "test-token"
+        self.context = {"horizon_steps": 1, "base_price": 100.0, "symbol": "btcusdt"}
+
+    def _chain(self):
+        """Available candidates under the same cleared environment as the run."""
+        import os
+        from prediction_engine import MODEL_CONFIGS, _build_runtime_candidates, _candidate_is_available
+        with patch.dict(os.environ, self.cloud, clear=False):
+            cands = _build_runtime_candidates(MODEL_CONFIGS["analyst"])
+            return [c for c in cands if _candidate_is_available(c, strict_nvapi=False)]
+
+    async def _run_chain(self, exc):
+        import os
+        import prediction_engine
+        from prediction_engine import MODEL_CONFIGS, generate_model_prediction
+        chat = AsyncMock(side_effect=exc)
+        with patch.dict(os.environ, self.cloud, clear=False), \
+            patch.object(prediction_engine, "_ollama_chat", chat), \
+            patch.object(prediction_engine, "_fetch_role_accuracy", AsyncMock(return_value=None)), \
+            patch("asyncio.sleep", AsyncMock()):
+            result = await generate_model_prediction(
+                MODEL_CONFIGS["analyst"], self.context, role="bull")
+        return result, chat
+
+    def test_empty_httpx_timeout_is_recognised(self):
+        import httpx
+        from prediction_engine import _is_timeout_error
+        self.assertTrue(_is_timeout_error(httpx.ReadTimeout("")))
+        self.assertTrue(_is_timeout_error(httpx.ConnectTimeout("")))
+
+    def test_timeout_hidden_in_exception_cause_is_recognised(self):
+        import httpx
+        from prediction_engine import _is_timeout_error
+        outer = RuntimeError("Chat call failed")
+        outer.__cause__ = httpx.ConnectError("")
+        self.assertTrue(_is_timeout_error(outer))
+
+    def test_ordinary_errors_are_not_reclassified_as_timeouts(self):
+        from prediction_engine import _is_timeout_error
+        self.assertFalse(_is_timeout_error(
+            ValueError("Model response does not contain a JSON object or array")))
+        self.assertFalse(_is_timeout_error(RuntimeError("403 forbidden")))
+
+    def test_describe_error_keeps_a_cause_when_message_is_empty(self):
+        import httpx
+        from prediction_engine import _describe_error
+        described = _describe_error(httpx.ReadTimeout(""))
+        self.assertTrue(described.startswith("ReadTimeout:"))
+        self.assertGreater(len(described.strip()), len("ReadTimeout:"))
+        self.assertIn("JSON", _describe_error(
+            ValueError("Model response does not contain a JSON object or array")))
+
+    async def test_timeout_now_retries_and_walks_the_whole_chain(self):
+        import httpx
+        chain = self._chain()
+        self.assertGreaterEqual(len(chain), 2, "analyst chain must have a fallback to switch to")
+        result, chat = await self._run_chain(httpx.ReadTimeout(""))
+        schedule = len(_schedule_for_analyst())
+        self.assertEqual(chat.await_count, len(chain) * schedule)
+        self.assertEqual(result.status, "failed")
+
+    async def test_failed_run_keeps_role_primary_model_and_trail(self):
+        import httpx
+        chain = self._chain()
+        result, _ = await self._run_chain(httpx.ReadTimeout(""))
+        # The role that asked for the forecast owns the failure.
+        self.assertEqual(result.agent_role, "bull")
+        # Not "the last candidate that touched the network".
+        self.assertEqual(result.model_id, chain[0].model_id)
+        self.assertEqual(result.attempted_models, [c.model_id for c in chain])
+        self.assertIn("ReadTimeout", result.error_message)
+        self.assertIn("after:", result.error_message)
+
+    async def test_retry_is_dropped_when_it_cannot_fit_the_role_budget(self):
+        """Retrying a 60 s timeout must not eat the queue's whole job budget.
+
+        forecast_queue wraps an entire role bundle in wait_for(300 s) inside one
+        transaction, so a role that spends 3x60 s cancels the bundle and rolls
+        back the roles that answered correctly.
+        """
+        import httpx
+        import prediction_engine
+        chain = self._chain()
+        with patch.object(prediction_engine, "ROLE_ATTEMPT_BUDGET_SECONDS", 50.0):
+            result, chat = await self._run_chain(httpx.ReadTimeout(""))
+        self.assertEqual(chat.await_count, len(chain))
+        self.assertEqual(result.agent_role, "bull")
+        self.assertEqual(result.attempted_models, [c.model_id for c in chain])
+
+
+def _schedule_for_analyst():
+    from prediction_engine import MODEL_CONFIGS, _attempt_schedule
+    return _attempt_schedule(MODEL_CONFIGS["analyst"])
+
+
 if __name__ == "__main__":
     unittest.main()
