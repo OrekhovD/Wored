@@ -39,7 +39,7 @@ powershell -ExecutionPolicy Bypass -File scripts\bonsai_guard.ps1 -Port 8088 -Co
 [CmdletBinding()]
 param(
     [int]$Port = 8088,
-    [string]$Model = 'bonsai-27b',
+    [string]$Model = 'bonsai-27b:lmstudio-q1',
     [string]$ModelsDir = "$env:USERPROFILE\.ollama\models",
     [int]$ContextLength = 8192,
     [string]$KeepAlive = '30m',

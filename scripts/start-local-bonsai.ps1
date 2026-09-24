@@ -90,7 +90,7 @@
 param(
     [int]$Port = 8088,
     [string]$ModelsDir = "$env:USERPROFILE\.ollama\models",
-    [string]$Model = "bonsai-27b",
+    [string]$Model = "bonsai-27b:lmstudio-q1",
     [ValidateRange(2048, 262144)]
     [int]$ContextLength = 8192,
     [string]$KeepAlive = "30m",

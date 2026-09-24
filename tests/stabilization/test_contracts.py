@@ -279,7 +279,7 @@ class LocalModelRoleTests(unittest.IsolatedAsyncioTestCase):
         analyst = self._candidates("analyst", roles="analyst")
         premium = self._candidates("premium", roles="analyst")
         self.assertEqual(analyst[0].provider, "ollama_local")
-        self.assertEqual(analyst[0].model_id, "bonsai-27b")
+        self.assertEqual(analyst[0].model_id, "bonsai-27b:lmstudio-q1")
         self.assertEqual(analyst[0].timeout, 120.0)
         # The cloud chain of the same role must stay behind it, untouched.
         self.assertNotIn("ollama_local", [c.provider for c in analyst[1:]])

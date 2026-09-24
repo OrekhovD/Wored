@@ -35,7 +35,7 @@ NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com
 # Ollama Cloud path above. Disabled unless LOCAL_LLM_ROLES names a role chain, and
 # read per call so the opt-in can be toggled without reimporting the module.
 LOCAL_LLM_BASE_URL_DEFAULT = "http://127.0.0.1:8088"
-LOCAL_LLM_MODEL_DEFAULT = "bonsai-27b"
+LOCAL_LLM_MODEL_DEFAULT = "bonsai-27b:lmstudio-q1"
 # A cold 27B load costs ~11 s and one forecast ~20 s, which does not fit the
 # 20-90 s cloud role timeouts, so local candidates carry their own budget.
 LOCAL_LLM_TIMEOUT_DEFAULT = 120.0

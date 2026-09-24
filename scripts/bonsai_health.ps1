@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File scripts\bonsai_health.ps1 -AsJson
 [CmdletBinding()]
 param(
     [int]$Port = 8088,
-    [string]$Model = 'bonsai-27b',
+    [string]$Model = 'bonsai-27b:lmstudio-q1',
     [string]$ModelsDir = "$env:USERPROFILE\.ollama\models",
     [int]$CheckAppPort = 11434,
     [int]$TimeoutSec = 10,
