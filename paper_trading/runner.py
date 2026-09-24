@@ -738,7 +738,28 @@ class PaperTradingRunner:
         now = time.time()
         self._last_poll = now
         try:
-            # 0. Recovery if not yet recovered
+            # 0a. Self-wire if dependencies are missing (the scheduled
+            # _wire_and_recover job can be missed by APScheduler on startup).
+            if self.recovery_store is None and self.repository is None:
+                try:
+                    from storage.postgres_client import get_pool as _get_pool
+                    pool = await _get_pool()
+                    if pool is not None:
+                        self._wire_dependencies(pg_pool=pool)
+                        try:
+                            from storage.redis_client import get_redis as _get_redis
+                            redis = _get_redis()
+                            if hasattr(redis, '__await__'):
+                                redis = await redis
+                            if redis is not None:
+                                self._wire_dependencies(redis_client=redis)
+                        except Exception:
+                            pass
+                        log.info("Paper trading: self-wired dependencies from run_cycle")
+                except Exception as exc:
+                    log.debug("Paper trading: self-wire failed: %s", exc)
+
+            # 0b. Recovery if not yet recovered
             if not self._recovered and self.recovery_store is not None:
                 await self.recover()
 
