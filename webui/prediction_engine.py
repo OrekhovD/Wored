@@ -898,11 +898,11 @@ async def _local_ollama_chat(
 ) -> str:
     """Call the workstation's own Ollama server via native /api/chat.
 
-    Two differences from the cloud path, both measured on this server:
-    thinking must be disabled with a top-level ``think`` field (in ``options``
-    it is ignored, and ``reasoning_effort`` does nothing for this model - without
-    the field the whole budget goes to reasoning and ``content`` comes back
-    empty), and the output contract has to be restated after the context.
+    Quality mode: ``think=True`` lets the 27B model reason before producing
+    JSON, which gives deeper analysis at the cost of ~15-140s per call
+    (measured 24.09.2026). The forecast queue wraps the whole bundle in
+    asyncio.wait_for(300s), so three thinking calls at ~40s each still fit.
+    Set LOCAL_LLM_THINK=false to revert to the faster non-thinking mode.
     """
     import httpx
 
@@ -915,11 +915,12 @@ async def _local_ollama_chat(
         "content": messages[-1]["content"] + _local_schema_tail(context_payload),
     }
 
+    think_mode = os.getenv("LOCAL_LLM_THINK", "true").lower() in ("1", "true", "yes", "on")
     payload = {
         "model": candidate.model_id,
         "messages": messages,
         "stream": False,
-        "think": False,
+        "think": think_mode,
         "options": {
             "temperature": config.temperature,
             "num_predict": config.max_tokens,

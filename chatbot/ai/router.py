@@ -7,6 +7,7 @@ import os
 import time
 from typing import Optional
 
+import httpx
 from openai import AsyncOpenAI
 
 from ai.resilience import CircuitBreakerError, get_resilience_handler
@@ -55,6 +56,41 @@ def get_client(tier: str) -> Optional[AsyncOpenAI]:
             max_retries=0,
         )
     return _clients[tier]
+
+
+def _is_bonsai_endpoint(endpoint: str) -> bool:
+    """True if this ModelConfig points at the local Bonsai server."""
+    return "127.0.0.1:8088" in endpoint or "host.docker.internal:8088" in endpoint
+
+
+async def _call_bonsai_native(
+    cfg,
+    messages: list[dict],
+    max_tokens: int,
+    temperature: float,
+    think: bool = True,
+) -> str:
+    """Call the local Bonsai server via native /api/chat.
+
+    The OpenAI-compatible /v1/chat/completions endpoint silently ignores
+    ``think``, so quality mode (think=True) only works on the native API.
+    Returns the assistant content string.
+    """
+    base = cfg.endpoint.rstrip("/").removesuffix("/v1").replace("/v1", "")
+    url = f"{base}/api/chat"
+    payload = {
+        "model": cfg.model_id,
+        "messages": messages,
+        "stream": False,
+        "think": think,
+        "options": {"temperature": temperature, "num_predict": max_tokens},
+    }
+    async with httpx.AsyncClient(timeout=cfg.timeout) as hc:
+        resp = await hc.post(url, json=payload, headers={"Content-Type": "application/json"})
+        resp.raise_for_status()
+        data = resp.json()
+    content = (data.get("message", {}).get("content", "") or "").strip()
+    return content
 
 
 def format_badge(tier: str, model_id: str, elapsed: float) -> str:
@@ -162,6 +198,18 @@ async def _call_with_fallback(
             if context:
                 messages.extend(context)
             messages.append({"role": "user", "content": message})
+            # Local Bonsai: use native /api/chat with think=True for quality
+            if _is_bonsai_endpoint(cfg.endpoint):
+                think_mode = os.getenv("LOCAL_LLM_THINK", "true").lower() in ("1", "true", "yes", "on")
+                content = await _call_bonsai_native(
+                    cfg, messages, cfg.max_tokens, 0.7, think=think_mode,
+                )
+                # Wrap in a mock response object for the caller
+                class _MockResp:
+                    class choices:
+                        class message:
+                            content = content
+                return _MockResp()
             request_kwargs = {
                 "model": cfg.model_id,
                 "messages": messages,
@@ -170,9 +218,6 @@ async def _call_with_fallback(
             }
             if cfg.tier == "worker" and "dashscope-intl.aliyuncs.com" in cfg.endpoint:
                 request_kwargs["extra_body"] = {"enable_thinking": False}
-            # Local Bonsai: disable thinking (otherwise content comes back empty)
-            if "127.0.0.1:8088" in cfg.endpoint or "host.docker.internal:8088" in cfg.endpoint:
-                request_kwargs["extra_body"] = {"think": False}
             return await client.chat.completions.create(
                 **request_kwargs,
             )
