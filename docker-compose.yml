@@ -52,33 +52,15 @@ services:
       - LOCAL_LLM_BASE_URL=http://host.docker.internal:8088
     command: python main.py
     restart: unless-stopped
+    # Explicit host-gateway mapping: host.docker.internal resolves out of the
+    # box on Docker Desktop, but not on Linux Docker Engine. Keeps the local
+    # bonsai-27b branch reachable after a move to a Linux host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   chatbot:
     build: ./chatbot
     container_name: htx_trading_bot_chatbot
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
-    env_file:
-      - .env
-    volumes:
-      - ./chatbot:/app
-      - ./paper_trading:/opt/paper_trading:ro
-      - ./trading_math:/opt/trading_math:ro
-      - ./forecast_engine:/opt/forecast_engine:ro
-      - ./config:/config:ro
-    environment:
-      - PYTHONPATH=/app:/opt
-      - TZ=Asia/Bangkok
-      - LOCAL_LLM_BASE_URL=http://host.docker.internal:8088
-    command: python main.py
-    restart: unless-stopped
-
-  chatbot_wored:
-    build: ./chatbot
-    container_name: htx_trading_bot_chatbot_wored
     depends_on:
       postgres:
         condition: service_healthy
@@ -98,6 +80,8 @@ services:
       - LOCAL_LLM_BASE_URL=http://host.docker.internal:8088
     command: python main.py
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   webui:
     build: ./webui
