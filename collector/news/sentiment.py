@@ -100,7 +100,13 @@ NEWS_SENTIMENT_PROMPT = """Ты — AI-аналитик новостного с�
 
 
 async def _call_local_bonsai(prompt: str, user_content: str) -> Optional[dict]:
-    """Call the local Bonsai model for sentiment scoring — free, no API key."""
+    """Call the local Bonsai model for sentiment scoring — free, no API key.
+
+    Uses the native /api/chat endpoint (not /v1/chat/completions) because
+    ``think: false`` is only honoured as a top-level field on the native API.
+    The OpenAI-compatible endpoint silently ignores it, causing the 27B model
+    to spend its entire token budget on reasoning and return empty content.
+    """
     if not LOCAL_LLM_ENABLED:
         return None
     payload = {
@@ -109,21 +115,24 @@ async def _call_local_bonsai(prompt: str, user_content: str) -> Optional[dict]:
             {"role": "system", "content": prompt},
             {"role": "user", "content": user_content},
         ],
-        "temperature": 0.1,
-        "max_tokens": 500,
+        "stream": False,
         "think": False,
+        "options": {
+            "temperature": 0.1,
+            "num_predict": 500,
+        },
     }
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
-                f"{LOCAL_LLM_BASE_URL}/v1/chat/completions",
+                f"{LOCAL_LLM_BASE_URL}/api/chat",
                 headers={"Content-Type": "application/json"},
                 json=payload,
             )
             resp.raise_for_status()
             data = resp.json()
 
-        content = data["choices"][0]["message"]["content"].strip()
+        content = (data.get("message", {}).get("content", "") or "").strip()
         if content.startswith("```"):
             content = content.split("\n", 1)[1] if "\n" in content else content[3:]
         if content.endswith("```"):
