@@ -49,6 +49,7 @@ services:
     environment:
       - PYTHONPATH=/app:/chatbot:/webui:/opt
       - TZ=Asia/Bangkok
+      - LOCAL_LLM_BASE_URL=http://host.docker.internal:8088
     command: python main.py
     restart: unless-stopped
 
@@ -71,6 +72,7 @@ services:
     environment:
       - PYTHONPATH=/app:/opt
       - TZ=Asia/Bangkok
+      - LOCAL_LLM_BASE_URL=http://host.docker.internal:8088
     command: python main.py
     restart: unless-stopped
 
@@ -93,6 +95,7 @@ services:
     environment:
       - PYTHONPATH=/app:/opt
       - TZ=Asia/Bangkok
+      - LOCAL_LLM_BASE_URL=http://host.docker.internal:8088
     command: python main.py
     restart: unless-stopped
 

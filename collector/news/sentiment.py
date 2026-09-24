@@ -22,6 +22,11 @@ OLLAMA_CLOUD_URL = os.getenv("OLLAMA_CLOUD_URL", "https://ollama.com/v1")
 OLLAMA_CLOUD_API_KEY = os.getenv("OLLAMA_CLOUD_API_KEY", "")
 SENTIMENT_MODEL = os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4-flash")
 
+# Local Bonsai model — free, unlimited, no API key needed
+LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8088")
+LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "bonsai-27b:lmstudio-q1")
+LOCAL_LLM_ENABLED = os.getenv("LOCAL_LLM_SENTIMENT", "true").lower() in ("1", "true", "yes", "on")
+
 
 @dataclass
 class SentimentResult:
@@ -92,6 +97,47 @@ NEWS_SENTIMENT_PROMPT = """Ты — AI-аналитик новостного с�
 
 Если новостей нет или они нерелевантны, верни:
 {"score": 0.0, "category": "Neutral", "rationale": "Недостаточно данных для оценки.", "key_factors": []}"""
+
+
+async def _call_local_bonsai(prompt: str, user_content: str) -> Optional[dict]:
+    """Call the local Bonsai model for sentiment scoring — free, no API key."""
+    if not LOCAL_LLM_ENABLED:
+        return None
+    payload = {
+        "model": LOCAL_LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 500,
+        "think": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{LOCAL_LLM_BASE_URL}/v1/chat/completions",
+                headers={"Content-Type": "application/json"},
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        content = data["choices"][0]["message"]["content"].strip()
+        if content.startswith("```"):
+            content = content.split("\n", 1)[1] if "\n" in content else content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+        return json.loads(content)
+
+    except json.JSONDecodeError as exc:
+        log.error("Local Bonsai sentiment returned invalid JSON: %s", exc)
+        return None
+    except Exception as exc:
+        log.warning("Local Bonsai sentiment call failed: %s", exc)
+        return None
 
 
 async def _call_ollama_cloud(prompt: str, user_content: str) -> Optional[dict]:
@@ -177,8 +223,10 @@ async def analyze_sentiment(
     """
     news_text = _build_news_text(news_items, fear_greed)
 
-    # Try AI scoring
-    ai_result = await _call_ollama_cloud(NEWS_SENTIMENT_PROMPT, news_text)
+    # Try local Bonsai first (free, unlimited), then cloud fallback
+    ai_result = await _call_local_bonsai(NEWS_SENTIMENT_PROMPT, news_text)
+    if ai_result is None or "score" not in ai_result:
+        ai_result = await _call_ollama_cloud(NEWS_SENTIMENT_PROMPT, news_text)
 
     if ai_result and "score" in ai_result:
         result = SentimentResult(

@@ -404,12 +404,35 @@ MODELS = {
         max_tokens=4096,
         timeout=60.0,
     ),
+
+    # ─── Local Bonsai (free, unlimited, workstation) ──────────────────
+    "analyst_bonsai": ModelConfig(
+        name="Analyst (Local Bonsai-27B)",
+        model_id=os.getenv("LOCAL_LLM_MODEL", "bonsai-27b:lmstudio-q1"),
+        endpoint=os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8088") + "/v1",
+        api_key_env="LOCAL_LLM_API_KEY",
+        tier="analyst",
+        max_tokens=4000,
+        timeout=120.0,
+    ),
+    "premium_bonsai": ModelConfig(
+        name="Strategist (Local Bonsai-27B)",
+        model_id=os.getenv("LOCAL_LLM_MODEL", "bonsai-27b:lmstudio-q1"),
+        endpoint=os.getenv("LOCAL_LLM_BASE_URL", "http://127.0.0.1:8088") + "/v1",
+        api_key_env="LOCAL_LLM_API_KEY",
+        tier="premium",
+        max_tokens=4000,
+        timeout=120.0,
+    ),
 }
+
+# Dummy key for local server (no auth needed, but ModelConfig requires non-empty)
+_LOCAL_LLM_DUMMY_KEY = "ollama"
 
 
 WORKER_MODEL_CHAIN = ["worker_ollama", "omniroute_execution"]
-ANALYST_MODEL_CHAIN = ["analyst_ollama", "omniroute_reasoning", "analyst_deepseek_or"]
-PREMIUM_MODEL_CHAIN = ["premium_ollama", "omniroute_reasoning", "premium", "premium_qwen35b", "analyst_deepseek_or", "premium_glm", "premium_nemotron_ultra", "premium_nemotron_super", "premium_nemotron_49b", "premium_nemotron_49b_v15", "premium_mistral_large", "premium_dracarys"]
+ANALYST_MODEL_CHAIN = ["analyst_bonsai", "analyst_ollama", "omniroute_reasoning", "analyst_deepseek_or"]
+PREMIUM_MODEL_CHAIN = ["premium_bonsai", "premium_ollama", "omniroute_reasoning", "premium", "premium_qwen35b", "analyst_deepseek_or", "premium_glm", "premium_nemotron_ultra", "premium_nemotron_super", "premium_nemotron_49b", "premium_nemotron_49b_v15", "premium_mistral_large", "premium_dracarys"]
 
 
 FALLBACK_ORDER = ["analyst", "worker", "premium", "minimax"]

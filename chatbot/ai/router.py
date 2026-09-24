@@ -29,6 +29,9 @@ def get_client(tier: str) -> Optional[AsyncOpenAI]:
     if tier not in _clients:
         cfg = MODELS[tier]
         api_key = os.getenv(cfg.api_key_env, "").strip()
+        # Local Bonsai server needs no auth — use a dummy key
+        if not api_key and ("127.0.0.1:8088" in cfg.endpoint or "host.docker.internal:8088" in cfg.endpoint):
+            api_key = "ollama"
         if not api_key:
             _log_client_message_once(
                 f"{tier}:missing_key",
@@ -167,6 +170,9 @@ async def _call_with_fallback(
             }
             if cfg.tier == "worker" and "dashscope-intl.aliyuncs.com" in cfg.endpoint:
                 request_kwargs["extra_body"] = {"enable_thinking": False}
+            # Local Bonsai: disable thinking (otherwise content comes back empty)
+            if "127.0.0.1:8088" in cfg.endpoint or "host.docker.internal:8088" in cfg.endpoint:
+                request_kwargs["extra_body"] = {"think": False}
             return await client.chat.completions.create(
                 **request_kwargs,
             )
@@ -220,6 +226,8 @@ async def _route_trade_plan(message: str, intent: dict, context: list[dict] | No
                 }
                 if "dashscope-intl.aliyuncs.com" in cfg.endpoint:
                     request_kwargs["extra_body"] = {"enable_thinking": False}
+                if "127.0.0.1:8088" in cfg.endpoint or "host.docker.internal:8088" in cfg.endpoint:
+                    request_kwargs["extra_body"] = {"think": False}
                 return await client.chat.completions.create(**request_kwargs)
 
             response = await _normalize()
@@ -361,6 +369,8 @@ async def _route_trade_sim(message: str, intent: dict, context: list[dict] | Non
                     }
                     if "dashscope-intl.aliyuncs.com" in cfg.endpoint:
                         request_kwargs["extra_body"] = {"enable_thinking": False}
+                    if "127.0.0.1:8088" in cfg.endpoint or "host.docker.internal:8088" in cfg.endpoint:
+                        request_kwargs["extra_body"] = {"think": False}
                     return await client.chat.completions.create(**request_kwargs)
 
                 response = await _parse_sim()
@@ -540,6 +550,8 @@ async def _route_trade_sim(message: str, intent: dict, context: list[dict] | Non
                 }
                 if 'dashscope-intl.aliyuncs.com' in cfg.endpoint:
                     request_kwargs['extra_body'] = {'enable_thinking': False}
+                if '127.0.0.1:8088' in cfg.endpoint or 'host.docker.internal:8088' in cfg.endpoint:
+                    request_kwargs['extra_body'] = {'think': False}
                 return await client.chat.completions.create(**request_kwargs)
 
             response = await _parse_sim()
