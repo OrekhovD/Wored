@@ -13,6 +13,10 @@ class ModelConfig:
     tier: str
     max_tokens: int
     timeout: float
+    # "openai_compat" = OpenAI-style /v1/chat/completions provider;
+    # "local_ollama" = workstation Ollama/Bonsai server, needs native /api/chat
+    # because the OpenAI endpoint silently ignores the ``think`` field.
+    provider: str = "openai_compat"
 
 
 MINIMAX_NVIDIA_MODEL = "minimaxai/minimax-m2.7"
@@ -206,8 +210,8 @@ MODELS = {
         timeout=60.0,
     ),
     "worker_ollama": ModelConfig(
-        name="Robotyaga (Ollama Cloud)",
-        model_id=os.getenv("OLLAMA_CHATBOT_WORKER_MODEL", "minimax-m3"),
+        name="Robotyaga (Ollama Pro)",
+        model_id=os.getenv("OLLAMA_CHATBOT_WORKER_MODEL", "deepseek-v4.1-flash:cloud"),
         endpoint=OLLAMA_CLOUD_ENDPOINT,
         api_key_env="OLLAMA_CLOUD_API_KEY",
         tier="worker",
@@ -215,8 +219,8 @@ MODELS = {
         timeout=15.0,
     ),
     "analyst_ollama": ModelConfig(
-        name="Analyst (Ollama Cloud)",
-        model_id=os.getenv("OLLAMA_CHATBOT_ANALYST_MODEL", "gpt-oss:120b"),
+        name="Analyst (Ollama Pro)",
+        model_id=os.getenv("OLLAMA_CHATBOT_ANALYST_MODEL", "glm-5.3:cloud"),
         endpoint=OLLAMA_CLOUD_ENDPOINT,
         api_key_env="OLLAMA_CLOUD_API_KEY",
         tier="analyst",
@@ -224,8 +228,8 @@ MODELS = {
         timeout=90.0,
     ),
     "premium_ollama": ModelConfig(
-        name="Strategist (Ollama Cloud)",
-        model_id=os.getenv("OLLAMA_CHATBOT_PREMIUM_MODEL", "minimax-m3"),
+        name="Strategist (Ollama Pro)",
+        model_id=os.getenv("OLLAMA_CHATBOT_PREMIUM_MODEL", "glm-5.3:cloud"),
         endpoint=OLLAMA_CLOUD_ENDPOINT,
         api_key_env="OLLAMA_CLOUD_API_KEY",
         tier="premium",
@@ -414,6 +418,7 @@ MODELS = {
         tier="analyst",
         max_tokens=4000,
         timeout=120.0,
+        provider="local_ollama",
     ),
     "premium_bonsai": ModelConfig(
         name="Strategist (Local Bonsai-27B)",
@@ -423,6 +428,7 @@ MODELS = {
         tier="premium",
         max_tokens=4000,
         timeout=120.0,
+        provider="local_ollama",
     ),
 }
 

@@ -185,7 +185,7 @@ MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
     "worker": PredictionModelConfig(
         key="worker",
         name="Worker / Ollama Auto",
-        model_id=os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4.1-flash"),
+        model_id=os.getenv("OLLAMA_WORKER_MODEL", "deepseek-v4.1-flash:cloud"),
         base_url=OLLAMA_BASE_URL,
         api_key_env="OLLAMA_API_KEY",
         tier="worker",
@@ -195,7 +195,7 @@ MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
     "analyst": PredictionModelConfig(
         key="analyst",
         name="Analyst / Ollama Reasoning",
-        model_id=os.getenv("OLLAMA_ANALYST_MODEL", "glm-5.1"),
+        model_id=os.getenv("OLLAMA_ANALYST_MODEL", "glm-5.3:cloud"),
         base_url=OLLAMA_BASE_URL,
         api_key_env="OLLAMA_API_KEY",
         tier="analyst",
@@ -205,7 +205,7 @@ MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
     "premium": PredictionModelConfig(
         key="premium",
         name="Strategist / Ollama Reasoning",
-        model_id=os.getenv("OLLAMA_PREMIUM_MODEL", "glm-5.2"),
+        model_id=os.getenv("OLLAMA_PREMIUM_MODEL", "glm-5.3:cloud"),
         base_url=OLLAMA_BASE_URL,
         api_key_env="OLLAMA_API_KEY",
         tier="premium",
@@ -215,7 +215,7 @@ MODEL_CONFIGS: dict[str, PredictionModelConfig] = {
     "minimax": PredictionModelConfig(
         key="minimax",
         name="Oracle / Ollama Thinking",
-        model_id=os.getenv("OLLAMA_ORACLE_MODEL", "minimax-m3"),
+        model_id=os.getenv("OLLAMA_ORACLE_MODEL", "glm-5.3-flash:cloud"),
         base_url=OLLAMA_BASE_URL,
         api_key_env="OLLAMA_API_KEY",
         tier="minimax",
@@ -656,9 +656,9 @@ def _cloud_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
         return candidates
 
     if config.key == "analyst":
-        # Ollama primary — glm-5.3, fallback deepseek-v4-pro:0813
-        ollama_primary = os.getenv("OLLAMA_ANALYST_MODEL", "glm-5.3").strip()
-        ollama_fallback = os.getenv("OLLAMA_ANALYST_FALLBACK_MODEL", "deepseek-v4-pro:0813").strip()
+        # Ollama primary — glm-5.3:cloud, fallback gemma4:31b:cloud (Pro models only)
+        ollama_primary = os.getenv("OLLAMA_ANALYST_MODEL", "glm-5.3:cloud").strip()
+        ollama_fallback = os.getenv("OLLAMA_ANALYST_FALLBACK_MODEL", "gemma4:31b:cloud").strip()
         candidates = []
         for model_id in [ollama_primary, ollama_fallback]:
             if model_id:
@@ -701,9 +701,9 @@ def _cloud_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
             candidates.append(nvidia)
         return candidates
 
-    # Oracle — Ollama only: minimax-m3 → glm-5.3-flash (structured content models)
-    ollama_primary = os.getenv("OLLAMA_ORACLE_MODEL", "minimax-m3").strip()
-    ollama_fallback = os.getenv("OLLAMA_ORACLE_FALLBACK_MODEL", "glm-5.3-flash").strip()
+    # Oracle — Ollama Pro: glm-5.3-flash:cloud → deepseek-v4.1-flash:cloud
+    ollama_primary = os.getenv("OLLAMA_ORACLE_MODEL", "glm-5.3-flash:cloud").strip()
+    ollama_fallback = os.getenv("OLLAMA_ORACLE_FALLBACK_MODEL", "deepseek-v4.1-flash:cloud").strip()
     candidates = []
     for model_id in [ollama_primary, ollama_fallback]:
         if model_id:
