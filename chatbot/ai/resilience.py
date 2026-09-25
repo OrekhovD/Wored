@@ -295,30 +295,23 @@ _resilience_handlers: dict[str, ResilienceOrchestrator] = {}
 
 # Конфигурация per-tier (соответствует models.py)
 _TIER_CONFIGS = {
+    # Active model policy: Ollama Cloud Pro (primary) + local Bonsai-27B
+    # (failover). Bare tier names stay as generic defaults for the fallback
+    # expander. Free-model entries (qwen/glm/gemini/deepseek/omniroute/nim/
+    # nemotron/minimax) were retired with the free-model routing subsystem.
     "worker":  {"timeout": 15.0,  "retries": 1, "cb_threshold": 8},
-    "worker_qwen35": {"timeout": 15.0, "retries": 1, "cb_threshold": 8},
-    "worker_qwen_legacy": {"timeout": 15.0, "retries": 1, "cb_threshold": 8},
-    "worker_glm": {"timeout": 15.0, "retries": 1, "cb_threshold": 8},
-    "worker_gemini": {"timeout": 15.0, "retries": 1, "cb_threshold": 8},
-    "worker_deepseek": {"timeout": 15.0, "retries": 1, "cb_threshold": 8},
-    "worker_deepseek_or": {"timeout": 15.0, "retries": 1, "cb_threshold": 8},
-    "omniroute_execution": {"timeout": 15.0, "retries": 1, "cb_threshold": 8},
     "analyst": {"timeout": 65.0,  "retries": 2, "cb_threshold": 5},
-    "analyst_qwen27b": {"timeout": 65.0, "retries": 2, "cb_threshold": 5},
-    "analyst_qwen_extra": {"timeout": 65.0, "retries": 2, "cb_threshold": 5},
-    "analyst_glm": {"timeout": 65.0, "retries": 2, "cb_threshold": 5},
-    "analyst_deepseek": {"timeout": 65.0, "retries": 2, "cb_threshold": 5},
-    "analyst_deepseek_or": {"timeout": 65.0, "retries": 2, "cb_threshold": 5},
     "premium": {"timeout": 95.0,  "retries": 2, "cb_threshold": 5},
-    "premium_qwen35b": {"timeout": 95.0, "retries": 2, "cb_threshold": 5},
-    "premium_glm": {"timeout": 95.0, "retries": 2, "cb_threshold": 5},
-    "omniroute_reasoning": {"timeout": 95.0, "retries": 2, "cb_threshold": 5},
-    # Ollama Cloud tier configs (primary provider)
+    # Ollama Cloud (primary provider)
     "worker_ollama": {"timeout": 15.0, "retries": 1, "cb_threshold": 8},
     "analyst_ollama": {"timeout": 65.0, "retries": 2, "cb_threshold": 5},
     "premium_ollama": {"timeout": 95.0, "retries": 2, "cb_threshold": 5},
-    # Second-opinion routing should fail fast and move on when MiniMax/NIM is slow or unavailable.
-    "minimax": {"timeout": 12.0,  "retries": 0, "cb_threshold": 2},
+    # Local Bonsai-27B: thinking calls run long, so the handler timeout stays
+    # above models.py timeout (180s) — otherwise reasoning gets truncated mid
+    # response and the failover tier (last in chain) reports "no candidates".
+    "worker_bonsai": {"timeout": 200.0, "retries": 0, "cb_threshold": 5},
+    "analyst_bonsai": {"timeout": 200.0, "retries": 0, "cb_threshold": 5},
+    "premium_bonsai": {"timeout": 200.0, "retries": 0, "cb_threshold": 5},
 }
 
 def get_resilience_handler(provider_id: str) -> ResilienceOrchestrator:

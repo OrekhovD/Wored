@@ -91,8 +91,6 @@ async def classify(message: str) -> dict:
                 "max_tokens": 150,
                 "temperature": 0.1,
             }
-            if "dashscope-intl.aliyuncs.com" in cfg.endpoint:
-                request_kwargs["extra_body"] = {"enable_thinking": False}
             response = await asyncio.wait_for(
                 client.chat.completions.create(**request_kwargs),
                 timeout=cfg.timeout,

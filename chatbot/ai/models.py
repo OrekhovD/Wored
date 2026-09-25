@@ -105,19 +105,18 @@ WORKER_MODEL_CHAIN = ["worker_ollama", "worker_bonsai"]
 ANALYST_MODEL_CHAIN = ["analyst_ollama", "analyst_bonsai"]
 PREMIUM_MODEL_CHAIN = ["premium_ollama", "premium_bonsai"]
 
-MINIMAX_MODEL_CHAIN = ["premium_ollama", "premium_bonsai"]
-
 # Local Bonsai server needs no auth, but AsyncOpenAI requires a non-empty key.
 _LOCAL_LLM_DUMMY_KEY = "ollama"
 
-FALLBACK_ORDER = ["analyst", "worker", "premium", "minimax"]
+FALLBACK_ORDER = ["analyst", "worker", "premium"]
 
 
 def expand_fallback_tiers(preferred: str) -> list[str]:
     """Expand a tier preference into an ordered candidate key list.
 
-    ``minimax`` (oracle) now routes through the premium chain — the old
-    NVIDIA NIM oracle models are gone with the Pro-only policy.
+    Only Ollama Pro cloud and the local Bonsai failover exist under the
+    Pro-only policy; the legacy ``minimax`` NVIDIA NIM oracle tier was retired
+    together with the free-model routing subsystem.
     """
     order: list[str] = []
 
@@ -128,8 +127,6 @@ def expand_fallback_tiers(preferred: str) -> list[str]:
             candidates = ANALYST_MODEL_CHAIN
         elif tier == "premium":
             candidates = PREMIUM_MODEL_CHAIN
-        elif tier == "minimax":
-            candidates = MINIMAX_MODEL_CHAIN
         else:
             candidates = [tier]
         for candidate in candidates:

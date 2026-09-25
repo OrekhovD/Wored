@@ -91,7 +91,9 @@ async def cb_second_opinion(call: CallbackQuery):
     try:
         from ai.router import _call_with_fallback
 
-        reply = await _call_with_fallback("minimax", "minimax_reviewer", prompt, None)
+        # Second opinion (Oracle peer-review) runs on the premium Ollama/Bonsai
+        # chain; the dedicated free-model "minimax" NVIDIA NIM tier was retired.
+        reply = await _call_with_fallback("premium", "oracle_reviewer", prompt, None)
         try:
             await wait_message.edit_text(
                 sanitize_html(reply),

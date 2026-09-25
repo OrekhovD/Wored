@@ -5,6 +5,7 @@ import logging
 import re
 import os
 import time
+from types import SimpleNamespace
 from typing import Optional
 
 import httpx
@@ -30,21 +31,17 @@ def get_client(tier: str) -> Optional[AsyncOpenAI]:
     if tier not in _clients:
         cfg = MODELS[tier]
         api_key = os.getenv(cfg.api_key_env, "").strip()
-        # Local Bonsai server needs no auth — use a dummy key
-        if not api_key and ("127.0.0.1:8088" in cfg.endpoint or "host.docker.internal:8088" in cfg.endpoint):
-            api_key = "ollama"
+        # Local Ollama/Bonsai server needs no auth — use a dummy key.
+        # Detected via the explicit provider flag so the branch keeps working
+        # for localhost/LAN-IP variants of LOCAL_LLM_BASE_URL.
+        if not api_key and cfg.provider == "local_ollama":
+            from ai.models import _LOCAL_LLM_DUMMY_KEY
+
+            api_key = _LOCAL_LLM_DUMMY_KEY
         if not api_key:
             _log_client_message_once(
                 f"{tier}:missing_key",
                 f"AI tier '{tier}' skipped: env var {cfg.api_key_env} is not set.",
-            )
-            _clients[tier] = None
-            return None
-
-        if tier == "minimax" and not api_key.startswith("nvapi-"):
-            _log_client_message_once(
-                "minimax:unsupported_key",
-                "AI tier 'minimax' skipped: current router supports MiniMax only via NVIDIA NIM nvapi- keys.",
             )
             _clients[tier] = None
             return None
@@ -58,9 +55,9 @@ def get_client(tier: str) -> Optional[AsyncOpenAI]:
     return _clients[tier]
 
 
-def _is_bonsai_endpoint(endpoint: str) -> bool:
-    """True if this ModelConfig points at the local Bonsai server."""
-    return "127.0.0.1:8088" in endpoint or "host.docker.internal:8088" in endpoint
+def _is_bonsai_endpoint(cfg) -> bool:
+    """True if this ModelConfig points at the local Ollama/Bonsai server."""
+    return cfg.provider == "local_ollama"
 
 
 async def _call_bonsai_native(
@@ -89,7 +86,14 @@ async def _call_bonsai_native(
         resp = await hc.post(url, json=payload, headers={"Content-Type": "application/json"})
         resp.raise_for_status()
         data = resp.json()
+    # Same completeness contract as prediction_engine._local_ollama_chat:
+    # a truncated or empty generation must surface as an error so the
+    # fallback chain can move on to the next tier instead of returning junk.
+    if data.get("done") is not True or data.get("done_reason") not in (None, "stop", "length"):
+        raise ValueError("Local model response is incomplete")
     content = (data.get("message", {}).get("content", "") or "").strip()
+    if not content:
+        raise ValueError("Local model returned no final content")
     return content
 
 
@@ -98,7 +102,6 @@ def format_badge(tier: str, model_id: str, elapsed: float) -> str:
         "worker": "🤖 Р",
         "analyst": "🧠 А",
         "premium": "🎯 С",
-        "minimax": "⚖️ О",
     }
     badge = badges.get(tier, "❓")
     return f"<b>{badge}</b> | <code>{model_id} · {elapsed:.1f}s</code>\n\n"
@@ -199,25 +202,23 @@ async def _call_with_fallback(
                 messages.extend(context)
             messages.append({"role": "user", "content": message})
             # Local Bonsai: use native /api/chat with think=True for quality
-            if _is_bonsai_endpoint(cfg.endpoint):
+            if _is_bonsai_endpoint(cfg):
                 think_mode = os.getenv("LOCAL_LLM_THINK", "true").lower() in ("1", "true", "yes", "on")
                 content = await _call_bonsai_native(
                     cfg, messages, cfg.max_tokens, 0.7, think=think_mode,
                 )
-                # Wrap in a mock response object for the caller
-                class _MockResp:
-                    class choices:
-                        class message:
-                            content = content
-                return _MockResp()
+                # Shape the native answer like an OpenAI chat.completions
+                # response: choices must be a list so the caller can read
+                # response.choices[0].message.content below.
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+                )
             request_kwargs = {
                 "model": cfg.model_id,
                 "messages": messages,
                 "max_tokens": cfg.max_tokens,
                 "temperature": 0.7,
             }
-            if cfg.tier == "worker" and "dashscope-intl.aliyuncs.com" in cfg.endpoint:
-                request_kwargs["extra_body"] = {"enable_thinking": False}
             return await client.chat.completions.create(
                 **request_kwargs,
             )
@@ -269,10 +270,6 @@ async def _route_trade_plan(message: str, intent: dict, context: list[dict] | No
                     "max_tokens": 200,
                     "temperature": 0.1,
                 }
-                if "dashscope-intl.aliyuncs.com" in cfg.endpoint:
-                    request_kwargs["extra_body"] = {"enable_thinking": False}
-                if "127.0.0.1:8088" in cfg.endpoint or "host.docker.internal:8088" in cfg.endpoint:
-                    request_kwargs["extra_body"] = {"think": False}
                 return await client.chat.completions.create(**request_kwargs)
 
             response = await _normalize()
@@ -412,10 +409,6 @@ async def _route_trade_sim(message: str, intent: dict, context: list[dict] | Non
                         "max_tokens": 250,
                         "temperature": 0.1,
                     }
-                    if "dashscope-intl.aliyuncs.com" in cfg.endpoint:
-                        request_kwargs["extra_body"] = {"enable_thinking": False}
-                    if "127.0.0.1:8088" in cfg.endpoint or "host.docker.internal:8088" in cfg.endpoint:
-                        request_kwargs["extra_body"] = {"think": False}
                     return await client.chat.completions.create(**request_kwargs)
 
                 response = await _parse_sim()
@@ -593,10 +586,6 @@ async def _route_trade_sim(message: str, intent: dict, context: list[dict] | Non
                     'max_tokens': 250,
                     'temperature': 0.1,
                 }
-                if 'dashscope-intl.aliyuncs.com' in cfg.endpoint:
-                    request_kwargs['extra_body'] = {'enable_thinking': False}
-                if '127.0.0.1:8088' in cfg.endpoint or 'host.docker.internal:8088' in cfg.endpoint:
-                    request_kwargs['extra_body'] = {'think': False}
                 return await client.chat.completions.create(**request_kwargs)
 
             response = await _parse_sim()

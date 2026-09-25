@@ -60,14 +60,17 @@ async def test_fallback_on_first_model_failure():
         except StopIteration: # Handle mock side_effect depletion if any
             pass
 
-def test_minimax_routes_through_premium_chain():
-    from ai.models import MODELS, expand_fallback_tiers
+def test_second_opinion_uses_premium_chain():
+    from ai.models import MODELS, PREMIUM_MODEL_CHAIN, expand_fallback_tiers
 
-    # Pro-only policy: the NVIDIA oracle model is gone; the minimax tier
-    # routes through the premium cloud/bonsai chain.
+    # The legacy free-model "minimax" NVIDIA NIM oracle tier was retired with the
+    # free-model routing subsystem. The second opinion now runs on the premium
+    # cloud/bonsai chain directly (see handlers/callbacks -> "premium").
     assert "minimax" not in MODELS
-    order = expand_fallback_tiers("minimax")
-    assert order[:2] == ["premium_ollama", "premium_bonsai"]
+    order = expand_fallback_tiers("premium")
+    assert order[: len(PREMIUM_MODEL_CHAIN)] == ["premium_ollama", "premium_bonsai"]
+    # A retired/unknown tier name degrades to the generic fallback order.
+    assert expand_fallback_tiers("minimax")[:2] == ["analyst_ollama", "analyst_bonsai"]
 
 
 def test_worker_chain_cloud_first_then_bonsai():
