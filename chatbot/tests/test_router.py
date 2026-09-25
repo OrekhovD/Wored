@@ -60,40 +60,41 @@ async def test_fallback_on_first_model_failure():
         except StopIteration: # Handle mock side_effect depletion if any
             pass
 
-def test_get_client_skips_unsupported_minimax_key():
-    import ai.router as router
+def test_minimax_routes_through_premium_chain():
+    from ai.models import MODELS, expand_fallback_tiers
 
-    with patch.dict(os.environ, {"NVIDIA_API_KEY": "mmx-direct-key"}, clear=False):
-        router._clients.clear()
-        client = router.get_client("minimax")
-        assert client is None
-
-def test_minimax_uses_current_nvidia_model_id():
-    from ai.models import MODELS
-
-    assert MODELS["minimax"].model_id == "minimaxai/minimax-m2.7"
+    # Pro-only policy: the NVIDIA oracle model is gone; the minimax tier
+    # routes through the premium cloud/bonsai chain.
+    assert "minimax" not in MODELS
+    order = expand_fallback_tiers("minimax")
+    assert order[:2] == ["premium_ollama", "premium_bonsai"]
 
 
-def test_worker_fallback_chain_prefers_ollama_then_qwen_then_glm():
+def test_worker_chain_cloud_first_then_bonsai():
     from ai.models import expand_fallback_tiers
 
     order = expand_fallback_tiers("worker")
-    # After stabilization patch, the fallback chain includes analyst tier entries
-    assert order[:3] == ["worker_ollama", "omniroute_execution", "analyst_ollama"]
-    assert "analyst_glm" in order
+    # Pro-only policy (22425c3): cloud first, local Bonsai failover
+    assert order[:2] == ["worker_ollama", "worker_bonsai"]
+    assert "analyst_ollama" in order
+    # Removed with the non-Pro cleanup
+    assert "omniroute_execution" not in order
 
 
-def test_analyst_fallback_chain_prefers_ollama_then_reasoning_qwen_then_glm():
-    from ai.models import expand_fallback_tiers
+def test_analyst_chain_cloud_first_then_bonsai():
+    from ai.models import ANALYST_MODEL_CHAIN, expand_fallback_tiers
 
     order = expand_fallback_tiers("analyst")
 
-    assert order[:7] == ["analyst_ollama", "omniroute_reasoning", "analyst", "analyst_qwen27b", "analyst_deepseek", "analyst_deepseek_or", "analyst_glm"]
+    assert order[: len(ANALYST_MODEL_CHAIN)] == ANALYST_MODEL_CHAIN == ["analyst_ollama", "analyst_bonsai"]
+    assert "worker_ollama" in order  # worker fallback appended after analyst chain
 
 
-def test_premium_fallback_chain_prefers_ollama_then_reasoning_qwen_then_glm():
-    from ai.models import expand_fallback_tiers
+def test_premium_chain_cloud_first_then_bonsai():
+    from ai.models import PREMIUM_MODEL_CHAIN, expand_fallback_tiers
 
     order = expand_fallback_tiers("premium")
 
-    assert order[:6] == ["premium_ollama", "omniroute_reasoning", "premium", "premium_qwen35b", "analyst_deepseek_or", "premium_glm"]
+    assert order[: len(PREMIUM_MODEL_CHAIN)] == PREMIUM_MODEL_CHAIN == ["premium_ollama", "premium_bonsai"]
+    # Removed with the non-Pro cleanup
+    assert "omniroute_reasoning" not in PREMIUM_MODEL_CHAIN
