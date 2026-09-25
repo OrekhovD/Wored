@@ -27,20 +27,50 @@ Each key has: type, default, required/optional, service consumers, and secrecy l
 | `WEBUI_COOKIE_SECURE` | bool | `true` (HTTPS) | required | webui | no |
 | `WEBUI_PORT` | int | `8080` | optional | compose | no |
 
-## LLM Provider Gateway
+## LLM Provider Gateway — ARCHIVED (frozen free-model routing)
+
+> **No-op on the current runtime.** These keys belonged to the free-model gateway
+> subsystem (`provider_gateway` / `provider_adapters` / `usage_ledger` /
+> `budget_policy`), which is archived under `free_routing_archive/` and is not
+> collected or imported by the WORED runtime. They are documented here only for
+> the revival procedure; do **not** treat them as active configuration.
+
+| Key | Type | Default | Status | Consumers | Secret |
+|-----|------|---------|--------|-----------|--------|
+| `LLM_ROUTING_MODE` | enum | `balanced` | **archived / no-op** | archived gateway | no |
+| `LLM_PAID_ENABLED` | bool | `false` | **archived / no-op** | archived gateway | no |
+| `LLM_REGISTRY_PATH` | string | `/config/provider_registry.json` | **archived / no-op** | archived gateway | no |
+| `NVIDIA_NIM_ENABLED` | bool | `false` | **archived / no-op** | webui prediction_engine | no |
+
+## Active Inference (chatbot `ai/models.py` + webui `prediction_engine.py`)
+
+The active stack is Ollama Cloud Pro (`:cloud`) as primary and the workstation-local
+Bonsai server as failover. The chatbot and the WebUI resolve **different chain
+orders and use different env names for the same cloud endpoint**: the chatbot uses
+`OLLAMA_CLOUD_BASE_URL` / `OLLAMA_CLOUD_API_KEY` and tier chains
+(worker/analyst/premium, cloud→local) via `OLLAMA_CHATBOT_*_MODEL`, while the WebUI
+forecast engine uses `OLLAMA_BASE_URL` / `OLLAMA_API_KEY` and its own per-role
+candidate order (`OLLAMA_WORKER_MODEL` / `OLLAMA_ANALYST_MODEL` /
+`OLLAMA_PREMIUM_MODEL` / `OLLAMA_ORACLE_MODEL` + `*_FALLBACK_MODEL`). See
+`chatbot/ai/models.py` versus `webui/prediction_engine.py`.
 
 | Key | Type | Default | Required | Consumers | Secret |
 |-----|------|---------|----------|-----------|--------|
-| `LLM_ROUTING_MODE` | enum | `balanced` | required | runtime gateway | no |
-| `LLM_PAID_ENABLED` | bool | `false` | required | runtime gateway | no |
-| `LLM_REGISTRY_PATH` | string | `/config/provider_registry.json` | required | runtime gateway | no |
-| `OLLAMA_BASE_URL` | string | — | required | provider_adapters | **yes** |
-| `OLLAMA_API_KEY` | string | — | required | provider_adapters | **yes** |
+| `OLLAMA_CLOUD_API_KEY` | string | — | required | chatbot (services, admin, sentiment) | **yes** |
+| `OLLAMA_CLOUD_BASE_URL` | string | `https://ollama.com/v1` | optional | chatbot | no |
+| `OLLAMA_API_KEY` | string | — | required | webui prediction_engine | **yes** |
+| `OLLAMA_BASE_URL` | string | `https://ollama.com/v1` | optional | webui prediction_engine | no |
+| `OLLAMA_CHATBOT_WORKER_MODEL` | string | `deepseek-v4.1-flash:cloud` | optional | chatbot | no |
+| `OLLAMA_CHATBOT_ANALYST_MODEL` | string | `glm-5.3:cloud` | optional | chatbot | no |
+| `OLLAMA_CHATBOT_PREMIUM_MODEL` | string | `glm-5.3:cloud` | optional | chatbot | no |
+| `OLLAMA_WORKER_MODEL` | string | `deepseek-v4.1-flash:cloud` | optional | webui prediction_engine | no |
+| `OLLAMA_ANALYST_MODEL` | string | `glm-5.3:cloud` | optional | webui prediction_engine | no |
+| `OLLAMA_PREMIUM_MODEL` | string | `glm-5.3:cloud` | optional | webui prediction_engine | no |
+| `OLLAMA_ORACLE_MODEL` | string | `glm-5.3-flash:cloud` | optional | webui prediction_engine | no |
 | `LOCAL_LLM_ROLES` | string (comma-separated model keys, or `all`) | empty (disabled) | optional | webui prediction_engine | no |
-| `LOCAL_LLM_MODEL` | string | `bonsai-27b` | optional | webui prediction_engine | no |
-| `LOCAL_LLM_BASE_URL` | string (URL origin) | `http://127.0.0.1:8088` | optional | webui prediction_engine | no |
+| `LOCAL_LLM_MODEL` | string | `bonsai-27b` | optional | chatbot, webui prediction_engine | no |
+| `LOCAL_LLM_BASE_URL` | string (URL origin) | `http://127.0.0.1:8088` | optional | chatbot, webui prediction_engine | no |
 | `LOCAL_LLM_TIMEOUT` | float (seconds) | `120` | optional | webui prediction_engine | no |
-| `NVIDIA_NIM_ENABLED` | bool | `false` | **archived / no-op** | webui prediction_engine | no |
 
 `NVIDIA_NIM_ENABLED` used to gate the NVIDIA NIM tail of every prediction chain.
 That free-model tier was retired with the routing subsystem archived to
@@ -89,10 +119,14 @@ using account credentials or order endpoints.
 - `test-password` / `test-token` / `disposable-qa-only` values are **never** used in production
 - Environment changes require `docker compose up -d --force-recreate` (restart does not re-read env)
 
-## Model Registry
+## Model Registry — ARCHIVED
 
-The model registry is mounted from `./config:/config:ro` in all four runtime services.
-For host tests, pass the full path: `LLM_REGISTRY_PATH=D:/WORED_STAGING_20260908/config/provider_registry.json`
+> The `provider_registry.json` mount (`./config:/config:ro`) and
+> `LLM_REGISTRY_PATH` belong to the frozen free-model gateway. The active runtime
+> does not read them; model selection lives in `chatbot/ai/models.py` and
+> `webui/prediction_engine.py`. Kept only for the `free_routing_archive/` revival
+> procedure. For a host revival run, pass the archived path:
+> `LLM_REGISTRY_PATH=D:/WORED/free_routing_archive/config/provider_registry.json`
 
 Registry entries include: `registry_version`, `verified_at`, `provider`, `model_id`, `endpoint_type`, `enabled`, `cost_class`, `capabilities`, `context_tokens`, `max_output_tokens`, `pricing`, `validation_gate_id`.
 

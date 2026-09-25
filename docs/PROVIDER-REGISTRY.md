@@ -32,7 +32,11 @@
 }
 ```
 
-## Active Models
+## Archived Models (historical — not the active runtime registry)
+
+> The table below describes the frozen free-model gateway registry. Active
+> inference is defined in `chatbot/ai/models.py` (Ollama Cloud Pro `:cloud` +
+> local Bonsai) and `webui/prediction_engine.py`, not here.
 
 | Provider | Model | Endpoint | Cost Class | Thinking | JSON Schema |
 |---------|-------|----------|------------|----------|-------------|

@@ -19,26 +19,36 @@ WORED — это local-first Telegram-бот для мониторинга кр�
 
 ## Актуальный AI-стек WORED
 
-Primary-провайдер — **Ollama Cloud** (OpenAI-совместимый endpoint `https://ollama.com/v1`):
+Решение владельца от 2026-09-25: активны **только** модели подписки Ollama PRO
+(cloud-first) и локальная модель Bonsai как failover. Реестр и цепочки заданы в
+`chatbot/ai/models.py`; цепочки идут cloud→local (быстро и качественно — затем
+бесплатный локальный отказоустойчивый fallback).
 
-| Роль | Модель по умолчанию |
+Primary — **Ollama Cloud** (OpenAI-совместимый endpoint `https://ollama.com/v1`,
+ключ `OLLAMA_CLOUD_API_KEY`):
+
+| Роль | Модель по умолчанию (chain: cloud → local failover) |
 |---|---|
-| Premium / сложные задачи | `glm-5.2` |
-| Analyst / reasoning | `deepseek-v4-pro` |
-| Worker / быстрые задачи | `deepseek-v4-flash` |
-| Reviewer / second opinion | `minimax-m3` |
-| Oracle / fallback | `kimi-k2.6`, `kimi-k2:1t` |
+| Premium / strategist | `glm-5.3:cloud` → `bonsai-27b:lmstudio-q1` |
+| Analyst / reasoning | `glm-5.3:cloud` → `bonsai-27b:lmstudio-q1` |
+| Worker / быстрые задачи | `deepseek-v4.1-flash:cloud` → `bonsai-27b:lmstudio-q1` |
 
-Дешёвый utility-tier: **TokenRouter** (`moonshotai/kimi-k3-free`).
+Local failover — **Bonsai-27B** на рабочей станции (`provider="local_ollama"`,
+endpoint `LOCAL_LLM_BASE_URL` по умолчанию `http://127.0.0.1:8088/v1`, без авторизации).
 
-Fallback-tier: **NVIDIA NIM** (`mistralai/mistral-nemotron`, `minimaxai/minimax-m3`) и **OpenRouter**.
+**Законсервировано (NOT активный runtime):** вся бесплатная gateway-подсистема
+роутинга — OmniRoute, NVIDIA NIM / Nemotron, TokenRouter (`kimi-k3-free`),
+DashScope/Qwen, minimax-oracle, вместе со шлюзовым стеком
+(`provider_gateway`, `provider_adapters`, `usage_ledger`, `budget_policy`,
+`reflector`/`strategy_learner`) и реестром `provider_registry.json` — перенесена в
+top-level `free_routing_archive/` и не собирается pytest'ом (`norecursedirs`).
+Она упоминается здесь только как архив, а не как рабочий fallback-tier.
 
-**Qwen/DashScope исключены** из активного стека.
-
-Переменные окружения для управления моделями:
-- `OLLAMA_WORKER_MODEL=deepseek-v4-flash`
-- `OLLAMA_ANALYST_MODEL=deepseek-v4-pro`
-- `OLLAMA_PREMIUM_MODEL=glm-5.2`
+Переменные окружения для управления моделями (реальные имена из `models.py`):
+- `OLLAMA_CHATBOT_WORKER_MODEL=deepseek-v4.1-flash:cloud`
+- `OLLAMA_CHATBOT_ANALYST_MODEL=glm-5.3:cloud`
+- `OLLAMA_CHATBOT_PREMIUM_MODEL=glm-5.3:cloud`
+- `LOCAL_LLM_MODEL=bonsai-27b:lmstudio-q1`
 
 ## Архитектура runtime
 
@@ -48,7 +58,7 @@ Fallback-tier: **NVIDIA NIM** (`mistralai/mistral-nemotron`, `minimaxai/minimax-
 chatbot (aiogram 3)
     -> Redis: кэш тикеров, market_alerts pub/sub
     -> Postgres: история alerts, история ai_journal
-    -> AI providers: Ollama Cloud primary, NVIDIA/OpenRouter fallback, Kimi utility
+    -> AI providers: Ollama Cloud (primary) → local Bonsai (failover)
 
 Браузер
     ->

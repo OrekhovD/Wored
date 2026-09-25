@@ -9,7 +9,16 @@
 
 ## Data Limits
 
-5. **Forecast queue TTL** — 20 minutes from creation; expired jobs are not re-processed automatically.
+5. **Forecast queue TTL — code/DB drift.** `webui/forecast_queue.py` declares
+   `deadline_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 minutes'`, but the
+   statement is `CREATE TABLE IF NOT EXISTS`, so it never alters an already-created
+   table. In the **working and QA databases the live column default is still
+   `INTERVAL '20 minutes'`**, and `enqueue` does not pass `deadline_at` explicitly —
+   so the effective TTL in production is **20 minutes**, not the 30 minutes the code
+   now reads. A separate additive migration
+   (`ALTER TABLE forecast_jobs ALTER COLUMN deadline_at SET DEFAULT NOW() + INTERVAL
+   '30 minutes'`) or an explicit `deadline_at` in `enqueue` is required before the
+   code default becomes the real one. Tracked as a pending decision, not fixed here.
 6. **Heartbeat timeout** — evaluate_forecasts 5min/12min, execution_watch 10sec/30sec, market_context 30sec/90sec.
 7. **Simulation versioning** — existing positions keep their calculation version (1 or 2); new positions use v3 (Decimal, ROUND_HALF_UP). No automatic migration of v1/v2 positions.
 
@@ -26,6 +35,13 @@
 13. **Cookie: 12 hours, HttpOnly, SameSite=Lax, Secure=true when HTTPS** — no refresh token mechanism.
 14. **Telegram initData HMAC** — 300-second window; future timestamps rejected.
 15. **CSRF on POST** — requires exact Origin from current origin or `WEBUI_PUBLIC_BASE_URL`.
+15b. **Local HTTP entry boundary** — with `WEBUI_COOKIE_SECURE=true` (production
+    default for HTTPS), the session cookie is `Secure`, so a plain-HTTP route over
+    `127.0.0.1` cannot hold a session and POSTs fail the CSRF/Origin check (observed
+    `403`). A local HTTP 200 on `GET /` does **not** prove authenticated flows work;
+    real login/POST acceptance requires the chosen HTTPS route (or an explicitly
+    `WEBUI_COOKIE_SECURE=false` local dev posture). Do not disable external protection
+    just to make a test green.
 
 ## Compatibility Limits
 

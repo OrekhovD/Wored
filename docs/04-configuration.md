@@ -19,13 +19,19 @@
 | --- | --- | --- | --- |
 | `TELEGRAM_TOKEN` | `1234567890:token` | `chatbot` | нужен для запуска polling-бота |
 | `TELEGRAM_ADMIN_ID` | `123456789` | `chatbot` | получает push-алерты и admin-функции |
-| `DASHSCOPE_API_KEY` | `sk-...` | `chatbot`, `webui` | включает Qwen worker chain, analyst chain и strategist chain |
-| `GLM_API_KEY` | `replace_me` | `chatbot`, `webui` | резервный fallback для analyst/strategist chain и части worker-path |
+| `OLLAMA_CLOUD_API_KEY` | `...` | `chatbot` | ключ Ollama Cloud Pro для chatbot-цепочек (`ai/models.py`) |
+| `OLLAMA_API_KEY` | `...` | `webui` | ключ Ollama Cloud Pro для forecast-движка (`prediction_engine.py`) |
 | `POSTGRES_USER` | `bot` | `postgres`, compose | пользователь БД при bootstrap |
 | `POSTGRES_PASSWORD` | `change_me` | `postgres`, compose | пароль БД |
 | `POSTGRES_DB` | `trading` | `postgres`, compose | имя основной БД |
 | `DATABASE_URL` | `postgresql+asyncpg://bot:...@postgres:5432/trading` | `chatbot`, `collector`, `webui` | строка подключения к Postgres |
 | `REDIS_URL` | `redis://redis:6379/0` | `chatbot`, `collector`, `webui` | строка подключения к Redis |
+
+> **Архив бесплатного роутинга.** `DASHSCOPE_API_KEY`, `GLM_API_KEY`,
+> `GOOGLE_API_KEY`, `MINIMAX_API_KEY` и все `*_QWEN_*` / `GLM_FALLBACK` цепочки
+> относились к замороженной gateway-подсистеме (`free_routing_archive/`). Они
+> **не читаются** активным runtime (`chatbot/ai/models.py`,
+> `webui/prediction_engine.py`, `collector/`) и приведены ниже только как legacy.
 
 ## Необязательные runtime-переменные
 
@@ -52,25 +58,50 @@
 | `WEBUI_PUBLIC_BASE_URL` | `http://localhost:8080` | `chatbot` | публичный base URL для кнопки `Matrix` в Telegram |
 | `WEBUI_INTERNAL_TOKEN` | пусто | `chatbot`, `webui` | общий токен для internal prediction API; если пусто, вычисляется автоматически |
 
-## Модельные цепочки
+## Модельные цепочки (активные: Ollama Cloud Pro → локальный Bonsai)
+
+Chatbot (`chatbot/ai/models.py`) — облачный первичный кандидат, затем локальный
+Bonsai как failover. Порядок ролей: `worker → analyst → premium`, внутри роли —
+`*_ollama → *_bonsai`.
 
 | Переменная | По умолчанию | Где используется | Комментарий |
 | --- | --- | --- | --- |
-| `WORKER_QWEN_MODEL` | `qwen3.6-flash` | `chatbot`, `webui` | primary worker model |
-| `WORKER_QWEN_FALLBACKS` | `qwen3.5-flash,qwen-flash` | `chatbot`, `webui` | worker fallback chain before GLM |
-| `WORKER_GLM_FALLBACK_MODEL` | `glm-4-flash` | `chatbot`, `webui` | worker fallback after Qwen |
-| `WORKER_GEMINI_FALLBACK_MODEL` | `gemini-3-flash-preview` | `chatbot`, `webui` | final flash-grade worker fallback |
-| `ANALYST_QWEN_MODEL` | `qwen3.6-35b-a3b` | `chatbot`, `webui` | primary analyst reasoning model |
-| `ANALYST_QWEN_FALLBACKS` | `qwen3.6-27b` | `chatbot`, `webui` | analyst fallback chain before GLM |
-| `ANALYST_GLM_FALLBACK_MODEL` | `glm-5.1` | `chatbot`, `webui` | final analyst fallback |
-| `PREMIUM_QWEN_MODEL` | `qwen3.6-27b` | `chatbot`, `webui` | primary strategist reasoning model |
-| `PREMIUM_QWEN_FALLBACKS` | `qwen3.6-35b-a3b` | `chatbot`, `webui` | strategist fallback chain before GLM |
-| `PREMIUM_GLM_FALLBACK_MODEL` | `glm-5.1` | `chatbot`, `webui` | final strategist fallback |
+| `OLLAMA_CHATBOT_WORKER_MODEL` | `deepseek-v4.1-flash:cloud` | `chatbot` | worker cloud model |
+| `OLLAMA_CHATBOT_ANALYST_MODEL` | `glm-5.3:cloud` | `chatbot` | analyst cloud model |
+| `OLLAMA_CHATBOT_PREMIUM_MODEL` | `glm-5.3:cloud` | `chatbot` | strategist cloud model |
+| `LOCAL_LLM_MODEL` | `bonsai-27b:lmstudio-q1` | `chatbot`, `webui` | локальный failover для всех тиров |
+| `LOCAL_LLM_BASE_URL` | `http://127.0.0.1:8088` | `chatbot`, `webui` | локальный ollama serve |
+
+WebUI forecast (`webui/prediction_engine.py`) — **свои имена переменных и свой
+порядок кандидатов** (роль `oracle` есть только здесь):
+
+| Переменная | По умолчанию | Где используется | Комментарий |
+| --- | --- | --- | --- |
+| `OLLAMA_WORKER_MODEL` | `deepseek-v4.1-flash:cloud` | `webui` | worker cloud model |
+| `OLLAMA_ANALYST_MODEL` | `glm-5.3:cloud` | `webui` | analyst cloud model |
+| `OLLAMA_PREMIUM_MODEL` | `glm-5.3:cloud` | `webui` | strategist cloud model |
+| `OLLAMA_ORACLE_MODEL` | `glm-5.3-flash:cloud` | `webui` | oracle cloud model |
+| `OLLAMA_*_FALLBACK_MODEL` | (напр. `gemma4:31b:cloud`) | `webui` | облачный fallback каждой роли |
+| `LOCAL_LLM_ROLES` | пусто (выключено) | `webui` | роли, для которых локальный кандидат идёт первым |
+
+### Legacy (архив бесплатного роутинга — НЕ активны)
+
+| Переменная | По умолчанию | Комментарий |
+| --- | --- | --- |
+| `GLM_MODEL` | `glm-5.1` | legacy GLM fallback id (gateway archived) |
+| `WORKER_QWEN_MODEL` / `ANALYST_QWEN_MODEL` / `PREMIUM_QWEN_MODEL` и `*_FALLBACKS` | `qwen*` | замороженная Qwen/DashScope-цепочка |
+| `WORKER_GLM_FALLBACK_MODEL` / `ANALYST_GLM_FALLBACK_MODEL` / `PREMIUM_GLM_FALLBACK_MODEL` | `glm-*` | замороженный GLM-tail |
+| `WORKER_GEMINI_FALLBACK_MODEL` | `gemini-3-flash-preview` | замороженный Gemini fallback |
 
 ## Legacy и исследовательские переменные
 
 Эти переменные могут жить в локальном `.env`, но не относятся к активному root runtime path:
 
+- `DASHSCOPE_API_KEY` (архив бесплатного роутинга Qwen)
+- `GLM_API_KEY` / `GLM_MODEL` (архив GLM-tail)
+- `GOOGLE_API_KEY` (архив Gemini fallback)
+- `MINIMAX_API_KEY` (архив NVIDIA NIM oracle)
+- `LLM_ROUTING_MODE` / `LLM_PAID_ENABLED` / `LLM_REGISTRY_PATH` (архив шлюза)
 - `PERPLEXITY_API_KEY`
 - `DEFAULT_AI_MODEL`
 - `BRIEFING_HOUR_UTC`
@@ -104,11 +135,10 @@
 
 - `TELEGRAM_TOKEN`
 - `TELEGRAM_ADMIN_ID`
-- `DASHSCOPE_API_KEY`
-- `GLM_API_KEY`
-- `GLM_MODEL`
-- `GOOGLE_API_KEY`
-- `MINIMAX_API_KEY`
+- `OLLAMA_CLOUD_API_KEY`
+- `OLLAMA_CLOUD_BASE_URL`
+- `OLLAMA_CHATBOT_WORKER_MODEL` / `OLLAMA_CHATBOT_ANALYST_MODEL` / `OLLAMA_CHATBOT_PREMIUM_MODEL`
+- `LOCAL_LLM_MODEL` / `LOCAL_LLM_BASE_URL`
 - `WEBUI_INTERNAL_URL`
 - `WEBUI_PUBLIC_BASE_URL`
 - `WEBUI_INTERNAL_TOKEN`
@@ -125,10 +155,9 @@
 - `DATABASE_URL`
 - `REDIS_URL`
 - `HTX_REST_URL`
-- `DASHSCOPE_API_KEY`
-- `GLM_API_KEY`
-- `GOOGLE_API_KEY`
-- `MINIMAX_API_KEY`
+- `OLLAMA_API_KEY` / `OLLAMA_BASE_URL`
+- `OLLAMA_WORKER_MODEL` / `OLLAMA_ANALYST_MODEL` / `OLLAMA_PREMIUM_MODEL` / `OLLAMA_ORACLE_MODEL` (+ `*_FALLBACK_MODEL`)
+- `LOCAL_LLM_ROLES` / `LOCAL_LLM_MODEL` / `LOCAL_LLM_BASE_URL` / `LOCAL_LLM_TIMEOUT`
 - `WEBUI_INTERNAL_URL`
 - `WEBUI_PUBLIC_BASE_URL`
 - `WEBUI_INTERNAL_TOKEN`
@@ -139,20 +168,22 @@
 
 ## Prediction Lab provider keys
 
-`/predictions` не вводит отдельные ключи. Он использует тот же набор provider keys, что уже живёт в root runtime:
+`/predictions` не вводит отдельные ключи. Он использует набор Ollama Cloud Pro,
+который уже живёт в root runtime (`webui/prediction_engine.py`):
 
-- `DASHSCOPE_API_KEY`
-- `GLM_API_KEY`
-- `GLM_MODEL`
-- `GOOGLE_API_KEY`
-- `MINIMAX_API_KEY`
+- `OLLAMA_API_KEY` (обязателен для облачных кандидатов)
+- `OLLAMA_BASE_URL` (по умолчанию `https://ollama.com/v1`)
+- `OLLAMA_WORKER_MODEL` / `OLLAMA_ANALYST_MODEL` / `OLLAMA_PREMIUM_MODEL` / `OLLAMA_ORACLE_MODEL` (+ `*_FALLBACK_MODEL`)
+- `LOCAL_LLM_ROLES` / `LOCAL_LLM_MODEL` / `LOCAL_LLM_BASE_URL` (локальный failover)
 
 Особенности:
 
-- `worker` доступен при `DASHSCOPE_API_KEY` и умеет переключаться на `GLM_API_KEY`, а затем на `GOOGLE_API_KEY` flash fallback;
-- `analyst` доступен при `DASHSCOPE_API_KEY` и умеет переключаться по reasoning-chain `qwen3.6-35b-a3b -> qwen3.6-27b -> glm-5.1`;
-- `premium` доступен при `DASHSCOPE_API_KEY` и умеет переключаться по reasoning-chain `qwen3.6-27b -> qwen3.6-35b-a3b -> glm-5.1`;
-- `minimax` доступен только если `MINIMAX_API_KEY` задан и начинается с `nvapi-`.
+- каждая роль (`worker`/`analyst`/`premium`/`oracle`) идёт облачным Pro-кандидатом,
+  затем его `*_FALLBACK_MODEL`; NVIDIA NIM tail удалён из движка;
+- если роль перечислена в `LOCAL_LLM_ROLES` (или `all`), локальный Bonsai идёт
+  первым кандидатом, а облако — позади;
+- ключевые слова `DASHSCOPE` / `nvapi-` / Qwen-цепочки больше не участвуют — они
+  относятся к замороженному шлюзу в `free_routing_archive/`.
 
 ## Команды валидации
 
@@ -162,16 +193,16 @@
 docker-compose config
 ```
 
-Проверить, что `chatbot` видит DashScope key:
+Проверить, что `chatbot` видит Ollama Cloud key:
 
 ```powershell
-docker-compose exec chatbot python -c "import os; print(bool(os.getenv('DASHSCOPE_API_KEY')))"
+docker-compose exec chatbot python -c "import os; print(bool(os.getenv('OLLAMA_CLOUD_API_KEY')))"
 ```
 
 Проверить, что `webui` видит strategist defaults:
 
 ```powershell
-docker-compose exec webui python -c "import os; print(os.getenv('PREMIUM_QWEN_MODEL', 'qwen3.6-27b'))"
+docker-compose exec webui python -c "import os; print(os.getenv('OLLAMA_PREMIUM_MODEL', 'glm-5.3:cloud'))"
 ```
 
 Проверить, что auth включён именно так, как ожидается:

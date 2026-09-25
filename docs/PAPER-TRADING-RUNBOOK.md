@@ -124,6 +124,16 @@ cmd.exe /c "cd /d D:\WORED && docker compose restart webui"
 
 ## 5. QA (изолированная)
 
+> **Safety rail.** Financial paper-trading tests run ONLY in the isolated
+> `wored-qa` compose project (tmpfs Postgres, DB `wored_qa`, internal network, no
+> host port, `WORED_TEST_DATABASE_URL` → `postgres-qa`). Never point them at the
+> production `trading` DB and never mount production named volumes into a test.
+> Warning: `tests/paper_trading/test_closeout.py` issues `DROP TABLE` in its
+> fixture — running it outside the disposable QA database is destructive. The
+> command below uses `-p wored-qa` and the QA file explicitly for that reason.
+> Real exchange orders are never placed by any test; `PAPER_MARKET_MODE=demo` or a
+> recorded snapshot is used instead.
+
 ```bash
 # Verify QA compose config
 cmd.exe /c "cd /d D:\WORED && docker compose -p wored-qa -f docker-compose.qa.yml config --quiet"
@@ -217,6 +227,66 @@ docker exec htx_trading_bot_postgres psql -U bot -d trading -t -c \
 5. Check strategy: EMA20 > EMA50 на 1h? 15m confirm? 1m trigger?
 6. No signal → `waiting_regime` или `waiting_trigger` — это нормально
 
+### Диагностика `settlement_pending` (P0 rollover)
+
+День переходит в `settlement_pending`, когда срок истёк, но closeout невозможно
+выполнить прямо сейчас (нет валидного perpetual-снимка, либо позиция/проведка ещё
+не сверены). Это **не** ошибка и **не** зависание: новые входы запрещены, позиции и
+защитное сопровождение сохранены, а раннер повторяет попытку закрытия **каждый
+цикл** (выборка `state IN ('running','settlement_pending','closing')`). `closed`
+ставится только когда `update_day_state(closed)` реально вернул успех; фиктивных
+close/fill и обнуления счёта не происходит.
+
+PowerShell (read-only, боевая БД только на чтение):
+
+```powershell
+Set-Location -LiteralPath 'D:\WORED'
+# Незакрытые дни и их причины/next_check
+docker exec htx_trading_bot_postgres psql -U bot -d trading -c \
+  "SELECT day_id, state, end_utc, settings_snapshot->>'timezone' AS tz, \
+          settings_snapshot->>'end_time_local' AS end_local \
+   FROM paper_v2_days WHERE state <> 'closed' ORDER BY created_at DESC;"
+# Открытые позиции по проблемному дню (closeout берётся из БД, не из памяти)
+docker exec htx_trading_bot_postgres psql -U bot -d trading -c \
+  "SELECT position_id, account_id, instrument, status FROM paper_v2_positions \
+   WHERE day_id='<day_id>' AND status='open';"
+# Зависшие finish-команды (processing дольше 60с освобождаются requeue_stale_processing)
+docker exec htx_trading_bot_postgres psql -U bot -d trading -c \
+  "SELECT command_id, idempotency_key, status, updated_at FROM paper_v2_commands \
+   WHERE status IN ('accepted','processing') ORDER BY updated_at;"
+```
+
+Что проверять, если день «застрял» в `settlement_pending`:
+
+1. Свежесть HTX perpetual snapshot (`GET market:perpetual:htx:BTC-USDT`, age < 5s).
+   Stale/crossed/missing/block → closeout откладывается намеренно. Дать рынку
+   прислать валидный снимок — день закроется сам в следующем цикле.
+2. Причина и `next_check` в heartbeat/решениях (`paper_v2_decisions`,
+   `reason_detail`). `closed` при `not finished` не проставляется.
+3. Следующий день **не** создастся, пока текущий не стал `closed` и не сверен
+   (`uq_days_one_incomplete`). Это ожидаемое поведение, а не баг.
+4. После рестарта раннера владелец с `settlement_pending` восстанавливается
+   (`load_active_auto_accounts` включает `running/settlement_pending/closing`),
+   входы остаются заблокированными до завершения (`entries_blocked_reason=
+   pending_closure`).
+5. Если политика следующего дня не восстановима из `settings_snapshot`
+   (нет timezone/end_time_local) → день помечается `recovery_required`, авто-старт
+   НЕ подставляет молча `Asia/Bangkok/21:00/baseline_auto`. Требуется ручное
+   решение оператора.
+
+Ручное завершение (канонический путь, та же идемпотентная команда `finish-{day_id}`):
+
+```powershell
+docker exec htx_trading_bot_webui python -c "
+import asyncio
+from paper_trading.adapter import owner_id_from_webui
+from paper_trading.service import PaperTradingService
+async def main():
+    print(await PaperTradingService.finish_day(owner_id_from_webui('admin')))
+asyncio.run(main())
+"
+```
+
 ## 8. Миграция и rollback
 
 ### Pre-migration checklist
@@ -240,6 +310,21 @@ cmd.exe /c "cd /d D:\WORED && docker compose stop collector && docker compose rm
 ```
 
 **Важно:** Rollback НЕ удаляет paper_v2_* таблицы. Старые `trading_sessions`/`session_plans`/`executed_trades` продолжают работать. Новый runner просто выключается.
+
+### Rollback P0 rollover-фикса (settlement_pending)
+
+Этот фикс **не требует миграции схемы** — он использует уже существующие примитивы
+(`paper_v2_commands.status`, `paper_v2_days.settings_snapshot`, состояния
+`closing/settlement_pending/recovery_required`, `uq_days_one_incomplete`). Поэтому:
+
+- Откат кода = revert коммита/патча в `paper_trading/{repository,service,runner}.py`
+  + пересборка collector/webui (`stop + rm + up`, не `restart`). Данных не трогает.
+- `requeue_stale_processing` и `claim_command` — только SELECT/UPDATE по существующим
+  колонкам; никаких новых DDL-объектов, которые надо было бы удалять.
+- Если фикс уже отработал и день закрыт корректно, откатывать его **не** нужно:
+  повторное применение к закрытому дню безопасно (идемпотентный `finish-{day_id}`).
+- Откат проверяется сначала в `wored-qa` (раздел 5), НИКОГДА не на живой смене
+  торгового дня без снимка открытых позиций.
 
 ## 9. Known limitations
 
