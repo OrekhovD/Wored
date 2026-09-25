@@ -60,19 +60,33 @@ class PaperTradingService:
             pass  # owner already exists is OK
 
         # Ensure both accounts exist with default capital
-        settings = {**DEFAULT_SETTINGS, **(req.settings or {})}
+        # Persist the *selected* day policy into the snapshot so an automated
+        # rollover can inherit it (timezone / end_time_local / mode /
+        # strategy_version) instead of falling back to a hidden default.
+        policy = {
+            "timezone": req.timezone,
+            "end_time_local": req.end_time_local,
+            "mode": req.mode,
+            "strategy_version": req.strategy_version,
+        }
+        settings = {**DEFAULT_SETTINGS, **(req.settings or {}), **policy}
         capital = Decimal(settings["opening_capital"])
 
         manual = await self._get_or_create_account(req.owner_id, "manual", "USDT", capital)
         auto = await self._get_or_create_account(req.owner_id, "auto", "USDT", capital)
 
-        # Check no unclosed day exists
+        # Check no unclosed day exists.  A running, closing OR settlement_pending
+        # day is an active incomplete day and must be finished before a new one
+        # is started — the partial unique index uq_days_one_incomplete forbids a
+        # second one, so treating settlement_pending as "passable" here would
+        # only make create_day fail later.
         existing = await self.repo.get_active_day(req.owner_id)
-        if existing and existing.state not in ("closed", "settlement_pending"):
+        if existing and existing.state != "closed":
             return {
                 "ok": False,
                 "error": "day_already_active",
                 "day_id": str(existing.day_id),
+                "state": str(existing.state),
             }
 
         # Create new day

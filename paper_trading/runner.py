@@ -59,7 +59,6 @@ from paper_trading.contracts import (
     StatusDTO,
     money,
 )
-from paper_trading.contracts import CommandStatus
 from paper_trading.execution import (
     FillResult,
     Position as ExecutionPosition,
@@ -233,7 +232,15 @@ class PgRecoveryStore(RecoveryStore):
             return []
 
     async def load_active_auto_accounts(self) -> list[Account]:
-        """Load auto accounts whose owner currently has a running day."""
+        """Load auto accounts whose owner has an in-flight day.
+
+        Includes ``running`` as well as the deferred close states
+        ``settlement_pending``/``closing`` so that after a restart the owner of
+        a day that still needs closing is recovered (with new entries kept
+        blocked) instead of being silently dropped — the old query matched only
+        ``state = 'running'``, which orphaned a ``settlement_pending`` owner and
+        let the P0 stall persist across restarts.
+        """
         try:
             async with self._repo.pool.acquire() as conn:
                 rows = await conn.fetch(
@@ -241,7 +248,8 @@ class PgRecoveryStore(RecoveryStore):
                     SELECT DISTINCT a.*
                     FROM paper_v2_accounts AS a
                     JOIN paper_v2_days AS d ON d.owner_id = a.owner_id
-                    WHERE a.kind = 'auto' AND d.state = 'running'
+                    WHERE a.kind = 'auto'
+                      AND d.state IN ('running', 'settlement_pending', 'closing')
                     ORDER BY a.created_at
                     """
                 )
@@ -628,6 +636,7 @@ class PaperTradingRunner:
         self._entries_blocked = True
         report: dict[str, Any] = {
             "commands_loaded": 0,
+            "stale_commands_requeued": 0,
             "orders_loaded": 0,
             "positions_loaded": 0,
             "ledger_discrepancies": [],
@@ -644,6 +653,18 @@ class PaperTradingRunner:
             return report
 
         try:
+            # 0. Crash recovery: release commands left in 'processing' by a dead
+            #    runner (older than the lease window) back to 'accepted' so they
+            #    are retried, then load all unfinished commands.
+            if self.repository is not None:
+                try:
+                    requeued = await self.repository.requeue_stale_processing()
+                    if requeued:
+                        report["stale_commands_requeued"] = requeued
+                        log.info("recovery: requeued %d stale processing command(s)", requeued)
+                except Exception as exc:
+                    log.warning("requeue_stale_processing failed: %s", exc)
+
             # 1. Load unfinished commands
             commands = await self.recovery_store.load_unfinished_commands()
             self._pending_commands.extend(commands)
@@ -714,16 +735,30 @@ class PaperTradingRunner:
                     len(auto_accounts),
                 )
             else:
+                # A single active auto account is the normal, healthy scope.
+                # But if that owner's day still needs closing (settlement_pending
+                # or closing) we must NOT resume new entries until the close-out
+                # finishes — the deferred finish command is retried by the day
+                # loop and its handler re-blocks entries anyway.
+                pending_closure = await self._recovered_day_needs_closure(auto_accounts)
                 self._recovered = True
-                self._entries_blocked = False
                 report["recovered"] = True
-                log.info(
-                    "recovery complete: %d commands, %d orders, %d positions, %d intents cancelled — entries unblocked",
-                    report["commands_loaded"],
-                    report["orders_loaded"],
-                    report["positions_loaded"],
-                    report["intents_cancelled"],
-                )
+                if pending_closure:
+                    self._entries_blocked = True
+                    report["entries_blocked_reason"] = "pending_closure"
+                    log.warning(
+                        "recovery: owner %s has a day needing closure — entries BLOCKED",
+                        auto_accounts[0].owner_id,
+                    )
+                else:
+                    self._entries_blocked = False
+                    log.info(
+                        "recovery complete: %d commands, %d orders, %d positions, %d intents cancelled — entries unblocked",
+                        report["commands_loaded"],
+                        report["orders_loaded"],
+                        report["positions_loaded"],
+                        report["intents_cancelled"],
+                    )
         except Exception:
             self._last_error = "recovery failed"
             log.exception("recovery failed")
@@ -731,6 +766,27 @@ class PaperTradingRunner:
             report["error"] = self._last_error
             # Entries remain blocked on failure
         return report
+
+    async def _recovered_day_needs_closure(self, auto_accounts: list[Account]) -> bool:
+        """True if the recovered owner's active day still needs closing.
+
+        Used during recovery so a restart into a ``settlement_pending``/
+        ``closing`` day keeps new entries blocked instead of resuming trading
+        on a day that is mid close-out.
+        """
+        if self.repository is None or not auto_accounts:
+            return False
+        try:
+            day = await self.repository.get_active_day(auto_accounts[0].owner_id)
+        except Exception as exc:
+            log.warning("recovery: could not read active day for %s: %s",
+                        auto_accounts[0].owner_id, exc)
+            # Fail-closed: unknown state → keep entries blocked.
+            return True
+        return day is not None and day.state in (
+            DayState.settlement_pending,
+            DayState.closing,
+        )
 
     # ── Main loop ──
 
@@ -997,14 +1053,32 @@ class PaperTradingRunner:
     # ── Commands ──
 
     async def _process_commands(self, now: float) -> None:
-        """Poll for and process manual commands."""
-        # Fetch new commands from the source
+        """Poll for and process commands through a claim → execute → settle cycle.
+
+        Lifecycle (DB-backed): a command is atomically claimed
+        (``accepted`` → ``processing``) so two concurrent runners can never
+        execute the same command; it is then executed; on confirmed success it
+        is ``completed`` and dropped, and on a transient deferral (e.g.
+        settlement_pending) it is requeued to ``accepted`` so the next cycle's
+        poll resurfaces it.  Commands already claimed by another runner are
+        skipped — the DB row state is authoritative, so they are not kept in the
+        in-memory list.
+
+        For an in-memory runner (no repository) the previous behaviour is kept:
+        un-processed commands stay in ``_pending_commands`` for the next call.
+        """
+        # Fetch new commands from the source, de-duplicated by command_id.
         if self.command_source is not None:
             try:
                 new_commands = await self.command_source.poll()
-                self._pending_commands.extend(new_commands)
             except Exception as exc:
                 log.warning("command poll failed: %s", exc)
+                new_commands = []
+            known = {c.command_id for c in self._pending_commands}
+            for c in new_commands:
+                if c.command_id not in known:
+                    self._pending_commands.append(c)
+                    known.add(c.command_id)
 
         if not self._pending_commands:
             return
@@ -1019,10 +1093,57 @@ class PaperTradingRunner:
                 )
                 continue
 
-            processed = await self._execute_command(cmd, now)
-            if not processed:
-                remaining.append(cmd)
+            if self.repository is not None and cmd.command_id is not None:
+                claimed = await self._claim_command(cmd)
+                if claimed is None:
+                    # Another runner holds it, or it is terminal.  DB state is
+                    # authoritative — drop from memory, do not re-process.
+                    continue
+                cmd = claimed
+                processed = await self._execute_command(cmd, now)
+                if processed:
+                    await self._settle_command(cmd)
+                else:
+                    # Transient deferral: release the claim so the persisted
+                    # command is retried next cycle.  Not kept in memory to
+                    # avoid double-processing alongside the DB poll.
+                    await self._requeue_command(cmd)
+            else:
+                processed = await self._execute_command(cmd, now)
+                if not processed:
+                    remaining.append(cmd)
         self._pending_commands = remaining
+
+    async def _claim_command(self, cmd: Command) -> Command | None:
+        """Atomically claim a command; returns the claimed row or ``None``."""
+        repo = self.repository
+        if repo is None:
+            return None
+        try:
+            return await repo.claim_command(cmd.command_id)
+        except Exception as exc:
+            log.warning("claim_command failed for %s: %s", cmd.command_id, exc)
+            return None
+
+    async def _settle_command(self, cmd: Command) -> None:
+        repo = self.repository
+        if repo is None:
+            return
+        try:
+            await repo.complete_command(cmd.command_id)
+        except Exception as exc:
+            # Could not mark completed — leave it processing so a later
+            # requeue_stale_processing pass retries it.
+            log.warning("complete_command failed for %s: %s", cmd.command_id, exc)
+
+    async def _requeue_command(self, cmd: Command) -> None:
+        repo = self.repository
+        if repo is None:
+            return
+        try:
+            await repo.requeue_command(cmd.command_id)
+        except Exception as exc:
+            log.warning("requeue_command failed for %s: %s", cmd.command_id, exc)
 
     async def _execute_command(self, cmd: Command, now: float) -> bool:
         """Execute a single command.  Returns True if fully processed."""
@@ -1206,21 +1327,31 @@ class PaperTradingRunner:
                 else:
                     log.info("start_day: manual account %s acknowledged for day %s", account.account_id, cmd.day_id)
             else:
+                # Could not apply the transition.  Acknowledge (do not requeue
+                # forever) but leave entries blocked.
                 log.warning("start_day: could not transition day %s to running", cmd.day_id)
         except Exception as exc:
+            # Transient DB failure — signal the caller to retry the command.
             self._last_error = str(exc)
             log.warning("start_day failed: %s", exc)
+            return False
 
-        # Mark command as completed so poll() stops returning it
-        if self.repository is not None and cmd.command_id is not None:
-            try:
-                await self.repository.complete_command(cmd.command_id)
-            except Exception:
-                pass
+        # Command completion is centralised in _process_commands (claim →
+        # execute → complete/requeue), so the handler no longer marks itself
+        # completed here.
         return True
 
     async def _handle_finish_day(self, cmd: Command) -> bool:
-        """Handle finish_day command: cancel entries, close all, day→closed."""
+        """Handle finish_day command: cancel entries, close all, day→closed.
+
+        Returns ``True`` only when the day is durably transitioned to
+        ``closed``.  Returns ``False`` for any transient deferral
+        (``settlement_pending`` — snapshot unavailable or positions still open,
+        or the ``closed`` transition itself failed).  ``False`` makes the
+        caller requeue the persisted ``finish-{day_id}`` command so closure is
+        retried on the next cycle; ``closed`` is never inferred from the mere
+        fact that the handler ran.
+        """
         if self.repository is None:
             log.info("finish_day acknowledged (no repository)")
             return True
@@ -1229,20 +1360,49 @@ class PaperTradingRunner:
             log.warning("finish_day: no day_id in command")
             return True
 
-        # 1. Block new entries
+        # 1. Block new entries for the remainder of the close-out.
         self._entries_blocked = True
 
-        # 2. Close all open positions
+        # 2. Move the day into the explicit ``closing`` sub-state so an
+        #    operator can see the close-out is in progress (idempotent if it is
+        #    already closing/settlement_pending).
+        try:
+            await self.repository.update_day_state(cmd.day_id, DayState.closing)
+        except Exception as exc:
+            self._last_error = str(exc)
+            log.warning("finish_day: could not mark day %s closing: %s", cmd.day_id, exc)
+            return False
+
+        # 3. Cancel residual unfilled entry orders (fail-closed on risk).
+        try:
+            unfilled = await self.repository.get_unfilled_orders_by_day(cmd.day_id)
+        except Exception as exc:
+            log.warning("finish_day: could not load unfilled orders for %s: %s", cmd.day_id, exc)
+            unfilled = []
+        for order in unfilled:
+            try:
+                await self.repository.update_order_state(order.order_id, OrderState.cancelled)
+                self._open_orders.pop(order.order_id, None)
+            except Exception as exc:
+                log.warning("finish_day: cancel order %s failed: %s", order.order_id, exc)
+
+        # 4. Load this day's open positions from the DB (authoritative after a
+        #    restart) and merge them into the in-memory book.
+        try:
+            db_positions = await self.repository.get_open_positions_by_day(cmd.day_id)
+        except Exception as exc:
+            log.warning("finish_day: could not load open positions for %s: %s", cmd.day_id, exc)
+            db_positions = []
+        for pos in db_positions:
+            self._positions[pos.position_id] = pos
+
         snapshot = await self._fetch_snapshot()
         positions_to_close = [
             (pid, pos) for pid, pos in self._positions.items()
             if pos.status == PositionStatus.open and pos.day_id == cmd.day_id
         ]
         if snapshot is None and positions_to_close:
-            await self.repository.update_day_state(
-                cmd.day_id,
-                DayState.settlement_pending,
-            )
+            await self.repository.update_day_state(cmd.day_id, DayState.settlement_pending)
             self._last_decision = Decision(
                 reason_code=ReasonCode.settlement_pending,
                 reason_detail="Finish-day deferred: execution snapshot unavailable",
@@ -1266,10 +1426,7 @@ class PaperTradingRunner:
             for pos in self._positions.values()
         )
         if close_failed or remaining:
-            await self.repository.update_day_state(
-                cmd.day_id,
-                DayState.settlement_pending,
-            )
+            await self.repository.update_day_state(cmd.day_id, DayState.settlement_pending)
             self._last_decision = Decision(
                 reason_code=ReasonCode.settlement_pending,
                 reason_detail="Finish-day deferred: one or more positions remain open",
@@ -1278,95 +1435,160 @@ class PaperTradingRunner:
             )
             return False
 
-        # 3. Transition day state → closed
+        # 5. All positions closed — transition day → closed.  Only a confirmed
+        #    transition counts as success; a False result or exception must NOT
+        #    be reported as ``closed``.
         try:
             updated = await self.repository.update_day_state(
                 cmd.day_id,
                 DayState.closed,
             )
-            if updated:
-                log.info("finish_day: day %s transitioned to closed", cmd.day_id)
-            else:
-                log.warning("finish_day: could not transition day %s to closed", cmd.day_id)
         except Exception as exc:
             self._last_error = str(exc)
             log.warning("finish_day failed: %s", exc)
+            return False
 
+        if not updated:
+            log.warning("finish_day: could not transition day %s to closed", cmd.day_id)
+            return False
+
+        log.info("finish_day: day %s transitioned to closed", cmd.day_id)
+        self._last_decision = Decision(
+            reason_code=ReasonCode.day_closed,
+            reason_detail="Day closed and reconciled",
+            day_id=cmd.day_id,
+            decided_at=datetime.now(timezone.utc),
+        )
         return True
 
+
     async def _auto_finish_expired_days(self) -> None:
-        """Close running days whose end_utc has passed, then start a new day.
+        """Drive the day rollover through the canonical, persisted command path.
 
-        Called every run_cycle (2s) but only acts when a day is expired.
-        Without this, a day stays 'running' forever if no explicit finish_day
-        command arrives — the runner keeps evaluating signals against an
-        outdated day and blocks new day creation.
+        Called every run_cycle (2s).  Two responsibilities:
 
-        B1 fix: if _handle_finish_day returns False (settlement_pending —
-        positions couldn't be closed because the market snapshot was
-        unavailable), do NOT call start_day.  Calling start_day against a
-        day still in 'running' or 'settlement_pending' hits the partial
-        unique index uq_days_one_incomplete and silently fails, leaving the
-        system without an active day indefinitely.
+        1. **Closure** — every day still in ``running`` (past its ``end_utc``),
+           ``settlement_pending`` or ``closing`` gets a *persisted, idempotent*
+           ``finish-{day_id}`` command submitted via
+           :meth:`PaperTradingService.finish_day`.  The command is then executed
+           by :meth:`_process_commands` (claim → ``_handle_finish_day`` →
+           complete/requeue).  A deferred close (settlement_pending) is retried
+           every cycle because those states remain in the selection below — this
+           is what removes the old P0 stall where a ``settlement_pending`` day
+           was picked up exactly once (as ``running``) and then never again.
+
+        2. **Rollover** — a successor day is started (see
+           :meth:`_maybe_start_next_day`) *only* after the previous day is
+           confirmed ``closed``; the next day inherits the finished day's stored
+           policy rather than a hidden ``Asia/Bangkok/21:00/baseline_auto``.
+
+        A synthetic in-memory ``Command`` that bypassed ``submit_command`` is no
+        longer used: the persisted command is the single source of truth and is
+        what makes closure idempotent and crash-recoverable.
         """
         if self.repository is None:
             return
+        from paper_trading.service import PaperTradingService
+        svc = PaperTradingService(self.repository)
         try:
-            async with self.repository.pool.acquire() as conn:
-                # M2 fix: compare against now() (session TZ-aware) instead of
-                # NOW() AT TIME ZONE 'UTC' which returns naive text and
-                # depends on the session TimeZone setting.
-                rows = await conn.fetch(
-                    "SELECT day_id, end_utc, owner_id FROM paper_v2_days "
-                    "WHERE state = 'running' AND end_utc IS NOT NULL "
-                    "AND end_utc < now()"
-                )
-            for row in rows:
-                day_id = row["day_id"]
-                owner_id = row["owner_id"]
-                log.info("auto-finish: day %s expired (end_utc=%s), closing", day_id, row["end_utc"])
-                # Close positions for this day first
-                finished = await self._handle_finish_day(Command(
-                    command_id=uuid4(),
-                    owner_id=owner_id,
-                    account_id=None,
-                    day_id=day_id,
-                    command_type=CommandType.finish_day,
-                    idempotency_key=f"auto-finish-{day_id}",
-                    request_hash="",
-                    status=CommandStatus.accepted,
-                    created_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc),
-                ))
-                # B1 fix: only start a new day if the old one was fully closed.
-                # settlement_pending means positions are still open — retry
-                # next cycle.
-                if not finished:
-                    log.warning("auto-finish: day %s not fully closed (settlement_pending), "
-                                "deferring auto-start", day_id)
-                    continue
-                # Auto-start a new day for the same owner so trading continues
-                if self.repository is not None:
-                    try:
-                        from paper_trading.service import PaperTradingService, StartDayRequest
-                        svc = PaperTradingService(self.repository)
-                        result = await svc.start_day(StartDayRequest(
-                            owner_id=str(owner_id),
-                            timezone="Asia/Bangkok",
-                            end_time_local="21:00",
-                            mode="baseline_auto",
-                        ))
-                        if result.get("ok"):
-                            log.info("auto-start: new day %s created for owner %s",
-                                     result.get("day_id"), owner_id)
-                        elif result.get("error") == "day_already_active":
-                            log.debug("auto-start: day already active for %s", owner_id)
-                        else:
-                            log.warning("auto-start failed: %s", result.get("error"))
-                    except Exception as exc:
-                        log.warning("auto-start new day failed: %s", exc)
+            days = await self.repository.get_days_needing_closure()
         except Exception as exc:
             log.warning("auto-finish check failed: %s", exc)
+            return
+
+        for day in days:
+            owner_id = str(day.owner_id)
+            try:
+                result = await svc.finish_day(owner_id)
+                if not result.get("ok"):
+                    log.warning("auto-finish: could not enqueue finish for owner %s: %s",
+                                owner_id, result.get("error"))
+            except Exception as exc:
+                log.warning("auto-finish: finish_day enqueue failed for owner %s: %s",
+                            owner_id, exc)
+
+        # Rollover is handled separately and only acts on confirmed-closed days.
+        await self._maybe_start_next_day(svc)
+
+    async def _maybe_start_next_day(self, svc: Any) -> None:
+        """Start a successor day for auto owners whose latest day is closed.
+
+        Only owners that have an ``auto`` account (i.e. expect unattended
+        continuation) are considered.  The new day inherits the policy stored in
+        the closed day's ``settings_snapshot`` (timezone / end_time_local / mode
+        / strategy_version).  If that policy is not recoverable the day is marked
+        ``recovery_required`` and no auto-start happens — the system does not
+        silently fall back to a hard-coded schedule.
+        """
+        repo = self.repository
+        if repo is None:
+            return
+        try:
+            candidates = await repo.get_rollover_candidates()
+        except Exception as exc:
+            log.warning("rollover: query failed: %s", exc)
+            return
+
+        from paper_trading.service import StartDayRequest
+        for day in candidates:
+            owner_id = str(day.owner_id)
+
+            policy = day.settings_snapshot or {}
+            tz = policy.get("timezone") or day.timezone
+            end_local = policy.get("end_time_local")
+            mode = policy.get("mode")
+            strategy_version = policy.get("strategy_version") or day.strategy_version
+
+            # Only auto-rollover days that were started in an automatic mode.
+            if mode in (None, "manual"):
+                continue
+
+            if not (tz and end_local):
+                # Policy not recoverable → fail-closed, do NOT fabricate a day.
+                await self._mark_rollover_recovery_required(day.day_id)
+                continue
+
+            try:
+                result = await svc.start_day(StartDayRequest(
+                    owner_id=owner_id,
+                    timezone=str(tz),
+                    end_time_local=str(end_local),
+                    mode=str(mode),
+                    strategy_version=str(strategy_version),
+                ))
+            except Exception as exc:
+                log.warning("rollover: start_day failed for owner %s: %s", owner_id, exc)
+                continue
+
+            if result.get("ok"):
+                log.info("rollover: started successor day %s for owner %s "
+                         "(policy tz=%s end=%s mode=%s)",
+                         result.get("day_id"), owner_id, tz, end_local, mode)
+            elif result.get("error") == "day_already_active":
+                log.debug("rollover: successor already active for owner %s", owner_id)
+            else:
+                log.warning("rollover: start_day blocked for owner %s: %s",
+                            owner_id, result.get("error"))
+
+    async def _mark_rollover_recovery_required(self, day_id: Any) -> None:
+        """Mark a closed day as recovery_required when its rollover policy is
+        unrecoverable, and surface an actionable Decision."""
+        repo = self.repository
+        try:
+            if repo is not None:
+                await repo.update_day_state(day_id, DayState.recovery_required)
+        except Exception as exc:
+            log.warning("rollover: could not mark day %s recovery_required: %s", day_id, exc)
+        self._entries_blocked = True
+        self._last_decision = Decision(
+            reason_code=ReasonCode.recovery_pending,
+            reason_detail="Auto rollover blocked: closed day policy not recoverable",
+            day_id=day_id,
+            decided_at=datetime.now(timezone.utc),
+        )
+        log.warning("rollover: day %s policy not recoverable — marked recovery_required, "
+                    "auto-start blocked", day_id)
+
 
     # ── Signal evaluation ──
 

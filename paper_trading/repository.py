@@ -384,6 +384,51 @@ class PaperRepository:
             )
             return True
 
+    async def get_days_needing_closure(self) -> list[TradingDay]:
+        """Days whose close-out is due or was deferred.
+
+        Returns days in ``running`` whose ``end_utc`` has passed, plus every
+        ``settlement_pending``/``closing`` day (a deferred close must keep being
+        retried).  Selecting these is exactly what the old runner failed to do —
+        it only looked at ``running`` so a ``settlement_pending`` day was picked
+        up once and then orphaned forever.
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM paper_v2_days
+                WHERE state IN ('running', 'settlement_pending', 'closing')
+                  AND (state <> 'running'
+                       OR (end_utc IS NOT NULL AND end_utc < now()))
+                ORDER BY owner_id, end_utc NULLS LAST
+                """
+            )
+        return [_row_to_day(r) for r in rows]
+
+    async def get_rollover_candidates(self) -> list[TradingDay]:
+        """Most recent ``closed`` day per auto owner with no incomplete successor.
+
+        Only owners that have an ``auto`` account expect unattended rollover, and
+        a successor is started only when the owner currently has no non-closed
+        day (the ``NOT EXISTS`` mirrors ``uq_days_one_incomplete``).
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT ON (d.owner_id) d.*
+                FROM paper_v2_days AS d
+                JOIN paper_v2_accounts AS a
+                    ON a.owner_id = d.owner_id AND a.kind = 'auto'
+                WHERE d.state = 'closed'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM paper_v2_days AS x
+                      WHERE x.owner_id = d.owner_id AND x.state NOT IN ('closed')
+                  )
+                ORDER BY d.owner_id, d.end_utc DESC NULLS LAST, d.created_at DESC
+                """
+            )
+        return [_row_to_day(r) for r in rows]
+
     # ------------------------------------------------------------------
     # Command (idempotency)
     # ------------------------------------------------------------------
@@ -520,6 +565,93 @@ class PaperRepository:
                 str(command_id),
             )
             return True
+
+    async def claim_command(self, command_id: UUID) -> Command | None:
+        """Atomically transition an ``accepted`` command to ``processing``.
+
+        Uses ``SELECT ... FOR UPDATE SKIP LOCKED`` so two concurrent runners
+        can never claim the same command: the loser's row is locked/skipped and
+        it receives ``None``.  Only commands currently ``accepted`` are
+        claimable — ``processing``/``completed``/``failed``/``conflict`` are
+        left for their owner or for ``requeue_stale_processing`` after a crash.
+
+        Returns the freshly-claimed command row, or ``None`` if it was not
+        claimable at this instant.
+        """
+        now = _now_utc()
+        async with self._pool.acquire() as conn, conn.transaction():
+            locked = await conn.fetchval(
+                """
+                SELECT command_id FROM paper_v2_commands
+                WHERE command_id = $1 AND status = 'accepted'
+                FOR UPDATE SKIP LOCKED
+                """,
+                str(command_id),
+            )
+            if locked is None:
+                return None
+            row = await conn.fetchrow(
+                """
+                UPDATE paper_v2_commands
+                SET status = 'processing', updated_at = $1
+                WHERE command_id = $2
+                RETURNING *
+                """,
+                now,
+                str(command_id),
+            )
+        return _row_to_command(row) if row else None
+
+    async def requeue_command(self, command_id: UUID, error: str | None = None) -> bool:
+        """Release a ``processing`` command back to ``accepted`` for retry.
+
+        Used when a command could not be completed this cycle (e.g. a
+        finish_day that deferred to ``settlement_pending`` because the market
+        snapshot was unavailable).  Only a command still in ``processing`` is
+        released, so a command already completed/failed is never resurrected.
+        """
+        now = _now_utc()
+        async with self._pool.acquire() as conn, conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT status FROM paper_v2_commands WHERE command_id = $1 FOR UPDATE",
+                str(command_id),
+            )
+            if not row or row["status"] != "processing":
+                return False
+            await conn.execute(
+                """
+                UPDATE paper_v2_commands
+                SET status = 'accepted', error = $1, updated_at = $2
+                WHERE command_id = $3
+                """,
+                error,
+                now,
+                str(command_id),
+            )
+        return True
+
+    async def requeue_stale_processing(self, max_age_seconds: int = 60) -> int:
+        """Crash recovery: return ``processing`` commands stuck longer than the
+        lease window to ``accepted`` so a fresh runner retries them.
+
+        Returns the number of commands requeued.
+        """
+        now = _now_utc()
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE paper_v2_commands
+                SET status = 'accepted', updated_at = $1
+                WHERE status = 'processing'
+                  AND updated_at < $1 - make_interval(secs => $2::int)
+                """,
+                now,
+                int(max_age_seconds),
+            )
+        try:
+            return int(result.split()[-1])
+        except (ValueError, IndexError):
+            return 0
 
     # ------------------------------------------------------------------
     # Signal
@@ -933,6 +1065,39 @@ class PaperRepository:
     async def get_open_positions_by_account(self, account_id: UUID) -> list[Position]:
         """Get all open positions for an account (alias for get_open_positions)."""
         return await self.get_open_positions(account_id)
+
+    async def get_open_positions_by_day(self, day_id: UUID) -> list[Position]:
+        """Open positions for a trading day, sourced from the DB.
+
+        Used by finish_day so a close-out is correct after a runner restart
+        (the in-memory dict alone is not authoritative across crashes).
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM paper_v2_positions
+                WHERE day_id = $1 AND status = 'open'
+                ORDER BY opened_at
+                """,
+                str(day_id),
+            )
+        return [_row_to_position(r) for r in rows]
+
+    async def get_unfilled_orders_by_day(self, day_id: UUID) -> list[Order]:
+        """Entry orders for a day that are still open (pending/submitted).
+
+        Used by finish_day to cancel residual entry intents before close-out.
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM paper_v2_orders
+                WHERE day_id = $1 AND state IN ('pending', 'submitted')
+                ORDER BY created_at
+                """,
+                str(day_id),
+            )
+        return [_row_to_order(r) for r in rows]
 
     async def update_position(
         self,

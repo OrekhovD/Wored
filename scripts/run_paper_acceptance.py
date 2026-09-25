@@ -309,12 +309,15 @@ class TestRunnerFence(unittest.TestCase):
         self.assertTrue(runner.commit_fence_token(t1))
         self.assertFalse(runner.commit_fence_token(t1))  # stale
 
-    def test_recover_no_store_unblocks(self):
+    def test_recover_no_store_stays_blocked(self):
+        """Fail-closed contract: with no recovery store, recover() completes but
+        entries MUST stay blocked (never fail-open on money paths)."""
         strat = BaselineV1Strategy()
         runner = PaperTradingRunner(strategy=strat)
         report = asyncio.run(runner.recover())
         self.assertTrue(report["recovered"])
-        self.assertFalse(runner.entries_blocked)
+        self.assertTrue(runner.entries_blocked)
+        self.assertEqual(report["entries_blocked_reason"], "recovery_store_unavailable")
 
 
 # ======================================================================
