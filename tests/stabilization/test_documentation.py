@@ -95,65 +95,11 @@ class TestEnvExample(unittest.TestCase):
                        ".env.wored.example must reference WEBUI_INTERNAL_TOKEN")
 
 
-class TestProviderRegistry(unittest.TestCase):
-    """R09-03: Provider registry JSON is valid and has required fields."""
-
-    def test_provider_registry_exists(self):
-        registry = ROOT / "config" / "provider_registry.json"
-        self.assertTrue(registry.exists(), f"Missing {registry}")
-
-    def test_provider_registry_valid_json(self):
-        registry = ROOT / "config" / "provider_registry.json"
-        if not registry.exists():
-            self.skipTest("provider_registry.json not found")
-        data = json.loads(registry.read_text())
-        self.assertIn("models", data)
-        self.assertIsInstance(data["models"], list)
-        self.assertGreater(len(data["models"]), 0)
-
-    def test_provider_registry_required_fields(self):
-        registry = ROOT / "config" / "provider_registry.json"
-        if not registry.exists():
-            self.skipTest("provider_registry.json not found")
-        data = json.loads(registry.read_text())
-        required_fields = [
-            "provider", "model_id", "endpoint_type", "enabled",
-            "cost_class", "capabilities", "context_tokens",
-            "max_output_tokens", "pricing"
-        ]
-        for model in data["models"]:
-            for field in required_fields:
-                self.assertIn(field, model, f"Model {model.get('model_id', '?')} missing {field}")
-
-    def test_provider_registry_capabilities(self):
-        registry = ROOT / "config" / "provider_registry.json"
-        if not registry.exists():
-            self.skipTest("provider_registry.json not found")
-        data = json.loads(registry.read_text())
-        cap_fields = ["tools", "thinking", "json_schema", "vision"]
-        for model in data["models"]:
-            caps = model.get("capabilities", {})
-            for field in cap_fields:
-                self.assertIn(field, caps, f"Model {model['model_id']} missing capability: {field}")
-                self.assertIsInstance(caps[field], bool, f"Capability {field} must be bool")
-
-    def test_provider_registry_cost_classes(self):
-        registry = ROOT / "config" / "provider_registry.json"
-        if not registry.exists():
-            self.skipTest("provider_registry.json not found")
-        data = json.loads(registry.read_text())
-        valid_classes = {"free", "included", "metered"}
-        for model in data["models"]:
-            self.assertIn(model["cost_class"], valid_classes,
-                          f"Model {model['model_id']} has invalid cost_class: {model['cost_class']}")
-
-    def test_provider_registry_has_ollama_cloud(self):
-        registry = ROOT / "config" / "provider_registry.json"
-        if not registry.exists():
-            self.skipTest("provider_registry.json not found")
-        data = json.loads(registry.read_text())
-        providers = {m["provider"] for m in data["models"]}
-        self.assertIn("ollama-cloud", providers, "Registry must include ollama-cloud provider")
+# R09-03 provider_registry.json assertions removed: the free-model provider
+# registry was archived with the free-model routing subsystem to
+# free_routing_archive/config/provider_registry.json. The active chatbot uses
+# chatbot/ai/models.py (Ollama Cloud + local Bonsai), not the gateway registry.
+# Restore this class together with the archive if the gateway stack is revived.
 
 
 class TestDocumentationFiles(unittest.TestCase):

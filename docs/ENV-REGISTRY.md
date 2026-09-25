@@ -40,15 +40,16 @@ Each key has: type, default, required/optional, service consumers, and secrecy l
 | `LOCAL_LLM_MODEL` | string | `bonsai-27b` | optional | webui prediction_engine | no |
 | `LOCAL_LLM_BASE_URL` | string (URL origin) | `http://127.0.0.1:8088` | optional | webui prediction_engine | no |
 | `LOCAL_LLM_TIMEOUT` | float (seconds) | `120` | optional | webui prediction_engine | no |
-| `NVIDIA_NIM_ENABLED` | bool | `false` | optional | webui prediction_engine | no |
+| `NVIDIA_NIM_ENABLED` | bool | `false` | **archived / no-op** | webui prediction_engine | no |
 
-`NVIDIA_NIM_ENABLED` gates the NVIDIA NIM tail of every prediction chain. The
-tier is off by default because `integrate.api.nvidia.com` answers `410 Gone` for
-every model those chains used (24 runs / 24 failures / 0 successes in
-`forecast_model_runs` as of 2026-09-22); a chain therefore ends on a provider
-that can answer. Setting it to `true` restores the tail for the `NVIDIA_*_MODEL`
-entries whose own `NVIDIA_*_API_KEY` is present — the ~37 such keys in the webui
-container do not enable the tier by themselves. See `docs/HERMES-ROLE-FALLBACK-REVIEW-20260921.md` (M4).
+`NVIDIA_NIM_ENABLED` used to gate the NVIDIA NIM tail of every prediction chain.
+That free-model tier was retired with the routing subsystem archived to
+`free_routing_archive/`, so the flag is now **inert**: `_nvidia_candidate` and the
+`nvidia` chain tail were removed from `webui/prediction_engine.py`, and setting
+the flag to `true` no longer appends any NVIDIA candidate. Forecast chains resolve
+to Ollama Cloud Pro (`:cloud`) and the local Bonsai server only. The historical
+rationale (permanent `410 Gone` from `integrate.api.nvidia.com`, 24/24 failures)
+is preserved in `free_routing_archive/README.md`.
 
 `LOCAL_LLM_*` point at a workstation `ollama serve` (port 8088), not at Ollama
 Cloud. A local candidate leads the chain of the named role and the cloud chain

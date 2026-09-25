@@ -1,5 +1,14 @@
 # Provider Registry — WORED
 
+> **ARCHIVED (2026-09-25).** This gateway registry served the free-model routing
+> subsystem (OmniRoute / NVIDIA NIM / TokenRouter / DashScope / minimax). That
+> subsystem was frozen and moved to top-level `free_routing_archive/`; the JSON
+> now lives at `free_routing_archive/config/provider_registry.json` and is **not
+> read by the WORED runtime**. Active inference uses `chatbot/ai/models.py`
+> (Ollama Cloud Pro `:cloud` + local Bonsai) and `webui/prediction_engine.py`.
+> This page is kept only as historical reference. See
+> `free_routing_archive/README.md` for the revival procedure.
+
 ## Registry Format
 
 ```json

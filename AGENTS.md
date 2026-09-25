@@ -68,35 +68,38 @@ Docker Compose runtime содержит 5 сервисов:
 - **Auth:** `Authorization: Bearer $OLLAMA_CLOUD_API_KEY`
 - **Переменная окружения:** `OLLAMA_CLOUD_API_KEY` в `.env`
 
-### Рекомендуемые модели по ролям
+### Рекомендуемые модели по ролям (Ollama Pro + локальный Bonsai failover)
 
-| Роль | Модель по умолчанию | Провайдер |
+| Роль | Cloud (Ollama Pro, `:cloud`) | Локальный failover |
 |---|---|---|
-| Premium / сложные задачи | `glm-5.2` | Ollama Cloud |
-| Analyst / reasoning | `deepseek-v4-pro` | Ollama Cloud |
-| Worker / быстрые задачи | `deepseek-v4-flash` | Ollama Cloud |
-| Reviewer / second opinion | `minimax-m3` | Ollama Cloud |
-| Oracle / fallback | `kimi-k2.6`, `kimi-k2:1t` | Ollama Cloud |
+| Worker / быстрые задачи | `deepseek-v4.1-flash:cloud` | `bonsai-27b:lmstudio-q1` |
+| Analyst / reasoning | `glm-5.3:cloud` | `bonsai-27b:lmstudio-q1` |
+| Premium / strategist | `glm-5.3:cloud` | `bonsai-27b:lmstudio-q1` |
+| Oracle / second opinion | `glm-5.3-flash:cloud` | `bonsai-27b:lmstudio-q1` |
 
-### Utility-tier
-- **TokenRouter (Kimi K3 Free)** — `moonshotai/kimi-k3-free` для дешёвых вспомогательных задач.
-- Переменная: `TOKENROUTER_API_KEY` (опционально).
+Активные цепочки заданы в `chatbot/ai/models.py`: cloud-first, затем локальный Bonsai
+(`provider="local_ollama"`). Активные провайдеры — только **Ollama Cloud** (`:cloud`)
+и локальный **Bonsai**. Hermes (`hermes/`) остаётся внешним оркестратором.
 
-### Fallback-tier
-- **NVIDIA NIM**:
-  - `mistralai/mistral-nemotron` — переменная `NVIDIA_MISTRAL_NEMOTRON_API_KEY`;
-  - `minimaxai/minimax-m3` — переменная `NVIDIA_MINIMAX_M3_API_KEY`.
-- **OpenRouter** — fallback только при недоступности primary, переменная `OPENROUTER_API_KEY`.
+### Архив: роутинг бесплатных моделей (FROZEN)
+Система роутинга на бесплатных моделях — **OmniRoute, NVIDIA NIM / Nemotron,
+TokenRouter (Kimi K3 Free), DashScope/Qwen, minimax-oracle** — вместе со «шлюзовым»
+стеком (`provider_gateway`, `provider_adapters`, `usage_ledger`, `budget_policy`,
+self-learn `reflector` / `strategy_learner`) и реестром `provider_registry.json`
+**законсервирована** в top-level `free_routing_archive/` (вне runtime WORED, не
+собирается pytest'ом через `norecursedirs`). NVIDIA NIM chain-tail удалён и из
+`webui/prediction_engine.py`. Процедура разморозки — в `free_routing_archive/README.md`.
 
 ### Исключения
-**Qwen/DashScope не используются** в активном стеке WORED. Любые legacy-ссылки считать историческими и неактивными.
+**Qwen/DashScope/NVIDIA-NIM/TokenRouter/OpenRouter не активны** — исторические,
+вынесены в `free_routing_archive/`.
 
 ### Переключение моделей
 
 Смена активных моделей Ollama Cloud осуществляется через `.env` файл в корне `D:\WORED\`:
-- `OLLAMA_WORKER_MODEL=deepseek-v4-flash`
-- `OLLAMA_ANALYST_MODEL=deepseek-v4-pro`
-- `OLLAMA_PREMIUM_MODEL=glm-5.2`
+- Chatbot (`chatbot/ai/models.py`): `OLLAMA_CHATBOT_WORKER_MODEL`, `OLLAMA_CHATBOT_ANALYST_MODEL`, `OLLAMA_CHATBOT_PREMIUM_MODEL`
+- Webui forecast (`webui/prediction_engine.py`): `OLLAMA_WORKER_MODEL`, `OLLAMA_ANALYST_MODEL=glm-5.3:cloud`, `OLLAMA_PREMIUM_MODEL=glm-5.3:cloud`, `OLLAMA_ORACLE_MODEL=glm-5.3-flash:cloud`
+- Локальный failover: `LOCAL_LLM_MODEL=bonsai-27b:lmstudio-q1`, `LOCAL_LLM_BASE_URL`
 
 Чтобы применить изменения: `docker compose restart chatbot`.
 
