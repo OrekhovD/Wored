@@ -55,7 +55,7 @@ from forecast_queue import (
 from forecast_refresh import AUTO_SOURCE, forecast_refresh_loop
 from access_control import verify_telegram, verify_telegram_multi, allowed_origin, safe_next_url
 from principal import Principal, create_from_cookie, create_from_telegram, create_from_internal_token
-from services.market_data import fresh_ticker
+from services.market_data import fresh_ticker, timestamp_age
 from services.sim_math import preview as simulate_preview, validate_order, settlement
 
 from prediction_timeframes import period_to_minutes, STEP_MINUTES_MAP
@@ -1674,6 +1674,34 @@ async def run_prediction_request(
     return await queue_prediction(request, symbol, horizon_steps, requested_by, source, base_timeframe, depth)
 
 
+# Readiness feed-liveness window. Measured on the collector's own clock
+# (``received_at``) rather than the HTX exchange ``timestamp``, so a hair of
+# forward skew between the exchange and the webui container clock cannot flip
+# an actually-fresh ticker to "stale" and flap /readyz to 503. Slightly wider
+# than the 60s trading-path window to absorb publish latency on cold start.
+COLLECTOR_FEED_MAX_AGE_SECONDS = 90
+
+
+def _collector_feed_fresh(tick: dict[str, Any], *, max_age: int = COLLECTOR_FEED_MAX_AGE_SECONDS) -> bool:
+    """Whether a watchlist ticker counts as a live feed for readiness.
+
+    Uses ``received_at`` (collector clock) first, then the exchange
+    ``timestamp`` as a fallback. A small negative age (forward clock skew,
+    up to 5s) is clamped to just-received instead of treated as invalid.
+    """
+    if not tick:
+        return False
+    stamp = tick.get("received_at") or tick.get("timestamp") or tick.get("ts")
+    age = timestamp_age(stamp)
+    if age is not None and -5 <= age < 0:
+        age = 0.0
+    try:
+        price = float(tick.get("price", 0))
+    except (ValueError, TypeError):
+        return False
+    return age is not None and age <= max_age and math.isfinite(price) and price > 0
+
+
 async def fetch_health_snapshot(request: Request) -> dict[str, Any]:
     redis_client = request.app.state.redis_client
     pool = request.app.state.pg_pool
@@ -1707,7 +1735,7 @@ async def fetch_health_snapshot(request: Request) -> dict[str, Any]:
     if redis_client is not None:
         try:
             ticks = [safe_json(await redis_client.get(f"ticker:{sym}") or "{}") for sym in get_watchlist()]
-            collector_ok = bool(ticks) and all(fresh_ticker(tick) for tick in ticks)
+            collector_ok = bool(ticks) and all(_collector_feed_fresh(tick) for tick in ticks)
         except Exception:
             collector_ok = False
 
