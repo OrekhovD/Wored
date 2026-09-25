@@ -59,6 +59,7 @@ from paper_trading.contracts import (
     StatusDTO,
     money,
 )
+from paper_trading.contracts import CommandStatus
 from paper_trading.execution import (
     FillResult,
     Position as ExecutionPosition,
@@ -763,6 +764,9 @@ class PaperTradingRunner:
             if not self._recovered and self.recovery_store is not None:
                 await self.recover()
 
+            # 0c. Auto-finish expired running days
+            await self._auto_finish_expired_days()
+
             # 1. SL/TP check (always, even if entries blocked)
             await self._check_sl_tp(now)
             # 2. Process pending commands (close, cancel, start/finish day, etc.)
@@ -1290,6 +1294,63 @@ class PaperTradingRunner:
 
         return True
 
+    async def _auto_finish_expired_days(self) -> None:
+        """Close running days whose end_utc has passed.
+
+        Called every run_cycle (2s) but only acts when a day is expired.
+        Without this, a day stays 'running' forever if no explicit finish_day
+        command arrives — the runner keeps evaluating signals against an
+        outdated day and blocks new day creation.
+        """
+        if self.repository is None:
+            return
+        try:
+            async with self.repository.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT day_id, end_utc, owner_id FROM paper_v2_days "
+                    "WHERE state = 'running' AND end_utc IS NOT NULL "
+                    "AND end_utc < NOW() AT TIME ZONE 'UTC'"
+                )
+            for row in rows:
+                day_id = row["day_id"]
+                owner_id = row["owner_id"]
+                log.info("auto-finish: day %s expired (end_utc=%s), closing", day_id, row["end_utc"])
+                # Close positions for this day first
+                await self._handle_finish_day(Command(
+                    command_id=uuid4(),
+                    owner_id=owner_id,
+                    account_id=None,
+                    day_id=day_id,
+                    command_type=CommandType.finish_day,
+                    idempotency_key=f"auto-finish-{day_id}",
+                    request_hash="",
+                    status=CommandStatus.accepted,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                ))
+                # Auto-start a new day for the same owner so trading continues
+                if self.repository is not None:
+                    try:
+                        from paper_trading.service import PaperTradingService, StartDayRequest
+                        svc = PaperTradingService(self.repository)
+                        result = await svc.start_day(StartDayRequest(
+                            owner_id=str(owner_id),
+                            timezone="Asia/Bangkok",
+                            end_time_local="21:00",
+                            mode="baseline_auto",
+                        ))
+                        if result.get("ok"):
+                            log.info("auto-start: new day %s created for owner %s",
+                                     result.get("day_id"), owner_id)
+                        elif result.get("error") == "day_already_active":
+                            log.debug("auto-start: day already active for %s", owner_id)
+                        else:
+                            log.warning("auto-start failed: %s", result.get("error"))
+                    except Exception as exc:
+                        log.warning("auto-start new day failed: %s", exc)
+        except Exception as exc:
+            log.debug("auto-finish check failed: %s", exc)
+
     # ── Signal evaluation ──
 
     async def _evaluate_signals(self, now: float) -> None:
@@ -1367,8 +1428,9 @@ class PaperTradingRunner:
             # Execute the signal→order→fill→ledger chain
             await self._execute_signal(signal, now)
         else:
-            log.info("evaluate_signals: no signal (regime_bullish=%s, ema20=%s, atr=%s)",
+            log.info("evaluate_signals: no signal (regime_bullish=%s, regime_bearish=%s, ema20=%s, atr=%s)",
                      self.strategy.regime_bullish() if self.strategy else None,
+                     self.strategy.regime_bearish() if self.strategy else None,
                      self.strategy._ema20_1m.value if self.strategy else None,
                      self.strategy._atr14_1m.value if self.strategy else None)
 

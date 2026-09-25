@@ -35,8 +35,8 @@ EXPIRED = "expired"
 VALID_EXECUTION_STATES = frozenset({QUEUED, RUNNING, PARTIAL, COMPLETED, FAILED, EXPIRED})
 
 # ── Queue constants ────────────────────────────────────────────────────
-QUEUE_TTL_MINUTES = 20
-ATTEMPT_TIMEOUT_SECONDS = 300
+QUEUE_TTL_MINUTES = 30
+ATTEMPT_TIMEOUT_SECONDS = 600
 IDLE_CYCLE_SECONDS = 2
 
 # ── Heartbeat constants ────────────────────────────────────────────────

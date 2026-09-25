@@ -23,10 +23,10 @@ PROVIDER_COOLDOWN_SECONDS = {"ollama": 1.0, "glm": 1.8, "gemini": 1.0, "dashscop
 RETRY_BACKOFF_SECONDS = (2.0, 5.0)
 # A retry is only affordable while the next attempt still fits the role's share of
 # the queue's wall-clock budget: forecast_queue wraps a whole role bundle in
-# asyncio.wait_for(ATTEMPT_TIMEOUT_SECONDS = 300) inside one transaction, so a role
+# asyncio.wait_for(ATTEMPT_TIMEOUT_SECONDS = 600) inside one transaction, so a role
 # that spends 3x60 s on backoff gets the entire job cancelled and rolled back -
-# including the roles that answered fine. 300 s / 3 roles = 100 s per role.
-ROLE_ATTEMPT_BUDGET_SECONDS = 100.0
+# including the roles that answered fine. 600 s / 3 roles = 200 s per role.
+ROLE_ATTEMPT_BUDGET_SECONDS = 200.0
 GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
