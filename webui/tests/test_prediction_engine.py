@@ -89,22 +89,19 @@ def test_runtime_candidates_honor_configured_ollama_chain(role):
     assert all(item.api_key_env == "OLLAMA_API_KEY" for item in candidates)
 
 
-def test_nvidia_fallback_requires_its_own_credential():
-    config = {"OLLAMA_WORKER_MODEL": "primary", "NVIDIA_WORKER_MODEL": "fallback"}
-    # Opt-in tier: even with the credential, the chain stops at Ollama by default,
-    # because integrate.api.nvidia.com answers 410 Gone for these models.
-    with patch.dict(os.environ, {**config, "NVIDIA_DEEPSEEK_V4_FLASH_API_KEY": "test-key"}, clear=True):
-        assert [_item.provider for _item in _build_runtime_candidates(MODEL_CONFIGS["worker"])] == ["ollama"]
-    with patch.dict(os.environ, {**config, "NVIDIA_NIM_ENABLED": "1"}, clear=True):
-        assert len(_build_runtime_candidates(MODEL_CONFIGS["worker"])) == 1
-    with patch.dict(
-        os.environ,
-        {**config, "NVIDIA_NIM_ENABLED": "1", "NVIDIA_DEEPSEEK_V4_FLASH_API_KEY": "test-key"},
-        clear=True,
-    ):
-        candidates = _build_runtime_candidates(MODEL_CONFIGS["worker"])
-    assert candidates[-1].provider == "nvidia"
-    assert candidates[-1].model_id == "fallback"
+def test_nvidia_chain_tail_is_retired():
+    # NVIDIA NIM was an opt-in, off-by-default free-model chain tail. It was
+    # archived with the free-model routing subsystem, so even with every NVIDIA_*
+    # env var set the worker chain now resolves to Ollama candidates only.
+    config = {
+        "OLLAMA_WORKER_MODEL": "primary",
+        "NVIDIA_WORKER_MODEL": "fallback",
+        "NVIDIA_NIM_ENABLED": "1",
+        "NVIDIA_DEEPSEEK_V4_FLASH_API_KEY": "test-key",
+    }
+    with patch.dict(os.environ, config, clear=True):
+        providers = [_item.provider for _item in _build_runtime_candidates(MODEL_CONFIGS["worker"])]
+    assert providers == ["ollama"]
 
 
 @pytest.mark.parametrize("key,available", [("", False), ("test-key", True)])

@@ -442,7 +442,7 @@ class ErrorCauseAndRoleAttributionTests(unittest.IsolatedAsyncioTestCase):
         from prediction_engine import MODEL_CONFIGS, _build_runtime_candidates, _candidate_is_available
         with patch.dict(os.environ, self.cloud, clear=False):
             cands = _build_runtime_candidates(MODEL_CONFIGS["analyst"])
-            return [c for c in cands if _candidate_is_available(c, strict_nvapi=False)]
+            return [c for c in cands if _candidate_is_available(c)]
 
     async def _run_chain(self, exc):
         import os
@@ -558,12 +558,15 @@ class ChainHygieneTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("nvidia", [c.provider for c in chain],
                              f"{key} chain still ends on the permanently gone tier")
 
-    def test_nvidia_tail_returns_only_when_the_tier_is_opted_in(self):
+    def test_nvidia_tier_stays_retired_even_when_opt_in_is_set(self):
+        # The opt-in NVIDIA NIM chain tail was archived with the free-model
+        # routing subsystem: even with NVIDIA_NIM_ENABLED=1 and a key present,
+        # no role chain may end on an nvidia candidate.
         self.base["NVIDIA_NIM_ENABLED"] = "1"
         self.base["NVIDIA_MINIMAX_M3_API_KEY"] = "nvapi-test"
-        chain = self._chains()["minimax"]
-        self.assertEqual(chain[-1].provider, "nvidia")
-        self.assertEqual(chain[-1].model_id, "minimaxai/minimax-m3")
+        for key, chain in self._chains().items():
+            self.assertNotIn("nvidia", [c.provider for c in chain],
+                             f"{key} chain still ends on the archived nvidia tier")
 
     def test_opted_in_tier_still_needs_its_key(self):
         self.base["NVIDIA_NIM_ENABLED"] = "1"

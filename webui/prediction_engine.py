@@ -16,9 +16,9 @@ log = logging.getLogger("webui.prediction_engine")
 
 from prediction_timeframes import STEP_MINUTES_MAP
 
-DEFAULT_ANALYST_QWEN_MODEL = "qwen3.6-35b-a3b"
-DEFAULT_PREMIUM_QWEN_MODEL = "qwen3.6-27b"
-DEFAULT_WORKER_GEMINI_MODEL = "gemini-3-flash-preview"
+# Free-model direct providers (qwen/gemini) were retired together with the
+# free-model routing subsystem; the Pro-only policy keeps Ollama Cloud and the
+# local Bonsai server only.
 PROVIDER_COOLDOWN_SECONDS = {"ollama": 1.0, "glm": 1.8, "gemini": 1.0, "dashscope": 1.4, "minimax": 1.0}
 RETRY_BACKOFF_SECONDS = (2.0, 5.0)
 # A retry is only affordable while the next attempt still fits the role's share of
@@ -27,10 +27,9 @@ RETRY_BACKOFF_SECONDS = (2.0, 5.0)
 # that spends 3x60 s on backoff gets the entire job cancelled and rolled back -
 # including the roles that answered fine. 600 s / 3 roles = 200 s per role.
 ROLE_ATTEMPT_BUDGET_SECONDS = 200.0
-GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
-DASHSCOPE_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
-NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+# GLM / DashScope / NVIDIA direct base URLs were retired with the free-model
+# routing subsystem (see free_routing_archive/). Ollama Cloud + local Bonsai only.
 # Workstation-local inference server: a separate `ollama serve`, unrelated to the
 # Ollama Cloud path above. Disabled unless LOCAL_LLM_ROLES names a role chain, and
 # read per call so the opt-in can be toggled without reimporting the module.
@@ -137,8 +136,8 @@ class RuntimeModelCandidate:
     base_url: str
     api_key_env: str
     timeout: float
-    provider: str = "ollama"  # "ollama" (cloud /api/chat), "nvidia" (OpenAI /v1/chat/completions),
-    # "ollama_local" (workstation /api/chat, no auth, thinking forced off)
+    provider: str = "ollama"  # "ollama" (cloud /api/chat),
+    # "ollama_local" (workstation /api/chat, no auth)
 
 
 @dataclass(frozen=True)
@@ -424,12 +423,9 @@ def get_model_config(key: str) -> PredictionModelConfig:
 
 
 def _provider_group(config: PredictionModelConfig) -> str:
-    if "bigmodel.cn" in config.base_url:
-        return "glm"
-    if "googleapis.com" in config.base_url:
-        return "gemini"
-    if "dashscope-intl.aliyuncs.com" in config.base_url:
-        return "dashscope"
+    # Forecast chains resolve to Ollama Cloud / local Bonsai only after the
+    # free-model routing subsystem was archived, so the previous base_url
+    # sniffing for glm / gemini / dashscope direct providers was removed.
     return config.key
 
 
@@ -523,44 +519,11 @@ def _is_missing_model_error(exc: Exception) -> bool:
     return "404" in message and ("not found" in message or "unsupported" in message)
 
 
-def _nvidia_tier_enabled() -> bool:
-    """NVIDIA NIM is an opt-in tier, off by default.
-
-    The code comment used to claim "Ollama-only now" while every chain still
-    appended an NVIDIA candidate whenever its key was set, and the webui
-    container has ~37 of those keys. Measured against forecast_model_runs the
-    tier is not degraded but dead: 24 runs, 24 failures, zero successes
-    (minimaxai/minimax-m3 15/15, deepseek-ai/deepseek-v4-pro-0813 6/6,
-    moonshotai/kimi-k3 3/3), each one `410 Gone` from
-    integrate.api.nvidia.com. 410 is permanent, so the tail of every chain cost
-    an HTTP round-trip, log noise and - since 92233a4 attributes a failed run to
-    its chain primary - a failure that no longer names the provider that caused
-    it. Set NVIDIA_NIM_ENABLED=1 to bring the tier back.
-    """
-    return os.getenv("NVIDIA_NIM_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _nvidia_candidate(
-    cache_prefix: str,
-    model_env: str,
-    default_model: str,
-    api_key_env: str,
-    timeout: float,
-) -> RuntimeModelCandidate | None:
-    """The chain tail, only when the tier is explicitly switched on."""
-    if not _nvidia_tier_enabled():
-        return None
-    model_id = os.getenv(model_env, default_model).strip()
-    if not model_id or not os.getenv(api_key_env, "").strip():
-        return None
-    return RuntimeModelCandidate(
-        cache_key=f"{cache_prefix}:nvidia:{model_id}",
-        model_id=model_id,
-        base_url=NVIDIA_BASE_URL,
-        api_key_env=api_key_env,
-        timeout=timeout,
-        provider="nvidia",
-    )
+# NVIDIA NIM was an opt-in, off-by-default free-model chain tail. It was dead
+# (every call returned 410 Gone from integrate.api.nvidia.com) and belonged to
+# the retired free-model routing subsystem, so the tier and its candidate
+# builder were removed. The forecast roles below build Ollama Cloud (+ local
+# Bonsai) chains only.
 
 
 def _bundle_distinct_chain(
@@ -648,11 +611,6 @@ def _cloud_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                         timeout=config.timeout,
                     )
                 )
-        nvidia = _nvidia_candidate(
-            "worker", "NVIDIA_WORKER_MODEL", "deepseek-ai/deepseek-v4-flash-0731",
-            "NVIDIA_DEEPSEEK_V4_FLASH_API_KEY", config.timeout)
-        if nvidia:
-            candidates.append(nvidia)
         return candidates
 
     if config.key == "analyst":
@@ -671,11 +629,6 @@ def _cloud_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                         timeout=config.timeout,
                     )
                 )
-        nvidia = _nvidia_candidate(
-            "analyst", "NVIDIA_ANALYST_MODEL", "deepseek-ai/deepseek-v4-pro-0813",
-            "NVIDIA_DEEPSEEK_V4_PRO_API_KEY", config.timeout)
-        if nvidia:
-            candidates.append(nvidia)
         return candidates
 
     if config.key == "premium":
@@ -694,11 +647,6 @@ def _cloud_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                         timeout=config.timeout,
                     )
                 )
-        nvidia = _nvidia_candidate(
-            "premium", "NVIDIA_PREMIUM_MODEL", "moonshotai/kimi-k3",
-            "NVIDIA_KIMI_K3_API_KEY", config.timeout)
-        if nvidia:
-            candidates.append(nvidia)
         return candidates
 
     # Oracle — Ollama Pro: glm-5.3-flash:cloud → deepseek-v4.1-flash:cloud
@@ -716,24 +664,15 @@ def _cloud_runtime_candidates(config: PredictionModelConfig) -> list[RuntimeMode
                     timeout=config.timeout,
                 )
             )
-    nvidia = _nvidia_candidate(
-        "minimax", "NVIDIA_ORACLE_MODEL", "minimaxai/minimax-m3",
-        "NVIDIA_MINIMAX_M3_API_KEY", config.timeout)
-    if nvidia:
-        candidates.append(nvidia)
     return candidates
 
 
-def _candidate_is_available(candidate: RuntimeModelCandidate, strict_nvapi: bool = False) -> bool:
+def _candidate_is_available(candidate: RuntimeModelCandidate) -> bool:
     if candidate.provider == "ollama_local":
         # The workstation server has no auth; availability is proven by the call.
         return True
     api_key = os.getenv(candidate.api_key_env, "").strip()
-    if not api_key:
-        return False
-    if strict_nvapi and candidate.api_key_env != "OLLAMA_API_KEY" and not api_key.startswith("nvapi-"):
-        return False
-    return True
+    return bool(api_key)
 
 
 def list_prediction_models() -> list[dict[str, Any]]:
@@ -774,7 +713,7 @@ def list_prediction_models() -> list[dict[str, Any]]:
     return items
 
 
-def _build_client(candidate: RuntimeModelCandidate, strict_nvapi: bool = False) -> AsyncOpenAI | None:
+def _build_client(candidate: RuntimeModelCandidate) -> AsyncOpenAI | None:
     """Kept for list_prediction_models compatibility — actual calls use _ollama_chat."""
     if candidate.cache_key in _clients:
         return _clients[candidate.cache_key]
@@ -940,48 +879,9 @@ async def _local_ollama_chat(
     return content
 
 
-async def _nvidia_chat(
-    candidate: RuntimeModelCandidate,
-    config: PredictionModelConfig,
-    context_payload: dict[str, Any],
-    system_prompt: str | None = None,
-    peer_outputs: list[dict[str, Any]] | None = None,
-) -> str:
-    """Call NVIDIA NIM OpenAI-compatible /v1/chat/completions endpoint."""
-    import httpx
-
-    api_key = os.getenv(candidate.api_key_env, "").strip()
-    if not api_key:
-        raise RuntimeError(f"{candidate.api_key_env} is not set")
-
-    url = f"{candidate.base_url.rstrip('/')}/chat/completions"
-    messages = _build_prediction_messages(context_payload, system_prompt, peer_outputs)
-
-    payload = {
-        "model": candidate.model_id,
-        "messages": messages,
-        "max_tokens": config.max_tokens,
-        "temperature": config.temperature,
-        "stream": False,
-    }
-
-    async with httpx.AsyncClient(timeout=candidate.timeout) as hc:
-        resp = await hc.post(
-            url,
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-    content = (data.get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
-    if not content:
-        raise ValueError("Model returned empty content")
-    return content
+# NOTE: the NVIDIA NIM caller (_nvidia_chat) and its provider branch were
+# removed together with the retired free-model routing subsystem. Forecast
+# candidates are Ollama Cloud / local Bonsai only.
 
 
 def _role_system_prompt(role: str | None) -> str | None:
@@ -1063,9 +963,7 @@ async def generate_model_prediction(
             try:
                 if not attempted or attempted[-1] != candidate.model_id:
                     attempted.append(candidate.model_id)
-                if candidate.provider == "nvidia":
-                    content = await _nvidia_chat(candidate, config, context_payload, system_prompt, peer_outputs)
-                elif candidate.provider == "ollama_local":
+                if candidate.provider == "ollama_local":
                     content = await _local_ollama_chat(candidate, config, context_payload, system_prompt, peer_outputs)
                 else:
                     content = await _ollama_chat(candidate, config, context_payload, system_prompt, peer_outputs)
