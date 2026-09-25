@@ -1295,28 +1295,38 @@ class PaperTradingRunner:
         return True
 
     async def _auto_finish_expired_days(self) -> None:
-        """Close running days whose end_utc has passed.
+        """Close running days whose end_utc has passed, then start a new day.
 
         Called every run_cycle (2s) but only acts when a day is expired.
         Without this, a day stays 'running' forever if no explicit finish_day
         command arrives — the runner keeps evaluating signals against an
         outdated day and blocks new day creation.
+
+        B1 fix: if _handle_finish_day returns False (settlement_pending —
+        positions couldn't be closed because the market snapshot was
+        unavailable), do NOT call start_day.  Calling start_day against a
+        day still in 'running' or 'settlement_pending' hits the partial
+        unique index uq_days_one_incomplete and silently fails, leaving the
+        system without an active day indefinitely.
         """
         if self.repository is None:
             return
         try:
             async with self.repository.pool.acquire() as conn:
+                # M2 fix: compare against now() (session TZ-aware) instead of
+                # NOW() AT TIME ZONE 'UTC' which returns naive text and
+                # depends on the session TimeZone setting.
                 rows = await conn.fetch(
                     "SELECT day_id, end_utc, owner_id FROM paper_v2_days "
                     "WHERE state = 'running' AND end_utc IS NOT NULL "
-                    "AND end_utc < NOW() AT TIME ZONE 'UTC'"
+                    "AND end_utc < now()"
                 )
             for row in rows:
                 day_id = row["day_id"]
                 owner_id = row["owner_id"]
                 log.info("auto-finish: day %s expired (end_utc=%s), closing", day_id, row["end_utc"])
                 # Close positions for this day first
-                await self._handle_finish_day(Command(
+                finished = await self._handle_finish_day(Command(
                     command_id=uuid4(),
                     owner_id=owner_id,
                     account_id=None,
@@ -1328,6 +1338,13 @@ class PaperTradingRunner:
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
                 ))
+                # B1 fix: only start a new day if the old one was fully closed.
+                # settlement_pending means positions are still open — retry
+                # next cycle.
+                if not finished:
+                    log.warning("auto-finish: day %s not fully closed (settlement_pending), "
+                                "deferring auto-start", day_id)
+                    continue
                 # Auto-start a new day for the same owner so trading continues
                 if self.repository is not None:
                     try:
@@ -1349,7 +1366,7 @@ class PaperTradingRunner:
                     except Exception as exc:
                         log.warning("auto-start new day failed: %s", exc)
         except Exception as exc:
-            log.debug("auto-finish check failed: %s", exc)
+            log.warning("auto-finish check failed: %s", exc)
 
     # ── Signal evaluation ──
 

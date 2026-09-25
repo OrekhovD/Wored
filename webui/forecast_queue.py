@@ -1,8 +1,8 @@
 """Durable, bounded forecast worker; results and acknowledgement share a transaction.
 
 R01 additions:
-- Job queue TTL 20 minutes from creation
-- Worker attempt timeout 300 seconds
+- Job queue TTL 30 minutes from creation
+- Worker attempt timeout 600 seconds
 - Idle cycle 2 seconds
 - Cancelled process rolls back uncommitted SQL
 - Re-grabbed job gets new attempt_id in ledger
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS forecast_jobs (
     attempt_id TEXT,
     error_code TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deadline_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '20 minutes',
+    deadline_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 minutes',
     finished_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS forecast_jobs_pending ON forecast_jobs (created_at) WHERE state='queued';
