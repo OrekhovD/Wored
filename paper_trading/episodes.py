@@ -134,7 +134,10 @@ def _build(*, source, position_ref, contract_code, side, entry, exit_, size,
     # Canonical net PnL recomputed from primitives — identical for identical
     # primitives regardless of the source loop (block C acceptance).
     entry_fee = abs(size * entry) * TAKER_FEE_RATE
-    net_pnl, exit_fee = settlement(side, entry, exit_, size, entry_fee, funding)
+    net_pnl_raw, exit_fee_raw = settlement(side, entry, exit_, size, entry_fee, funding)
+    # settlement is Decimal-in/Decimal-out by contract; normalise for typing.
+    net_pnl = net_pnl_raw if isinstance(net_pnl_raw, Decimal) else Decimal(str(net_pnl_raw))
+    exit_fee = exit_fee_raw if isinstance(exit_fee_raw, Decimal) else Decimal(str(exit_fee_raw))
     gross_pnl = (exit_ - entry) * size * (Decimal(1) if side == "long" else Decimal(-1))
 
     risk = abs(isolated_margin)

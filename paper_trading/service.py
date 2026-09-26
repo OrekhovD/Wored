@@ -22,6 +22,11 @@ from paper_trading.repository import PaperRepository
 
 log = logging.getLogger(__name__)
 
+
+def _as_uuid(value: UUID | str) -> UUID:
+    """Normalise a str/UUID identifier to UUID for repository calls."""
+    return UUID(value) if isinstance(value, str) else value
+
 # Default risk settings for new owner without saved settings
 DEFAULT_SETTINGS = {
     "opening_capital": "1000",
@@ -55,7 +60,7 @@ class PaperTradingService:
         """Start a new trading day for both manual and auto accounts."""
         # Ensure owner exists
         try:
-            await self.repo.create_owner(req.owner_id, display_name=f"owner-{req.owner_id[:8]}")
+            await self.repo.create_owner(_as_uuid(req.owner_id), display_name=f"owner-{req.owner_id[:8]}")
         except Exception:
             pass  # owner already exists is OK
 
@@ -80,7 +85,7 @@ class PaperTradingService:
         # is started — the partial unique index uq_days_one_incomplete forbids a
         # second one, so treating settlement_pending as "passable" here would
         # only make create_day fail later.
-        existing = await self.repo.get_active_day(req.owner_id)
+        existing = await self.repo.get_active_day(_as_uuid(req.owner_id))
         if existing and existing.state != "closed":
             return {
                 "ok": False,
@@ -173,7 +178,7 @@ class PaperTradingService:
 
     async def get_current_state(self, owner_id: str) -> dict[str, Any]:
         """Get current trading day state with both accounts."""
-        day = await self.repo.get_active_day(owner_id)
+        day = await self.repo.get_active_day(_as_uuid(owner_id))
         if not day:
             return {
                 "ok": True,
@@ -182,15 +187,15 @@ class PaperTradingService:
                 "accounts": [],
             }
 
-        manual = await self.repo.get_account_by_kind(owner_id, "manual")
-        auto = await self.repo.get_account_by_kind(owner_id, "auto")
+        manual = await self.repo.get_account_by_kind(_as_uuid(owner_id), AccountKind("manual"))
+        auto = await self.repo.get_account_by_kind(_as_uuid(owner_id), AccountKind("auto"))
 
         accounts = []
         for acct, kind in [(manual, "manual"), (auto, "auto")]:
             if not acct:
                 continue
-            positions = await self.repo.get_open_positions_by_account(str(acct.account_id))
-            balance = await self.repo.get_account_balance(str(acct.account_id))
+            positions = await self.repo.get_open_positions_by_account(_as_uuid(acct.account_id))
+            balance = await self.repo.get_account_balance(_as_uuid(acct.account_id))
             accounts.append({
                 "id": str(acct.account_id),
                 "kind": kind,
@@ -234,7 +239,7 @@ class PaperTradingService:
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Submit a manual order."""
-        day = await self.repo.get_active_day(owner_id)
+        day = await self.repo.get_active_day(_as_uuid(owner_id))
         if not day:
             return {"ok": False, "error": "no_active_day"}
 
@@ -268,7 +273,7 @@ class PaperTradingService:
         """Close a position (full or partial)."""
         key = idempotency_key or f"close-{position_id}-{uuid4()}"
         # Get position to find account/day
-        pos = await self.repo.get_position_by_id(position_id)
+        pos = await self.repo.get_position_by_id(_as_uuid(position_id))
         if not pos:
             return {"ok": False, "error": "position_not_found"}
 
@@ -289,11 +294,11 @@ class PaperTradingService:
 
     async def pause_auto(self, owner_id: str) -> dict[str, Any]:
         """Pause automatic trading (new entries blocked, positions protected)."""
-        day = await self.repo.get_active_day(owner_id)
+        day = await self.repo.get_active_day(_as_uuid(owner_id))
         if not day:
             return {"ok": False, "error": "no_active_day"}
 
-        auto = await self.repo.get_account_by_kind(owner_id, "auto")
+        auto = await self.repo.get_account_by_kind(_as_uuid(owner_id), AccountKind("auto"))
         if not auto:
             return {"ok": False, "error": "no_auto_account"}
 
@@ -310,11 +315,11 @@ class PaperTradingService:
 
     async def resume_auto(self, owner_id: str) -> dict[str, Any]:
         """Resume automatic trading."""
-        day = await self.repo.get_active_day(owner_id)
+        day = await self.repo.get_active_day(_as_uuid(owner_id))
         if not day:
             return {"ok": False, "error": "no_active_day"}
 
-        auto = await self.repo.get_account_by_kind(owner_id, "auto")
+        auto = await self.repo.get_account_by_kind(_as_uuid(owner_id), AccountKind("auto"))
         if not auto:
             return {"ok": False, "error": "no_auto_account"}
 
@@ -331,7 +336,7 @@ class PaperTradingService:
 
     async def finish_day(self, owner_id: str) -> dict[str, Any]:
         """Finish the trading day — closeout both accounts."""
-        day = await self.repo.get_active_day(owner_id)
+        day = await self.repo.get_active_day(_as_uuid(owner_id))
         if not day:
             return {"ok": False, "error": "no_active_day"}
 
@@ -347,7 +352,7 @@ class PaperTradingService:
 
     async def get_command_status(self, command_id: str) -> dict[str, Any]:
         """Get command status by ID."""
-        cmd = await self.repo.get_command(command_id)
+        cmd = await self.repo.get_command(_as_uuid(command_id))
         if not cmd:
             return {"ok": False, "error": "command_not_found"}
         return {

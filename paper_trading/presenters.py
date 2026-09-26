@@ -321,11 +321,13 @@ def format_position_card(
         card["current_price"] = _dec_str(current_price)
         card["unrealized_pnl"] = _dec_str(unrealized)
 
-        # Distance to SL/TP in %
-        sl_dist = abs(current_price - pos.stop_loss) / pos.avg_entry_price * Decimal(100)
-        tp_dist = abs(pos.take_profit - current_price) / pos.avg_entry_price * Decimal(100)
-        card["distance_to_sl_pct"] = _dec_str(sl_dist)
-        card["distance_to_tp_pct"] = _dec_str(tp_dist)
+        # Distance to SL/TP in % (each is optional on the position)
+        if pos.stop_loss is not None:
+            sl_dist = abs(current_price - pos.stop_loss) / pos.avg_entry_price * Decimal(100)
+            card["distance_to_sl_pct"] = _dec_str(sl_dist)
+        if pos.take_profit is not None:
+            tp_dist = abs(pos.take_profit - current_price) / pos.avg_entry_price * Decimal(100)
+            card["distance_to_tp_pct"] = _dec_str(tp_dist)
 
     return card
 

@@ -228,7 +228,9 @@ def _equity_drawdown(chronological_net_pnls: Iterable[Decimal]) -> Decimal:
     from paper_trading.metrics import equity_curve, max_drawdown
 
     curve = equity_curve(list(chronological_net_pnls), starting_equity=Decimal(0))
-    return max_drawdown(curve)
+    dd = max_drawdown(curve)
+    # equity_curve is Decimal-in/Decimal-out; normalise defensively for typing.
+    return dd if isinstance(dd, Decimal) else Decimal(str(dd))
 
 
 class LearningEvaluator:

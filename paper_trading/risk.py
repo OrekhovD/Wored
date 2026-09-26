@@ -224,7 +224,7 @@ def calculate_liquidation_price(
     """
     from trading_math import liquidation_price as _core_liquidation_price
 
-    return _core_liquidation_price(
+    result = _core_liquidation_price(
         entry_price,
         leverage,
         direction,
@@ -234,6 +234,9 @@ def calculate_liquidation_price(
         extra_margin=extra_margin,
         notional=notional if notional is not None or isolated_margin is None else entry_price,
     )
+    # Core is Decimal-in/Decimal-out when all inputs are Decimal (they are here);
+    # normalise defensively so the wrapper honours its -> Decimal contract.
+    return result if isinstance(result, Decimal) else Decimal(str(result))
 
 
 # ---------------------------------------------------------------------------
