@@ -9,16 +9,17 @@
 
 ## Data Limits
 
-5. **Forecast queue TTL — code/DB drift.** `webui/forecast_queue.py` declares
-   `deadline_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 minutes'`, but the
-   statement is `CREATE TABLE IF NOT EXISTS`, so it never alters an already-created
-   table. In the **working and QA databases the live column default is still
-   `INTERVAL '20 minutes'`**, and `enqueue` does not pass `deadline_at` explicitly —
-   so the effective TTL in production is **20 minutes**, not the 30 minutes the code
-   now reads. A separate additive migration
+5. **Forecast queue TTL — code/DB drift (RESOLVED 2026-09-26).** `webui/forecast_queue.py`
+   declares `deadline_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 minutes'`, but the
+   statement is `CREATE TABLE IF NOT EXISTS`, so it never alters an already-created table;
+   `enqueue` does not pass `deadline_at` explicitly, so any table originally created by
+   `scripts/migrate_stabilization.py` kept an effective **20-minute** TTL. Fixed with an
+   additive migration `migrations/20260926_forecast_jobs_deadline_30min.sql`
    (`ALTER TABLE forecast_jobs ALTER COLUMN deadline_at SET DEFAULT NOW() + INTERVAL
-   '30 minutes'`) or an explicit `deadline_at` in `enqueue` is required before the
-   code default becomes the real one. Tracked as a pending decision, not fixed here.
+   '30 minutes'`), applied to the **live production DB** (column default verified as
+   `now() + 30 minutes`), and `scripts/migrate_stabilization.py` was synced to `30 minutes`
+   so fresh environments are born correct. Any other pre-existing working database needs the
+   same migration run once.
 6. **Heartbeat timeout** — evaluate_forecasts 5min/12min, execution_watch 10sec/30sec, market_context 30sec/90sec.
 7. **Simulation versioning** — existing positions keep their calculation version (1 or 2); new positions use v3 (Decimal, ROUND_HALF_UP). No automatic migration of v1/v2 positions.
 
