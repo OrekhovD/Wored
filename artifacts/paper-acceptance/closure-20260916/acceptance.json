@@ -26,7 +26,7 @@
       ],
       "artifacts": [
         {
-          "path": "../docs/PAPER-TRADING-IMPLEMENTATION.md",
+          "path": "../../../docs/PAPER-TRADING-IMPLEMENTATION.md",
           "sha256": ""
         }
       ],
@@ -784,7 +784,7 @@
       ],
       "artifacts": [
         {
-          "path": "ac26_rerun_observations.json",
+          "path": "../../ac26_rerun_observations.json",
           "sha256": ""
         }
       ],
@@ -850,7 +850,7 @@
       ],
       "artifacts": [
         {
-          "path": "../docs/PAPER-TRADING-RUNBOOK.md",
+          "path": "../../../docs/PAPER-TRADING-RUNBOOK.md",
           "sha256": ""
         }
       ],
