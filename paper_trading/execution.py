@@ -698,8 +698,6 @@ def execute_reverse(
     Entry price, stop, and take-profit are derived from the current
     snapshot for the new direction.
     """
-    from paper_trading.risk import calculate_liquidation_price, DEFAULT_MAINTENANCE_MARGIN_RATE
-
     # 1. Close current position
     close_res = execute_close(position, snapshot, close_quantity=position.quantity)
 
