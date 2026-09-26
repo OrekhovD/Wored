@@ -238,6 +238,16 @@ docker exec htx_trading_bot_redis redis-cli GET paper_trading:runner:heartbeat
     * Вывод: P0-правка затронула только `paper_trading/{runner,service,repository}.py`
       (ноль delta в WebUI-маршрутах/ шаблонах/ `app.js` и Telegram-хендлерах) — живой
       браузерный и Telegram-прогоны эмпирически подтвердили отсутствие регрессий UI/Telegram.
+- **Фаза 5 (деплой на живые сервисы) — выполнен 2026-09-26, по явной команде владельца:**
+  `paper_trading` примонтирован в runtime-контейнеры read-only bind-mount
+  (`/opt/paper_trading`, `PYTHONPATH=/app:/opt`), поэтому пересборки образов не требовалось —
+  выполнен только `docker compose restart collector` (минимальный радиус; webui/chatbot
+  перезапущены бы были без необходимости). Проверка после рестарта:
+  `PaperTradingRunner.run_cycle` каждые 2 c — `executed successfully`, без tracebacks;
+  heartbeat `register_runner.<locals>._heartbeat` активен (значит адаптер импортировал
+  новый код); read-only запрос к боевой БД: дни — `closed=4, running=1`,
+  `settlement_pending/closing = 0`; команды — `completed=8`, зависших `processing` нет.
+  Коммиты: `d0673bf` (runtime+тесты+харнесс), `c703bc0` (docs).
 - **Документация приведена в соответствие коду:** README/04-configuration/ENV-REGISTRY/
   PROVIDER-REGISTRY (архивный gateway помечен no-op, активный стек — Ollama Cloud Pro →
   локальный Bonsai), новый ADR `docs/AI-ROUTING-DECISION-20260926.md`,
