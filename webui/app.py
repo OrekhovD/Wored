@@ -1992,13 +1992,13 @@ app.include_router(paper_router)
 app.include_router(trader_router)
 
 
-@app.get("/trader", response_class=HTMLResponse)
-async def trader_page(request: Request):
-    """Trader Deck — WORED Trader V0.1 Phase 5."""
-    auth_redirect = require_page_auth(request)
-    if auth_redirect is not None:
-        return auth_redirect
-    return template_response(request, "trader.html", page_title="Trader Deck")
+@app.get("/trader", include_in_schema=False)
+async def trader_page():
+    """Trader Deck is retired as a competing action surface.
+
+    F08 RFC Phase 4a: redirects to V2 workspace (the primary entry point).
+    """
+    return RedirectResponse(url="/workspace", status_code=307)
 
 
 @app.get("/trading-day", response_class=HTMLResponse)
@@ -2008,6 +2008,23 @@ async def trading_day_page(request: Request):
     if auth_redirect is not None:
         return auth_redirect
     return template_response(request, "trading_day.html", page_title="Сегодня")
+
+
+@app.get("/workspace", response_class=HTMLResponse)
+async def workspace_page(request: Request):
+    """Workspace V2 — unified operating area (B2 read-only)."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(request, "workspace.html", page_title="Рабочая область")
+
+
+@app.get("/api/workspace/state")
+async def api_workspace_state(request: Request, day_id: str = ""):
+    """BFF read model for the workspace 4-zone layout (RFC §4)."""
+    require_api_auth(request)
+    from workspace_read import get_workspace_state
+    return await get_workspace_state(request)
 
 
 @app.get("/healthz")
@@ -4082,6 +4099,138 @@ async def command_deck_page(request: Request):
     if auth_redirect is not None:
         return auth_redirect
     return template_response(request, "command_deck.html", page_title="Панель управления")
+
+
+@app.get("/results", response_class=HTMLResponse)
+async def results_page(request: Request):
+    """Итоги — read-only list of reconciled trading days."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    days: list = []
+    source_error: str | None = None
+    try:
+        from paper_trading.adapter import list_day_reports as _pt_list_reports, owner_id_from_webui as _pt_owner
+        if getattr(request.app.state, "pg_pool", None) is not None:
+            owner_id = _pt_owner("admin")
+            days = await _pt_list_reports(owner_id, limit=30)
+    except Exception:
+        source_error = "report source unavailable"
+    return template_response(
+        request, "results.html", page_title="Итоги", days=days, source_error=source_error
+    )
+
+
+@app.get("/results/{day_id}", response_class=HTMLResponse)
+async def result_detail_page(request: Request, day_id: str):
+    """Итоги — read-only detail for a single trading day."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    day_data = None
+    source_error = None
+    try:
+        from paper_trading.adapter import get_day_report as _pt_day_report, owner_id_from_webui as _pt_owner
+        if getattr(request.app.state, "pg_pool", None) is not None:
+            owner_id = _pt_owner("admin")
+            day_data = await _pt_day_report(owner_id, day_id)
+            if day_data is None:
+                source_error = "day not found or not closed"
+    except Exception:
+        source_error = "report source unavailable"
+    return template_response(
+        request, "results_detail.html", page_title="Итоги",
+        day=day_data, day_id=day_id, report_unavailable=(day_data is None), source_error=source_error,
+    )
+
+
+@app.get("/api/results")
+async def api_results_list(request: Request):
+    """F05: JSON list of day reports."""
+    require_api_auth(request)
+    try:
+        from paper_trading.adapter import list_day_reports as _pt_list_reports, owner_id_from_webui as _pt_owner
+        if getattr(request.app.state, "pg_pool", None) is None:
+            return {"ok": True, "days": [], "source": "unavailable"}
+        owner_id = _pt_owner("admin")
+        days = await _pt_list_reports(owner_id, limit=30)
+        return {"ok": True, "days": days, "source": "paper_trading"}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "days": []}
+
+
+@app.get("/api/results/{day_id}")
+async def api_result_detail(request: Request, day_id: str):
+    """F05: JSON full day report with reconciliation."""
+    require_api_auth(request)
+    try:
+        from paper_trading.adapter import get_day_report as _pt_day_report, owner_id_from_webui as _pt_owner
+        if getattr(request.app.state, "pg_pool", None) is None:
+            return JSONResponse({"ok": False, "error": "database unavailable"}, status_code=503)
+        owner_id = _pt_owner("admin")
+        report = await _pt_day_report(owner_id, day_id)
+        if report is None:
+            return JSONResponse({"ok": False, "error": "day not found"}, status_code=404)
+        return {"ok": True, "report": report}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.get("/api/results/{day_id}/export")
+async def api_result_export(request: Request, day_id: str, format: str = "json"):
+    """F05: Export day report as JSON or CSV."""
+    require_api_auth(request)
+    try:
+        from paper_trading.adapter import get_day_report as _pt_day_report, owner_id_from_webui as _pt_owner
+        if getattr(request.app.state, "pg_pool", None) is None:
+            return JSONResponse({"ok": False, "error": "database unavailable"}, status_code=503)
+        owner_id = _pt_owner("admin")
+        report = await _pt_day_report(owner_id, day_id)
+        if report is None:
+            return JSONResponse({"ok": False, "error": "day not found"}, status_code=404)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    if format == "csv":
+        lines = ["account,side,instrument,qty,entry,exit,net_pnl,fees,closed_at"]
+        for acct in report.get("accounts", []):
+            for pos in acct.get("closed_positions", []):
+                lines.append(",".join(str(pos.get(k, "")) for k in
+                    ["account_label", "side", "instrument", "qty", "entry", "exit", "net_pnl", "fees", "closed_at"]))
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(
+            "\n".join(lines),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=report_{day_id}.csv"},
+        )
+    # Default JSON export
+    return JSONResponse(
+        report,
+        headers={"Content-Disposition": f"attachment; filename=report_{day_id}.json"},
+    )
+
+
+@app.get("/learning", response_class=HTMLResponse)
+async def learning_page(request: Request):
+    """Обучение — read-only list of self-learning candidates."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(
+        request, "learning.html", page_title="Обучение", candidates=[], source_error=None
+    )
+
+
+@app.get("/learning/{candidate_id}", response_class=HTMLResponse)
+async def learning_detail_page(request: Request, candidate_id: str):
+    """Обучение — read-only detail for a single self-learning candidate."""
+    auth_redirect = require_page_auth(request)
+    if auth_redirect is not None:
+        return auth_redirect
+    return template_response(
+        request, "learning_detail.html", page_title="Обучение",
+        candidate=None, candidate_id=candidate_id, source_error=None,
+    )
 
 
 @app.get("/api/trade/preview")

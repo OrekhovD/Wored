@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="dashboard">
+  <section class="panel">
+    <div class="panel-header">
+      <div>
+        <div class="panel-kicker">Итоги</div>
+        <h2>День {{ day_id }}</h2>
+      </div>
+    </div>
+
+    {% if day %}
+      <div class="wored-detail">
+        <p>Состояние: {{ day.state or '—' }}</p>
+        <p>Начало: {{ day.start_utc or '—' }}</p>
+        <p>Конец: {{ day.end_utc or '—' }}</p>
+        <p>Стратегия: {{ day.strategy_version or '—' }}</p>
+
+        {% for acct in day.accounts %}
+        <h3>{{ acct.account_label }} ({{ acct.account_id }})</h3>
+        <dl>
+          <dt>Начальный капитал</dt><dd>{{ acct.summary.opening_capital }}</dd>
+          <dt>Конечный капитал</dt><dd>{{ acct.summary.ending_equity }}</dd>
+          <dt>Реализованный PnL</dt><dd>{{ acct.summary.realized_pnl }}</dd>
+          <dt>Комиссии</dt><dd>{{ acct.summary.total_fees }}</dd>
+          <dt>Чистый PnL</dt><dd>{{ acct.summary.net_pnl }}</dd>
+          <dt>Доходность %</dt><dd>{{ acct.summary.return_pct }}</dd>
+          <dt>Сделок</dt><dd>{{ acct.stats.trades_count }} ({{ acct.stats.wins }}W / {{ acct.stats.losses }}L)</dd>
+        </dl>
+        {% if acct.reconciliation %}
+        <p>Сверка: {{ "сбалансировано" if acct.reconciliation.balanced else "РАСХОЖДЕНИЕ" }}
+          {% if acct.reconciliation.mismatches %}{{ acct.reconciliation.mismatches | join('; ') }}{% endif %}</p>
+        {% endif %}
+        {% if acct.closed_positions %}
+        <table class="wored-list">
+          <thead><tr><th>Инструмент</th><th>Сторона</th><th>Вход</th><th>Выход</th><th>PnL</th></tr></thead>
+          <tbody>
+          {% for pos in acct.closed_positions %}
+            <tr><td>{{ pos.instrument }}</td><td>{{ pos.side }}</td><td>{{ pos.entry }}</td><td>{{ pos.exit or '—' }}</td><td>{{ pos.net_pnl }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+        {% endfor %}
+
+        {% if report_unavailable %}
+          <div class="wored-empty-state">Подробный отчёт по этому дню ещё не сформирован или недоступен.</div>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="wored-empty-state">
+        {% if source_error %}
+          Источник данных недоступен: {{ source_error }}
+        {% else %}
+          День не найден. Вернуться к <a href="/results">списку итогов</a>.
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <p><a class="wored-ghost-btn" href="/results">← К итогам</a></p>
+  </section>
+</main>
+{% endblock %}

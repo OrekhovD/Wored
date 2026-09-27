@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="dashboard">
+  <section class="panel">
+    <div class="panel-header">
+      <div>
+        <div class="panel-kicker">Обучение</div>
+        <h2>Кандидат {{ candidate.title if candidate else candidate_id }}</h2>
+      </div>
+    </div>
+
+    {% if candidate %}
+      <div class="wored-detail">
+        <p>Статус: {{ candidate.status or '—' }}</p>
+        <p>Выборка: {{ candidate.sample_size if candidate.sample_size is not none else '—' }}</p>
+        <p>Основание: {{ candidate.rationale or '—' }}</p>
+        {% if not candidate.applied %}
+          <div class="wored-empty-state">Правило не применено автоматически. Применение требует явного решения оператора.</div>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="wored-empty-state">
+        {% if source_error %}
+          Источник данных недоступен: {{ source_error }}
+        {% else %}
+          Кандидат не найден. Вернуться к <a href="/learning">списку обучения</a>.
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <p><a class="wored-ghost-btn" href="/learning">← К обучению</a></p>
+  </section>
+</main>
+{% endblock %}

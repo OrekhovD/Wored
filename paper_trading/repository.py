@@ -429,6 +429,34 @@ class PaperRepository:
             )
         return [_row_to_day(r) for r in rows]
 
+    async def get_closed_days(self, owner_id: UUID, limit: int = 30) -> list[TradingDay]:
+        """Return most-recent closed days for an owner, newest first."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM paper_v2_days
+                WHERE owner_id = $1 AND state = 'closed'
+                ORDER BY end_utc DESC NULLS LAST
+                LIMIT $2
+                """,
+                str(owner_id),
+                limit,
+            )
+        return [_row_to_day(r) for r in rows]
+
+    async def get_all_positions_by_day(self, day_id: UUID) -> list[Position]:
+        """Return all positions (open + closed) for a given trading day."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM paper_v2_positions
+                WHERE day_id = $1
+                ORDER BY opened_at
+                """,
+                str(day_id),
+            )
+        return [_row_to_position(r) for r in rows]
+
     # ------------------------------------------------------------------
     # Command (idempotency)
     # ------------------------------------------------------------------

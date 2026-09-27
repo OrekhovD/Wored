@@ -190,7 +190,11 @@ def test_login_page_renders_when_auth_enabled(monkeypatch):
         response = client.get("/login")
 
     assert response.status_code == 200
-    assert "WORED Web UI" in response.text
+    # Login route renders with its own page_title ("Web UI Login"); assert the
+    # rendered login identity rather than the base template's empty-title
+    # fallback, which never applies here.
+    assert "Web UI Login" in response.text
+    assert "Вход в WORED" in response.text
 
 
 def test_internal_prediction_api_rejects_invalid_token():

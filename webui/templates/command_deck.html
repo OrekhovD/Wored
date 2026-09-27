@@ -154,8 +154,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;heigh
   <div class="card-b">
     <div class="act-grid">
       <button class="act-btn fc" onclick="actForecast()">🔮 Новый прогноз</button>
-      <button class="act-btn long" onclick="openTicket('long')">📈 Long</button>
-      <button class="act-btn short" onclick="openTicket('short')">📉 Short</button>
+      <a class="act-btn long" href="/trading-day" style="text-align:center;text-decoration:none">📈 Торговать в «Сегодня»</a>
     </div>
     <div id="result" style="font-size:12px;color:var(--muted);min-height:16px;margin-top:4px"></div>
   </div>
@@ -188,39 +187,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;heigh
   </div>
 </div>
 
-<!-- ORDER TICKET MODAL -->
-<div class="modal" id="ticket">
-  <div class="modal-card">
-    <div class="modal-t">
-      <span id="ticketDir">📈 LONG</span>
-      <span class="modal-close" onclick="closeTicket()">✕</span>
-    </div>
-
-    <div class="modal-row"><span class="l">Символ</span><span class="v" id="tSym">BTCUSDT</span></div>
-    <div class="modal-row"><span class="l">Цена входа</span><span class="v mono" id="tEntry">—</span></div>
-
-    <div class="slider-row">
-      <div class="slider-lbl"><span>Плечо</span><span class="v" id="tLevVal">100x</span></div>
-      <input type="range" id="tLev" min="10" max="100" value="100" step="10" oninput="updateTicket()">
-    </div>
-    <div class="slider-row">
-      <div class="slider-lbl"><span>Маржа (USDT)</span><span class="v" id="tMarVal">10</span></div>
-      <input type="range" id="tMar" min="1" max="100" value="10" step="1" oninput="updateTicket()">
-    </div>
-
-    <div class="modal-section">Параметры сделки</div>
-    <div class="modal-row"><span class="l">Номинал</span><span class="v mono" id="tNotional">—</span></div>
-    <div class="modal-row"><span class="l">Размер позиции</span><span class="v mono" id="tSize">—</span></div>
-    <div class="modal-row"><span class="l">Комиссия (taker)</span><span class="v mono" id="tFee">—</span></div>
-    <div class="modal-row"><span class="l">Цена ликвидации</span><span class="v mono" id="tLiq" style="color:var(--red)">—</span></div>
-    <div class="modal-row"><span class="l">До ликвидации</span><span class="v mono" id="tLiqDist">—</span></div>
-
-    <div class="modal-section">Сценарии PnL</div>
-    <div class="modal-scen" id="tScen"></div>
-
-    <button class="modal-confirm" id="tConfirm" onclick="confirmTicket()">Открыть LONG</button>
-  </div>
-</div>
+<!-- Order ticket removed: trading is centralised in Сегодня (/trading-day). -->
 
 <div class="toast" id="toast"></div>
 
@@ -251,7 +218,6 @@ function startDeckPoll(){
   }
   tick();
 }
-let tDir='long';
 
 function fp(p){if(!p)return'—';const n=Number(p);if(n>=1000)return'$'+n.toLocaleString('en-US',{maximumFractionDigits:0});return'$'+n.toFixed(2)}
 function fpct(p){if(p===null||p===undefined)return'—';return(p>=0?'+':'')+Number(p).toFixed(2)+'%'}
@@ -285,8 +251,7 @@ function render(d){
     +'<span class="pos-id">#'+p.id+'</span>'
     +'<span class="pos-dir '+p.direction+'">'+p.direction.toUpperCase()+' x'+p.leverage+'</span>'
     +'<span class="pos-pnl mono" style="color:'+pc+'">'+(p.pnl>=0?'+':'')+'$'+p.pnl.toFixed(2)+'</span>'
-    +'</div><div class="pos-r2"><span>Вход '+fp(p.entry_price)+'</span><span>Тек '+fp(p.live_price)+'</span><span>'+(p.roi>=0?'+':'')+p.roi+'%</span></div>'
-    +'<button class="pos-close" onclick="closePos('+p.id+')">🔒 Закрыть #'+p.id+'</button></div>';
+    +'</div><div class="pos-r2"><span>Вход '+fp(p.entry_price)+'</span><span>Тек '+fp(p.live_price)+'</span><span>'+(p.roi>=0?'+':'')+p.roi+'%</span></div></div>';
   });}else{ph='<div class="empty">Нет открытых позиций</div>';}
   document.getElementById('positions').innerHTML=ph;
   // SESSION
@@ -479,61 +444,7 @@ async function actForecast(){
   }catch(e){forecastPending=false;result.textContent='Не удалось поставить прогноз в очередь: '+e.message;}
 }
 
-// ORDER TICKET
-async function openTicket(dir){
-  tDir=dir;
-  document.getElementById('ticketDir').textContent=dir==='long'?'📈 LONG':'📉 SHORT';
-  document.getElementById('ticketDir').style.color=dir==='long'?'var(--green)':'var(--red)';
-  const cb=document.getElementById('tConfirm');cb.className='modal-confirm '+dir;cb.textContent='Открыть '+dir.toUpperCase();
-  document.getElementById('tSym').textContent='BTCUSDT';
-  await updateTicket();
-  document.getElementById('ticket').classList.add('show');
-}
-function closeTicket(){document.getElementById('ticket').classList.remove('show');}
-
-async function updateTicket(){
-  const lev=parseInt(document.getElementById('tLev').value);
-  const mar=parseFloat(document.getElementById('tMar').value);
-  document.getElementById('tLevVal').textContent=lev+'x';
-  document.getElementById('tMarVal').textContent=mar+' USDT';
-  try{
-    const r=await fetch('/api/trade/preview?direction='+tDir+'&leverage='+lev+'&margin='+mar+'&symbol=btcusdt');
-    const d=await r.json();
-    document.getElementById('tEntry').textContent=fp(d.entry_price);
-    document.getElementById('tNotional').textContent='$'+d.notional.toLocaleString('en-US',{maximumFractionDigits:0});
-    document.getElementById('tSize').textContent=d.size.toFixed(6)+' BTC';
-    document.getElementById('tFee').textContent='$'+d.taker_fee.toFixed(4);
-    document.getElementById('tLiq').textContent=fp(d.liquidation_price);
-    document.getElementById('tLiqDist').textContent=fpc(d.liq_distance_pct);
-    // Scenarios
-    let sh='';for(const[k,v]of Object.entries(d.scenarios)){
-      const c=v>=0?'var(--green)':'var(--red)';
-      sh+='<div class="modal-scen-c"><div class="pl">BTC '+k+'</div><div class="pv mono" style="color:'+c+'">'+(v>=0?'+':'')+'$'+v.toFixed(2)+'</div></div>';
-    }
-    document.getElementById('tScen').innerHTML=sh;
-  }catch(e){document.getElementById('result').textContent='Preview error: '+e.message;}
-}
-
-async function confirmTicket(){
-  const lev=parseInt(document.getElementById('tLev').value);
-  const mar=parseFloat(document.getElementById('tMar').value);
-  document.getElementById('result').textContent='Открываю '+tDir+'...';
-  try{
-    const r=await fetch('/api/positions/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({symbol:'btcusdt',direction:tDir,leverage:lev,margin:mar,simulation:true})});
-    const d=await r.json();
-    if(d.ok){document.getElementById('result').innerHTML='<span style="color:var(--green)">✅ #'+d.id+' '+d.direction.toUpperCase()+' @ '+fp(d.entry_price)+'</span>';toast('Позиция открыта');closeTicket();setTimeout(fetchDeck,2e3);}
-    else{document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+(d.detail||'Ошибка')+'</span>';}
-  }catch(e){document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+e.message+'</span>';}
-}
-
-async function closePos(id){
-  document.getElementById('result').textContent='Закрываю #'+id+'...';
-  try{const r=await fetch('/api/positions/'+id+'/close',{method:'POST'});
-  const d=await r.json();
-  if(d.ok){document.getElementById('result').innerHTML='<span style="color:var(--green)">✅ #'+id+' PnL $'+d.realized_pnl+'</span>';toast('Позиция закрыта');setTimeout(fetchDeck,1e3);}
-  else{document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+(d.detail||'Ошибка')+'</span>';}
-  }catch(e){document.getElementById('result').innerHTML='<span style="color:var(--red)">❌ '+e.message+'</span>';}
-}
+// Order ticket retired — trading lives in Сегодня (/trading-day).
 
 fetchDeck();startDeckPoll();
 const savedForecast=sessionStorage.getItem('wored.forecast');

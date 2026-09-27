@@ -18,53 +18,46 @@ async def _login(client) -> str:
 
 
 @pytest.mark.asyncio
-class TestLongShortDialog:
-    async def test_command_deck_has_long_button(self, client):
+class TestSingleTradingCentre:
+    """Issue #1: trading is centralised on Сегодня (/trading-day).
+
+    Command Deck is now a read-only dashboard that links out to the single
+    action centre; it no longer hosts a competing order ticket that wrote to a
+    different backend than the trading-day deal ticket.
+    """
+
+    async def test_command_deck_links_to_trading_day(self, client):
         await _login(client)
         resp = await client.get("/command-deck")
         assert resp.status_code == 200
-        assert "long" in resp.text.lower()
+        assert 'href="/trading-day"' in resp.text
 
-    async def test_command_deck_has_short_button(self, client):
+    async def test_command_deck_has_no_independent_ticket(self, client):
         await _login(client)
         resp = await client.get("/command-deck")
-        assert "short" in resp.text.lower()
+        # The duplicate order ticket is retired.
+        assert 'id="ticket"' not in resp.text
+        assert "openTicket(" not in resp.text
+        assert "/api/positions/open" not in resp.text
 
-    async def test_command_deck_has_ticket_modal(self, client):
+    async def test_trading_day_page_renders(self, client):
         await _login(client)
-        resp = await client.get("/command-deck")
-        assert 'id="ticket"' in resp.text
-        assert "modal" in resp.text.lower()
+        resp = await client.get("/trading-day")
+        assert resp.status_code == 200
+        assert "tdStartBtn" in resp.text
 
-    async def test_ticket_has_direction_label(self, client):
+    async def test_trader_redirects_to_workspace(self, client):
         await _login(client)
-        resp = await client.get("/command-deck")
-        assert 'id="ticketDir"' in resp.text
+        resp = await client.get("/trader", follow_redirects=False)
+        assert resp.status_code == 307
+        assert resp.headers["location"] == "/workspace"
 
-    async def test_ticket_has_close_button(self, client):
+    async def test_trading_day_has_deal_ticket(self, client):
         await _login(client)
-        resp = await client.get("/command-deck")
-        assert "closeTicket" in resp.text or "modal-close" in resp.text
-
-    async def test_ticket_has_leverage_slider(self, client):
-        await _login(client)
-        resp = await client.get("/command-deck")
-        assert 'id="tLev"' in resp.text
-
-    async def test_ticket_has_margin_slider(self, client):
-        await _login(client)
-        resp = await client.get("/command-deck")
-        assert 'id="tMar"' in resp.text
-
-    async def test_ticket_has_confirm_button(self, client):
-        await _login(client)
-        resp = await client.get("/command-deck")
-        assert "confirmTicket" in resp.text or 'id="tConfirm"' in resp.text
-
-    async def test_open_ticket_function_exists(self, client):
-        await _login(client)
-        resp = await client.get("/command-deck")
-        assert "openTicket" in resp.text
+        resp = await client.get("/trading-day")
+        assert 'id="tdTicketSymbol"' in resp.text
+        assert 'id="tdPreviewBtn"' in resp.text
+        assert 'id="tdSubmitBtn"' in resp.text
 
 
 @pytest.mark.asyncio

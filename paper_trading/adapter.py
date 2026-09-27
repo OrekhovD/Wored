@@ -189,6 +189,22 @@ async def get_command_status(command_id: str) -> dict[str, Any]:
     return await service.get_command_status(command_id)
 
 
+async def list_day_reports(owner_id: str, limit: int = 30) -> list[dict[str, Any]]:
+    """Return summary cards for closed trading days."""
+    service = await get_service()
+    if service is None:
+        return []
+    return await service.list_day_reports(owner_id, limit=limit)
+
+
+async def get_day_report(owner_id: str, day_id: str) -> dict[str, Any] | None:
+    """Return full day report with reconciliation, or None if not found."""
+    service = await get_service()
+    if service is None:
+        return None
+    return await service.get_day_report(owner_id, day_id)
+
+
 # ─── Runner integration ────────────────────────────────────────────────
 
 _runner_registered = False

@@ -391,3 +391,123 @@ class PaperTradingService:
         from uuid import UUID
         pos_uuid = UUID(position_id) if isinstance(position_id, str) else position_id
         return await self.repo.get_position_by_id(pos_uuid)
+
+    # ------------------------------------------------------------------
+    # Day reports (F05)
+    # ------------------------------------------------------------------
+
+    async def list_day_reports(self, owner_id: str, limit: int = 30) -> list[dict[str, Any]]:
+        """Return summary cards for recent closed days."""
+        days = await self.repo.get_closed_days(_as_uuid(owner_id), limit=limit)
+        results = []
+        for day in days:
+            positions = await self.repo.get_all_positions_by_day(day.day_id)
+            closed = [p for p in positions if p.status.value == "closed"]
+            realized_pnl = sum((p.realized_net_pnl for p in closed), Decimal(0))
+            total_fees = sum((p.entry_fee + p.exit_fee for p in closed), Decimal(0))
+            wins = sum(1 for p in closed if p.realized_net_pnl > Decimal(0))
+            results.append({
+                "day_id": str(day.day_id),
+                "date": day.end_utc.strftime("%Y-%m-%d") if day.end_utc else "—",
+                "state": day.state.value,
+                "strategy_version": day.strategy_version,
+                "trades": len(closed),
+                "wins": wins,
+                "losses": len(closed) - wins,
+                "net_pnl": str(realized_pnl),
+                "fees": str(total_fees),
+            })
+        return results
+
+    async def get_day_report(self, owner_id: str, day_id: str) -> dict[str, Any] | None:
+        """Build a full day report with reconciliation.
+
+        Returns None if the day is not found or not owned by this owner.
+        """
+        from paper_trading.presenters import format_report
+        from paper_trading.ledger import reconcile
+
+        day = await self.repo.get_day(_as_uuid(day_id))
+        if not day or str(day.owner_id) != str(_as_uuid(owner_id)):
+            return None
+
+        # Collect positions for the day
+        positions = await self.repo.get_all_positions_by_day(day.day_id)
+        closed = [p for p in positions if p.status.value == "closed"]
+        open_pos = [p for p in positions if p.status.value == "open"]
+
+        # Get accounts for the owner
+        manual = await self.repo.get_account_by_kind(_as_uuid(owner_id), AccountKind.manual)
+        auto = await self.repo.get_account_by_kind(_as_uuid(owner_id), AccountKind.auto)
+
+        all_reports = []
+        for acct, kind_label in [(manual, "manual"), (auto, "auto")]:
+            if not acct:
+                continue
+            acct_positions = [p for p in positions if str(p.account_id) == str(acct.account_id)]
+            acct_closed = [p for p in acct_positions if p.status.value == "closed"]
+            acct_open = [p for p in acct_positions if p.status.value == "open"]
+
+            realized_pnl = sum((p.realized_net_pnl for p in acct_closed), Decimal(0))
+            total_fees = sum((p.entry_fee + p.exit_fee for p in acct_closed), Decimal(0))
+            wins = sum(1 for p in acct_closed if p.realized_net_pnl > Decimal(0))
+
+            report = format_report(
+                day_id=str(day.day_id),
+                account_id=str(acct.account_id),
+                account_label=kind_label,
+                opening_capital=acct.opening_deposit,
+                realized_pnl=realized_pnl,
+                total_fees=total_fees,
+                trades_count=len(acct_closed),
+                wins=wins,
+                losses=len(acct_closed) - wins,
+                positions=acct_open,
+                strategy_version=day.strategy_version,
+            )
+
+            # Ledger reconciliation
+            try:
+                postings = await self.repo.get_postings_for_account(acct.account_id)
+                actual_cash = await self.repo.get_account_balance(acct.account_id)
+                recon = reconcile(
+                    acct.account_id,
+                    postings,
+                    expected_cash=acct.opening_deposit,
+                    expected_realized_pnl=Decimal(0),
+                    actual_cash=actual_cash,
+                    actual_realized_pnl=realized_pnl,
+                )
+                report["reconciliation"] = {
+                    "balanced": recon.balanced,
+                    "mismatches": recon.mismatches,
+                }
+            except Exception:
+                report["reconciliation"] = {"balanced": None, "mismatches": ["reconcile unavailable"]}
+
+            report["closed_positions"] = [
+                {
+                    "id": str(p.position_id),
+                    "side": p.side.value,
+                    "instrument": p.instrument,
+                    "qty": str(p.qty),
+                    "entry": str(p.avg_entry_price),
+                    "exit": str(p.close_price) if p.close_price else None,
+                    "net_pnl": str(p.realized_net_pnl),
+                    "fees": str(p.entry_fee + p.exit_fee),
+                    "opened_at": p.opened_at.isoformat() if p.opened_at else None,
+                    "closed_at": p.closed_at.isoformat() if p.closed_at else None,
+                }
+                for p in acct_closed
+            ]
+            all_reports.append(report)
+
+        return {
+            "day_id": str(day.day_id),
+            "state": day.state.value,
+            "start_utc": day.start_utc.isoformat() if day.start_utc else None,
+            "end_utc": day.end_utc.isoformat() if day.end_utc else None,
+            "strategy_version": day.strategy_version,
+            "settings_snapshot": day.settings_snapshot,
+            "accounts": all_reports,
+        }

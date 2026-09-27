@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="dashboard">
+  <section class="panel">
+    <div class="panel-header">
+      <div>
+        <div class="panel-kicker">Итоги</div>
+        <h2>Завершённые торговые дни</h2>
+      </div>
+    </div>
+
+    {% if days %}
+      <ul class="wored-list">
+        {% for d in days %}
+        <li class="wored-list-item">
+          <span>{{ d.date or '—' }}</span>
+          <span>{{ d.state or '—' }}</span>
+          <span>Чистый PnL: {{ d.net_pnl if d.net_pnl is not none else '—' }}</span>
+          <span>Сделок: {{ d.trades if d.trades is not none else '—' }}</span>
+          <a class="wored-ghost-btn" href="/results/{{ d.day_id }}">Открыть</a>
+        </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="wored-empty-state">
+        {% if source_error %}
+          Источник данных недоступен: {{ source_error }}
+        {% else %}
+          Завершённых торговых дней пока нет. Итоги появятся здесь после сверки
+          дня на экране «Сегодня».
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

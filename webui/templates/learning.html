@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="dashboard">
+  <section class="panel">
+    <div class="panel-header">
+      <div>
+        <div class="panel-kicker">Обучение</div>
+        <h2>Кандидаты самообучения</h2>
+      </div>
+    </div>
+
+    {% if candidates %}
+      <ul class="wored-list">
+        {% for c in candidates %}
+        <li class="wored-list-item">
+          <span>{{ c.title or ('Кандидат ' ~ c.id) }}</span>
+          <span>Статус: {{ c.status or '—' }}</span>
+          <span>Выборка: {{ c.sample_size if c.sample_size is not none else '—' }}</span>
+          <a class="wored-ghost-btn" href="/learning/{{ c.id }}">Открыть</a>
+        </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="wored-empty-state">
+        {% if source_error %}
+          Источник данных недоступен: {{ source_error }}
+        {% else %}
+          Кандидатов на обучение пока нет. Они появятся после накопления
+          достаточной выборки закрытых сделок.
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

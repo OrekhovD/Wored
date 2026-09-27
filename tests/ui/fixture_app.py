@@ -57,8 +57,11 @@ PAGE_ROUTES: list[tuple[str, str]] = [
     ("/model-management", "models.html"),
     ("/system", "system.html"),
     ("/daily-session", "daily_session.html"),
-    ("/trader", "trading_day.html"),
+    ("/trading-day", "trading_day.html"),
+    ("/workspace", "workspace.html"),
     ("/command-deck", "command_deck.html"),
+    ("/results", "results.html"),
+    ("/learning", "learning.html"),
     ("/login", "login.html"),
     ("/journal/0", "journal.html"),  # journal detail (uses entry_id=0)
 ]
@@ -351,6 +354,121 @@ def _register_routes(app: FastAPI) -> None:
             return r
         return _template_response(request, "command_deck.html", page_title="Панель управления")
 
+    @app.get("/trading-day", response_class=HTMLResponse)
+    async def trading_day_page(request: Request):
+        r = _require_page_auth(request)
+        if r is not None:
+            return r
+        return _template_response(request, "trading_day.html", page_title="Сегодня")
+
+    @app.get("/workspace", response_class=HTMLResponse)
+    async def workspace_page(request: Request):
+        r = _require_page_auth(request)
+        if r is not None:
+            return r
+        return _template_response(request, "workspace.html", page_title="Рабочая область")
+
+    @app.get("/api/workspace/state")
+    async def api_workspace_state(request: Request):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        return _workspace_state_fixture()
+
+    @app.get("/api/results")
+    async def api_results_list(request: Request):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        return {"ok": True, "days": _RESULTS_DAYS_FIXTURE, "source": "paper_trading"}
+
+    @app.get("/api/results/{day_id}")
+    async def api_result_detail(request: Request, day_id: str):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        return {"ok": True, "report": {"day_id": day_id, "state": "closed",
+                "accounts": [{"account_label": "manual",
+                             "summary": {"net_pnl": "10.70", "trades_count": 3},
+                             "reconciliation": {"balanced": True, "mismatches": []},
+                             "closed_positions": []}]}}
+
+    @app.get("/trader", include_in_schema=False)
+    async def trader_page():
+        # Mirror production: /trader redirects to the V2 workspace (F08 Phase 4a).
+        return RedirectResponse(url="/workspace", status_code=307)
+
+    # ── Итоги / Обучение: read-only pages (mirror webui/app.py) ────────────────
+    _RESULTS_DAYS_FIXTURE = [
+        {"day_id": "day-aaa-001", "date": "2026-09-20", "state": "closed",
+         "strategy_version": "baseline_v1", "trades": 3, "wins": 2, "losses": 1,
+         "net_pnl": "12.50", "fees": "1.80"},
+        {"day_id": "day-bbb-002", "date": "2026-09-19", "state": "closed",
+         "strategy_version": "baseline_v1", "trades": 0, "wins": 0, "losses": 0,
+         "net_pnl": "0", "fees": "0"},
+    ]
+
+    @app.get("/results", response_class=HTMLResponse)
+    async def results_page(request: Request):
+        r = _require_page_auth(request)
+        if r is not None:
+            return r
+        return _template_response(
+            request, "results.html", page_title="Итоги",
+            days=_RESULTS_DAYS_FIXTURE, source_error=None,
+        )
+
+    @app.get("/results/{day_id}", response_class=HTMLResponse)
+    async def result_detail_page(request: Request, day_id: str):
+        r = _require_page_auth(request)
+        if r is not None:
+            return r
+        day_data = {
+            "day_id": day_id, "state": "closed",
+            "start_utc": "2026-09-20T00:00:00+00:00",
+            "end_utc": "2026-09-20T12:00:00+00:00",
+            "strategy_version": "baseline_v1", "settings_snapshot": {},
+            "accounts": [{
+                "day_id": day_id, "account_id": "acc-manual-1",
+                "account_label": "manual",
+                "summary": {"opening_capital": "1000", "ending_equity": "1010.70",
+                           "realized_pnl": "12.50", "total_fees": "1.80",
+                           "net_pnl": "10.70", "unrealized_pnl": "0", "return_pct": "1.07"},
+                "stats": {"trades_count": 3, "wins": 2, "losses": 1, "win_rate_pct": "66.67"},
+                "open_positions": [], "open_position_count": 0,
+                "reconciliation": {"balanced": True, "mismatches": []},
+                "closed_positions": [
+                    {"id": "pos-1", "side": "long", "instrument": "BTC-USDT",
+                     "qty": "1", "entry": "60000", "exit": "61000",
+                     "net_pnl": "950", "fees": "72", "closed_at": "2026-09-20T08:00:00Z"},
+                ],
+            }],
+        }
+        return _template_response(
+            request, "results_detail.html", page_title="Итоги",
+            day=day_data, day_id=day_id, report_unavailable=False, source_error=None,
+        )
+
+    @app.get("/learning", response_class=HTMLResponse)
+    async def learning_page(request: Request):
+        r = _require_page_auth(request)
+        if r is not None:
+            return r
+        return _template_response(
+            request, "learning.html", page_title="Обучение",
+            candidates=[], source_error=None,
+        )
+
+    @app.get("/learning/{candidate_id}", response_class=HTMLResponse)
+    async def learning_detail_page(request: Request, candidate_id: str):
+        r = _require_page_auth(request)
+        if r is not None:
+            return r
+        return _template_response(
+            request, "learning_detail.html", page_title="Обучение",
+            candidate=None, candidate_id=candidate_id, source_error=None,
+        )
+
     # ── API endpoints ───────────────────────────────────────────────────────────
     @app.get("/api/health")
     async def api_health(request: Request):
@@ -417,6 +535,152 @@ def _register_routes(app: FastAPI) -> None:
         if auth:
             return auth
         return {"ok": True, "id": position_id, "realized_pnl": 0.75}
+
+    # ── Trading-day: the single action centre API (mirrors webui/paper_api) ────
+    def _trading_day_payload() -> dict[str, Any]:
+        account = lambda kind: {  # noqa: E731
+            "id": f"proto-{kind}", "kind": kind, "currency": "USDT",
+            "cash": "1000", "opening_equity": "1000", "available_margin": "1000",
+            "equity": "1000", "realized_net": "0", "unrealized": "0",
+            "total_costs": "0", "loss_budget": "50", "open_positions": 0,
+            "closed_trades": 0,
+        }
+        return {
+            "ui_schema_version": 1, "mode": "prototype", "market_mode": "demo",
+            "storage_mode": "memory", "server_time": get_clock(), "day": None,
+            "accounts": [account("manual"), account("auto")],
+            "risk_policy": {"max_daily_loss_usdt": "50", "max_risk_per_order_usdt": "10",
+                            "max_total_exposure": "500", "max_leverage": 10},
+            "fresh": False,
+            "capabilities": {"can_start": True, "reason_code": None},
+            "reason_code": "Тестовая цена; реальные perpetual-данные не подключены",
+            "next_action": "start", "end_time_local": "21:00",
+            "timezone": "Asia/Bangkok", "auto_state": "observing",
+            "auto_state_label": "Ожидает запуска дня",
+            "positions": [], "closed_positions": [], "orders": [], "events": [],
+        }
+
+    def _workspace_state_fixture() -> dict[str, Any]:
+        """Deterministic /workspace BFF response for UI tests (read-only, no day)."""
+        return {
+            "schema_version": 2,
+            "as_of": get_clock(),
+            "stage": "prepare",
+            "day": None,
+            "accounts": [
+                {"kind": "manual", "currency": "USDT", "cash": "1000",
+                 "equity": "1000", "open_positions": 0, "realized_net": "0",
+                 "object_ref": {"kind": "account", "id": "ws-manual", "source": "paper_trading"}},
+                {"kind": "auto", "currency": "USDT", "cash": "1000",
+                 "equity": "1000", "open_positions": 0, "realized_net": "0",
+                 "object_ref": {"kind": "account", "id": "ws-auto", "source": "paper_trading"}},
+            ],
+            "market": {"quality": "demo", "bid": "64250", "ask": "64260", "mark": "64255"},
+            "objects": [],
+            "attention": [
+                {"severity": "info", "priority": 5, "reason_code": "ready_to_start",
+                 "message": "День не начат. Готов к запуску.",
+                 "source": "paper_trading", "primary_action": "start_day",
+                 "object_ref": None, "next_check_at": None},
+            ],
+            "capabilities": {"can_start": True, "can_trade": False,
+                            "can_finish": False, "commands_enabled": True,
+                            "can_enter": False},
+            "sources": [{"source_name": "paper_trading", "status": "ok"}],
+            "status_bar": {
+                "stage": "prepare", "day_date": "—",
+                "market_quality": "demo", "accounts": [
+                    {"kind": "manual", "equity": "1000", "open_positions": 0},
+                    {"kind": "auto", "equity": "1000", "open_positions": 0},
+                ],
+                "pending_commands": 0,
+            },
+            "automation_state": None,
+            "trader_mode": "trade",
+            "next_action": "start",
+            "commands_enabled": True,
+        }
+
+    @app.get("/api/trading-day/current")
+    async def api_trading_day_current(request: Request):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        return _trading_day_payload()
+
+    @app.post("/api/trading-day/settings")
+    async def api_trading_day_settings(request: Request):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        await request.json()
+        return {"ok": True, "settings": {"end_time_local": "21:00", "timezone": "Asia/Bangkok"}}
+
+    @app.post("/api/trading-day/start")
+    async def api_trading_day_start(request: Request):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        await request.json()
+        return JSONResponse({"command_id": "fixture-start", "status": "accepted"}, status_code=202)
+
+    @app.post("/api/trading-day/{day_id}/finish")
+    async def api_trading_day_finish(request: Request, day_id: str):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        await request.json()
+        return JSONResponse({"command_id": "fixture-finish", "status": "accepted"}, status_code=202)
+
+    @app.post("/api/trading-day/{day_id}/automation")
+    async def api_trading_day_automation(request: Request, day_id: str):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        body = await request.json()
+        return JSONResponse({"command_id": "fixture-auto", "status": "accepted",
+                             "action": body.get("action", "pause")}, status_code=202)
+
+    @app.post("/api/paper/accounts/{account_id}/orders/preview")
+    async def api_paper_preview(request: Request, account_id: str):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        await request.json()
+        return {
+            "allowed": True, "reasons": [], "account_label": "Ручной счёт",
+            "quantity": "0.02", "notional": "1285", "reserved_margin": "128.5",
+            "entry_fee": "0.771", "estimated_exit_fee": "0.771", "funding_status": "unknown",
+            "funding_rate": None, "break_even": "64251.5", "estimated_net_at_tp": "23.2",
+            "estimated_net_at_sl": "-10", "liquidation_price": "57825",
+            "liquidation_quality": "simplified", "price_as_of": get_clock(),
+            "entry_price": "64250.5", "side": "buy", "order_type": "market",
+            "leverage": 10, "market": {"mode": "demo", "contract_code": "BTC-USDT"},
+        }
+
+    @app.post("/api/paper/accounts/{account_id}/orders")
+    async def api_paper_order(request: Request, account_id: str):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        await request.json()
+        return JSONResponse({"command_id": "fixture-order", "status": "accepted"}, status_code=202)
+
+    @app.post("/api/paper/positions/{position_id}/actions")
+    async def api_paper_position_action(request: Request, position_id: str):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        await request.json()
+        return JSONResponse({"command_id": "fixture-close", "status": "accepted",
+                             "action": "close"}, status_code=202)
+
+    @app.get("/api/paper/commands/{command_id}")
+    async def api_paper_command_status(request: Request, command_id: str):
+        auth = _require_api_auth(request)
+        if auth:
+            return auth
+        return {"command_id": command_id, "status": "completed", "result": {}}
 
     @app.get("/api/daily-session/active")
     async def api_daily_session_active(request: Request):
@@ -489,7 +753,8 @@ def _register_routes(app: FastAPI) -> None:
         if auth:
             return auth
         fx = get_fixture("ready")
-        return {"candles": fx.get("history", [])}
+        return {"symbol": symbol, "period": period, "source": "fixture",
+                "candles": fx.get("history", [])[:size]}
 
     @app.get("/api/tickers")
     async def api_tickers(request: Request):

@@ -1,0 +1,19 @@
+{# Command Drawer — 4-step typed action executor (RFC §2.3) #}
+<div class="ws-drawer-overlay" id="wsDrawerOverlay" hidden>
+  <div class="ws-drawer" role="dialog" aria-modal="true" aria-labelledby="wsDrawerTitle">
+    <header class="ws-drawer-header">
+      <h3 id="wsDrawerTitle">Действие</h3>
+      <button type="button" class="ws-drawer-close" id="wsDrawerClose" aria-label="Закрыть">✕</button>
+    </header>
+    <div class="ws-drawer-body" id="wsDrawerBody">
+      <p>Выберите действие…</p>
+    </div>
+    <footer class="ws-drawer-footer">
+      <span class="ws-drawer-status" id="wsDrawerStatus" aria-live="polite"></span>
+      <div class="ws-drawer-actions">
+        <button type="button" class="wored-ghost-btn" id="wsDrawerCancel">Отмена</button>
+        <button type="button" class="ws-drawer-submit" id="wsDrawerSubmit" disabled>Подтвердить</button>
+      </div>
+    </footer>
+  </div>
+</div>

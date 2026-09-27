@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-# All 13 page routes that must return 200 when authenticated
+# Page routes that must return 200 when authenticated
 PAGES_200 = [
     "/",
     "/dashboard",
@@ -18,6 +18,10 @@ PAGES_200 = [
     "/system",
     "/daily-session",
     "/command-deck",
+    "/trading-day",
+    "/workspace",
+    "/results",
+    "/learning",
     "/login",        # login page is public
     "/journal/0",     # journal detail
 ]
@@ -34,6 +38,9 @@ NAV_LINKS = [
     "/journal",
     "/system",
     "/model-management",
+    "/results",
+    "/learning",
+    "/workspace",
 ]
 
 

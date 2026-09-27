@@ -47,12 +47,12 @@
   {% if can_admin %}
   <section class="card" aria-label="Администрирование">
     <h2>Администрирование</h2>
-    <form method="post" action="/admin/journal-snapshot" class="wored-inline-form">
+    <form method="post" action="/admin/actions/journal-snapshot" class="wored-inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="next" value="/system">
       <button type="submit" class="wored-btn">Создать снимок журнала</button>
     </form>
-    <form method="post" action="/admin/clear-acknowledged-alerts" class="wored-inline-form">
+    <form method="post" action="/admin/actions/clear-acknowledged-alerts" class="wored-inline-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="next" value="/system">
       <button type="submit" class="wored-btn wored-btn-danger">Очистить подтверждённые оповещения</button>

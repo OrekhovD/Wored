@@ -96,24 +96,26 @@
           el.className = "wored-health-dot " + (ok ? "is-ok" : "is-warn");
         }
 
-        /* Data freshness status */
-        const label = document.getElementById("dataStatusLabel");
+        /* Data freshness status — update the #dataStatus element that
+           navigation.html actually renders; show source age, not only color. */
+        const label = document.getElementById("dataStatus");
         if (label) {
+          const age = h.as_of ? " · " + h.as_of + " UTC" : "";
           if (h.redis && h.postgres && h.collector_feed) {
-            label.textContent = "Данные доступны";
-            label.className = "ui-text-success";
+            label.textContent = "Данные свежие" + age;
+            label.className = "wored-data-status ui-text-success";
           } else if (h.postgres) {
-            label.textContent = "Данные устарели";
-            label.className = "ui-text-accent";
+            label.textContent = "Данные устарели" + age;
+            label.className = "wored-data-status ui-text-accent";
           } else {
             label.textContent = "Нет связи";
-            label.className = "ui-text-danger";
+            label.className = "wored-data-status ui-text-danger";
           }
         }
       } catch (_) {
         healthErrCount++;
-        const label = document.getElementById("dataStatusLabel");
-        if (label) { label.textContent = "Нет связи"; label.className = "ui-text-danger"; }
+        const label = document.getElementById("dataStatus");
+        if (label) { label.textContent = "Нет связи"; label.className = "wored-data-status ui-text-danger"; }
       }
       const delay = healthErrCount > 0
         ? [3000,6000,12000,30000][Math.min(healthErrCount-1,3)]

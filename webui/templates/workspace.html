@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<main class="ws-layout" data-controller="workspace" data-state-url="/api/workspace/state">
+
+  {# ── Status bar ── #}
+  <header class="ws-status" id="wsStatus" aria-label="Статус дня">
+    <span class="ws-status-stage" id="wsStage">—</span>
+    <span class="ws-status-date" id="wsDate">—</span>
+    <span class="ws-status-market" id="wsMarket">рынок: —</span>
+    <span class="ws-status-accounts" id="wsAccounts">—</span>
+    <span class="ws-status-pending" id="wsPending" aria-live="polite"></span>
+  </header>
+
+  {# ── Day route stepper ── #}
+  <nav class="ws-route" aria-label="Маршрут дня">
+    <ol class="ws-stepper" id="wsStepper">
+      <li class="ws-step" data-stage="prepare">Подготовка</li>
+      <li class="ws-step" data-stage="work">Работа</li>
+      <li class="ws-step" data-stage="finishing">Завершение</li>
+      <li class="ws-step" data-stage="results">Итоги</li>
+      <li class="ws-step" data-stage="learning">Обучение</li>
+    </ol>
+  </nav>
+
+  {# ── Context panel (center) ── #}
+  <section class="ws-context" id="wsContext" aria-label="Контекст работы">
+    {# Accounts — rendered by JS #}
+    <div id="wsAccountsPanel" class="ws-accounts">
+      <div class="wored-loading-state">Загрузка состояния…</div>
+    </div>
+    {# Object inspector — rendered by JS #}
+    <div id="wsInspector" class="ws-inspector" hidden></div>
+  </section>
+
+  {# ── Attention queue (right) ── #}
+  <aside class="ws-attention" id="wsAttention" aria-label="Требует решения">
+    <h3 class="ws-attention-title">Требует решения</h3>
+    <ul class="ws-attention-list" id="wsAttentionList">
+      <li class="ws-attention-item ws-attention-info">Загрузка…</li>
+    </ul>
+  </aside>
+
+  {# ── Quick links: research & history (B4) ── #}
+  <section class="ws-quicklinks" aria-label="Инструменты">
+    <h4>Инструменты</h4>
+    <div class="ws-ql-grid">
+      <a href="/" class="ws-ql-item">Рынок</a>
+      <a href="/alerts" class="ws-ql-item">Оповещения</a>
+      <a href="/predictions" class="ws-ql-item">Прогнозы</a>
+      <a href="/journal" class="ws-ql-item">Журнал</a>
+      <a href="/results" class="ws-ql-item">История</a>
+      <a href="/learning" class="ws-ql-item">Обучение</a>
+      <a href="/strategy" class="ws-ql-item">Стратегия</a>
+    </div>
+  </section>
+
+</main>
+
+{% include "partials/workspace_command_drawer.html" %}
+
+<script src="/static/ui/workspace-state.js"></script>
+<script src="/static/ui/workspace-actions.js"></script>
+{% endblock %}

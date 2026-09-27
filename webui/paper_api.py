@@ -7,6 +7,7 @@ market adapter replaces placeholder execution in TD-04.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict
@@ -27,6 +28,8 @@ except ImportError:  # uvicorn runs with /app as the import root inside the cont
 
 router = APIRouter(prefix="/api", tags=["paper-trading"])
 
+log = logging.getLogger(__name__)
+
 # T06: paper_trading domain service bridge
 # When paper_trading.adapter is available, routes delegate to it.
 # Otherwise, fallback to the legacy paper_store implementation.
@@ -37,6 +40,10 @@ try:
         start_day as _pt_start_day,
         finish_day as _pt_finish_day,
         get_command_status as _pt_cmd_status,
+        submit_manual_order as _pt_submit_order,
+        close_position as _pt_close_position,
+        pause_auto as _pt_pause_auto,
+        resume_auto as _pt_resume_auto,
         owner_id_from_webui as _pt_owner_id,
     )
     _pt_available = True
@@ -143,9 +150,12 @@ def _empty_payload(settings: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-async def _current_payload(request: Request) -> Dict[str, Any]:
-    row = await _load(request)
-    payload = row.state or _empty_payload(_settings(row))
+def _storage_mode(request: Request) -> str:
+    return "postgres" if getattr(request.app.state, "pg_pool", None) is not None else "memory"
+
+
+async def _apply_market(request: Request, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Overlay real market freshness on a payload (never a fabricated green)."""
     market_mode = paper_market_mode(request)
     payload["market_mode"] = market_mode
     payload["mode"] = "prototype" if market_mode == "demo" else "paper-live-data"
@@ -165,10 +175,110 @@ async def _current_payload(request: Request) -> Dict[str, Any]:
                 payload.setdefault("capabilities", {})["can_start"] = False
             elif payload.get("day", {}).get("state") == "active":
                 payload["auto_state_label"] = f"Рыночные данные заблокированы: {exc.detail}"
-    payload["storage_mode"] = (
-        "postgres" if getattr(request.app.state, "pg_pool", None) is not None else "memory"
-    )
+    payload["storage_mode"] = _storage_mode(request)
     return payload
+
+
+async def _current_payload(request: Request) -> Dict[str, Any]:
+    row = await _load(request)
+    payload = row.state or _empty_payload(_settings(row))
+    return await _apply_market(request, payload)
+
+
+def _domain_skeleton(request: Request) -> Dict[str, Any]:
+    """A market-aware UI skeleton for the domain path.
+
+    Deliberately does NOT touch the prototype paper-store: when the PostgreSQL
+    trading domain owns the day, the browser-session ledger must never leak into
+    the rendered state (issue #1/#2 split-brain). Risk policy falls back to
+    DEFAULT_SETTINGS because the domain get_current_state does not expose it.
+    """
+    return _empty_payload({**DEFAULT_SETTINGS})
+
+
+
+def _map_domain_day_state(domain_state: str) -> str:
+    """Translate the domain lifecycle state to the UI vocabulary.
+
+    The trading-day frontend keys on ``active`` (deal ticket enabled) and
+    ``reconciled`` (final report). The domain service uses ``running`` and the
+    settlement states; map them explicitly instead of guessing.
+    """
+    if domain_state in {"running", "active"}:
+        return "active"
+    if domain_state in {"finished", "settling", "reconciled", "closed"}:
+        return "reconciled"
+    return domain_state
+
+
+async def _ui_payload_from_domain(
+    request: Request, state: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Render the authoritative domain state in the UI trading-day schema.
+
+    The domain ``get_current_state`` payload is the single source of truth for
+    day/accounts/positions, but its field names differ from the frontend
+    contract. We start from a market-aware skeleton that never touches the
+    prototype ledger (freshness is applied last, no invented balances) and
+    overlay the authoritative domain values. Fields the domain does not expose
+    (unrealized, total_costs, loss_budget, leverage) stay absent so the UI
+    shows an em-dash instead of a fabricated number.
+    """
+    payload = _domain_skeleton(request)
+    day = state.get("day") or {}
+    start_at = day.get("start_at")
+    local_date: str | None = None
+    if start_at:
+        try:
+            zone = ZoneInfo(str(payload.get("timezone") or DEFAULT_SETTINGS["timezone"]))
+            local_date = datetime.fromisoformat(start_at.replace("Z", "+00:00")).astimezone(
+                zone
+            ).date().isoformat()
+        except (ValueError, ZoneInfoNotFoundError):
+            local_date = None
+    payload["day"] = {
+        "id": day.get("id"),
+        "local_date": local_date,
+        "state": _map_domain_day_state(str(day.get("state", ""))),
+        "start_at": start_at,
+        "end_at": day.get("end_at"),
+    }
+    accounts_out: list[Dict[str, Any]] = []
+    positions_out: list[Dict[str, Any]] = []
+    for acct in state.get("accounts", []):
+        balance = acct.get("cash")
+        accounts_out.append({
+            "id": acct.get("id"),
+            "kind": acct.get("kind"),
+            "currency": acct.get("currency", "USDT"),
+            "cash": balance,
+            # Domain reports the ledger balance only; present it as equity and
+            # available margin because there is no separate margin-reservation or
+            # mark-to-market breakdown in get_current_state.
+            "equity": balance,
+            "available_margin": balance,
+            "open_positions": acct.get("open_positions", 0),
+        })
+        for pos in acct.get("positions", []):
+            positions_out.append({
+                "id": pos.get("id"),
+                "account_id": acct.get("id"),
+                "side": pos.get("side"),
+                "origin": acct.get("kind"),
+                "entry_price": pos.get("avg_entry"),
+                "quantity": pos.get("qty"),
+                "stop_price": pos.get("stop"),
+                "take_profit": pos.get("target"),
+            })
+    payload["accounts"] = accounts_out
+    payload["positions"] = positions_out
+    payload["next_action"] = state.get("next_action", payload.get("next_action"))
+    if payload["day"].get("id"):
+        # A day already exists — do not offer "start".
+        payload.setdefault("capabilities", {})["can_start"] = False
+        payload["auto_state"] = payload.get("auto_state") or "observing"
+    # Apply freshness last so the market failure branches key on the real day.
+    return await _apply_market(request, payload)
 
 
 def _account(state: Dict[str, Any], account_id: str) -> Dict[str, Any]:
@@ -258,35 +368,37 @@ def _preview(
 
 @router.get("/trading-day/current")
 async def get_current_day(request: Request) -> JSONResponse:
-    # T06: try paper_trading domain service first
+    # When the PostgreSQL domain is wired it is the single source of truth.
+    # We never fabricate readiness, engine status or balances for a day that has
+    # not started, and we never silently fall back to the prototype ledger and
+    # present it as a green, ready state (issue #2).
     if _use_pt_domain(request):
         try:
-            owner_id = _pt_owner_id("admin")  # TODO: get from session
+            owner_id = _pt_owner_id("admin")  # TODO: resolve from session identity
             state = await _pt_get_state(owner_id)
-            if state.get("ok") and state.get("day"):
-                return JSONResponse(state)
-            # No active day in paper_trading — return pre-start state
-            if state.get("ok") and not state.get("day"):
-                return JSONResponse({
-                    "ui_schema_version": 1,
-                    "day": None,
-                    "accounts": [
-                        {"id": "proto-manual", "kind": "manual", "currency": "USDT", "cash": "1000", "available_margin": "1000"},
-                        {"id": "proto-auto", "kind": "auto", "currency": "USDT", "cash": "1000", "available_margin": "1000"},
-                    ],
-                    "risk_policy": {"max_daily_loss_usdt": "50", "max_risk_per_order_usdt": "10", "max_total_exposure": "500", "max_leverage": 10},
-                    "fresh": True,
-                    "capabilities": {"can_start": True, "reason_code": None},
-                    "next_action": "start",
-                    "end_time_local": "21:00",
-                    "timezone": "Asia/Bangkok",
-                    "auto_state": "observing",
-                    "auto_state_label": "Наблюдает за рынком",
-                    "engine_status": "running",
-                    "engine_heartbeat_age": 2,
-                })
-        except Exception:
-            pass  # fall through to legacy
+            if not state.get("ok"):
+                raise RuntimeError(str(state.get("error") or "domain_state_unavailable"))
+            if state.get("day"):
+                return JSONResponse(await _ui_payload_from_domain(request, state))
+            # Domain reachable, but no active day yet: return the honest,
+            # market-aware pre-start payload (freshness computed from the real
+            # market mode, no invented engine_status / balances, never loaded
+            # from the prototype ledger).
+            return JSONResponse(await _apply_market(request, _domain_skeleton(request)))
+        except Exception as exc:
+            log.warning("trading-day/current: domain path failed, serving blocked: %s", exc)
+            payload = _domain_skeleton(request)
+            payload["fresh"] = False
+            payload["mode"] = "prototype" if paper_market_mode(request) == "demo" else "paper-live-data"
+            payload["market_mode"] = paper_market_mode(request)
+            payload["storage_mode"] = _storage_mode(request)
+            payload["reason_code"] = (
+                "Источник данных дня недоступен; запуск и заявки заблокированы"
+            )
+            caps = payload.setdefault("capabilities", {})
+            caps["can_start"] = False
+            caps["domain_error"] = str(exc)
+            return JSONResponse(payload)
     return JSONResponse(await _current_payload(request))
 
 
@@ -332,28 +444,45 @@ async def save_settings(request: Request, body: Dict[str, Any] = Body(...)) -> J
 
 @router.post("/trading-day/start")
 async def start_day(request: Request, body: Dict[str, Any] = Body(...)) -> JSONResponse:
-    # T06: try paper_trading domain service first
+    # When the PostgreSQL domain is wired it is authoritative: start the day
+    # through the service and never fall through to a prototype write (split-brain).
     if _use_pt_domain(request):
         try:
             owner_id = _pt_owner_id("admin")
-            result = await _pt_start_day(owner_id=owner_id, mode="baseline_auto")
-            if result.get("ok"):
-                return JSONResponse({
-                    "command_id": result.get("commands", [""])[0] if result.get("commands") else "",
-                    "status": "accepted",
-                    "day_id": result.get("day_id"),
-                    "start_at": result.get("start_at"),
-                    "end_at": result.get("end_at"),
-                    "accounts": [
-                        {"id": result.get("manual_account_id"), "kind": "manual", "currency": "USDT", "cash": "1000", "available_margin": "1000"},
-                        {"id": result.get("auto_account_id"), "kind": "auto", "currency": "USDT", "cash": "1000", "available_margin": "1000"},
-                    ],
-                    "auto_state": "observing",
-                    "auto_state_label": "Наблюдает за рынком",
-                    "fresh": True,
-                }, status_code=202)
-        except Exception:
-            pass  # fall through to legacy
+            risk = body.get("risk_policy") or {}
+            settings = {
+                "opening_capital": str(body.get("opening_capital", "1000")),
+                "max_daily_loss_usdt": str(risk.get("max_daily_loss_usdt", "50")),
+                "max_risk_per_order_usdt": str(risk.get("max_risk_per_order_usdt", "10")),
+                "max_leverage": risk.get("max_leverage", 10),
+                "timezone": str(body.get("timezone", "Asia/Bangkok")),
+                "end_time_local": str(body.get("end_time_local", "21:00")),
+            }
+            result = await _pt_start_day(
+                owner_id=owner_id,
+                timezone=settings["timezone"],
+                end_time_local=settings["end_time_local"],
+                mode="baseline_auto",
+                settings=settings,
+            )
+            if not result.get("ok"):
+                raise RuntimeError(str(result.get("error") or "domain_start_failed"))
+            # Start is accepted asynchronously; balances/positions come from the
+            # subsequent trading-day/current poll. Do not fabricate cash here.
+            return JSONResponse({
+                "command_id": (result.get("commands") or [""])[0],
+                "status": "accepted",
+                "day_id": result.get("day_id"),
+                "start_at": result.get("start_at"),
+                "end_at": result.get("end_at"),
+            }, status_code=202)
+        except Exception as exc:
+            log.warning("trading-day/start: domain path failed, refusing prototype fallback: %s", exc)
+            return JSONResponse(
+                {"ok": False, "detail": f"Не удалось запустить день через сервис торговли: {exc}"},
+                status_code=502,
+            )
+    # Legacy prototype path — only reached when the PostgreSQL domain is not wired.
     store = get_paper_store(request)
     owner_key = paper_owner_key(request)
     idempotency_key = str(body.get("idempotency_key") or uuid4())
@@ -408,6 +537,31 @@ async def start_day(request: Request, body: Dict[str, Any] = Body(...)) -> JSONR
 
 @router.post("/trading-day/{day_id}/automation")
 async def automation(request: Request, day_id: str, body: Dict[str, Any] = Body(...)) -> JSONResponse:
+    # Domain authoritative: the day lifecycle owns auto control; never write a
+    # prototype auto_state beside the real day (split-brain).
+    if _use_pt_domain(request):
+        action = str(body.get("action", ""))
+        if action not in {"pause", "resume", "close_auto"}:
+            raise HTTPException(status_code=422, detail="Неизвестная команда автомата")
+        try:
+            owner_id = _pt_owner_id("admin")
+            if action == "resume":
+                result = await _pt_resume_auto(owner_id)
+            else:
+                # close_auto also stops new entries; the runner owns liquidation.
+                result = await _pt_pause_auto(owner_id)
+            if not result.get("ok"):
+                raise RuntimeError(str(result.get("error") or "domain_auto_command_failed"))
+            return JSONResponse(
+                {"command_id": result.get("command_id"), "status": "accepted", "action": action},
+                status_code=202,
+            )
+        except Exception as exc:
+            log.warning("trading-day/automation: domain path failed, refusing prototype fallback: %s", exc)
+            return JSONResponse(
+                {"ok": False, "detail": f"Не удалось выполнить команду автомата: {exc}"},
+                status_code=502,
+            )
     store = get_paper_store(request)
     owner_key = paper_owner_key(request)
     idempotency_key = str(body.get("idempotency_key") or uuid4())
@@ -442,12 +596,72 @@ async def preview_order(request: Request, account_id: str,
                         body: Dict[str, Any] = Body(...)) -> JSONResponse:
     instrument = str(body.get("instrument", "btcusdt"))
     market = await resolve_market_snapshot(request, instrument)
-    return JSONResponse(_preview(await _current_payload(request), account_id, body, market))
+    if _use_pt_domain(request):
+        state = await _domain_ui_state_or_block(request)
+    else:
+        state = await _current_payload(request)
+    return JSONResponse(_preview(state, account_id, body, market))
+
+
+async def _domain_ui_state_or_block(request: Request) -> Dict[str, Any]:
+    """Authoritative domain state rendered in the UI schema, fail-closed.
+
+    Used by the deal-ticket paths so preview and placement evaluate the real
+    balances/positions rather than the prototype ledger.
+    """
+    owner_id = _pt_owner_id("admin")
+    state = await _pt_get_state(owner_id)
+    if not state.get("ok"):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Источник данных дня недоступен: {state.get('error') or 'domain_state_unavailable'}",
+        )
+    if not state.get("day"):
+        raise HTTPException(status_code=409, detail="Торговый день не активен")
+    return await _ui_payload_from_domain(request, state)
 
 
 @router.post("/paper/accounts/{account_id}/orders")
 async def place_order(request: Request, account_id: str,
                       body: Dict[str, Any] = Body(...)) -> JSONResponse:
+    # Domain authoritative for order placement; the runner turns the submitted
+    # command into fill/ledger. Never write a prototype position beside the
+    # real day (split-brain). Preview math (risk → quantity) is reused so the
+    # submitted quantity matches what the user confirmed.
+    if _use_pt_domain(request):
+        instrument = str(body.get("instrument", "btcusdt"))
+        try:
+            state = await _domain_ui_state_or_block(request)
+            market = await resolve_market_snapshot(request, instrument)
+            preview = _preview(state, account_id, body, market)
+        except HTTPException as exc:
+            return JSONResponse({"ok": False, "detail": exc.detail}, status_code=exc.status_code)
+        try:
+            owner_id = _pt_owner_id("admin")
+            result = await _pt_submit_order(
+                owner_id=owner_id,
+                account_id=account_id,
+                side=preview["side"],
+                order_type=preview["order_type"],
+                qty=preview["quantity"],
+                stop_loss=body.get("stop_price"),
+                take_profit=body.get("take_profit"),
+                idempotency_key=str(body.get("idempotency_key") or uuid4()),
+            )
+            if not result.get("ok"):
+                raise RuntimeError(str(result.get("error") or "domain_order_failed"))
+            return JSONResponse({
+                "command_id": result.get("command_id"),
+                "status": "accepted",
+                "order_type": preview["order_type"],
+                "quantity": preview["quantity"],
+            }, status_code=202)
+        except Exception as exc:
+            log.warning("paper orders: domain path failed, refusing prototype fallback: %s", exc)
+            return JSONResponse(
+                {"ok": False, "detail": f"Не удалось отправить заявку через сервис торговли: {exc}"},
+                status_code=502,
+            )
     store = get_paper_store(request)
     owner_key = paper_owner_key(request)
     idempotency_key = str(body.get("idempotency_key") or uuid4())
@@ -557,6 +771,31 @@ def _close_position(
 @router.post("/paper/positions/{position_id}/actions")
 async def position_action(request: Request, position_id: str,
                           body: Dict[str, Any] = Body(...)) -> JSONResponse:
+    # Domain authoritative for close; the runner settles the ledger. Never write
+    # a prototype close beside the real day (split-brain).
+    if _use_pt_domain(request):
+        if body.get("action") != "close":
+            raise HTTPException(status_code=422, detail="Доступно только полное закрытие")
+        try:
+            owner_id = _pt_owner_id("admin")
+            result = await _pt_close_position(
+                owner_id=owner_id,
+                position_id=position_id,
+                idempotency_key=str(body.get("idempotency_key") or uuid4()),
+            )
+            if not result.get("ok"):
+                raise RuntimeError(str(result.get("error") or "domain_close_failed"))
+            return JSONResponse({
+                "command_id": result.get("command_id"),
+                "status": "accepted",
+                "action": "close",
+            }, status_code=202)
+        except Exception as exc:
+            log.warning("paper positions close: domain path failed, refusing prototype fallback: %s", exc)
+            return JSONResponse(
+                {"ok": False, "detail": f"Не удалось закрыть позицию через сервис торговли: {exc}"},
+                status_code=502,
+            )
     store = get_paper_store(request)
     owner_key = paper_owner_key(request)
     idempotency_key = str(body.get("idempotency_key") or uuid4())
@@ -609,18 +848,25 @@ def _report_account(
 @router.post("/trading-day/{day_id}/finish")
 async def finish_day(request: Request, day_id: str,
                      body: Dict[str, Any] = Body(...)) -> JSONResponse:
-    # T06: try paper_trading domain service first
+    # Domain authoritative: finish through the service; never write a prototype
+    # "reconciled" day beside the real one (split-brain). Final report/balances
+    # arrive via trading-day/current once settlement completes.
     if _use_pt_domain(request):
         try:
             owner_id = _pt_owner_id("admin")
             result = await _pt_finish_day(owner_id)
-            if result.get("ok"):
-                return JSONResponse({
-                    "command_id": result.get("command_id"),
-                    "status": "accepted",
-                }, status_code=202)
-        except Exception:
-            pass
+            if not result.get("ok"):
+                raise RuntimeError(str(result.get("error") or "domain_finish_failed"))
+            return JSONResponse({
+                "command_id": result.get("command_id"),
+                "status": "accepted",
+            }, status_code=202)
+        except Exception as exc:
+            log.warning("trading-day/finish: domain path failed, refusing prototype fallback: %s", exc)
+            return JSONResponse(
+                {"ok": False, "detail": f"Не удалось завершить день через сервис торговли: {exc}"},
+                status_code=502,
+            )
     store = get_paper_store(request)
     owner_key = paper_owner_key(request)
     idempotency_key = str(body.get("idempotency_key") or uuid4())
@@ -676,12 +922,18 @@ async def next_day(request: Request) -> JSONResponse:
 
 @router.get("/paper/commands/{command_id}")
 async def get_command(request: Request, command_id: str) -> JSONResponse:
-    # T06: try paper_trading domain service first
-    if _pt_available:
+    # When the domain is available it owns command truth. Never report a made-up
+    # "completed" for an unknown/failed command — that would fake settlement.
+    if _pt_available and getattr(request.app.state, "pg_pool", None) is not None:
         try:
             result = await _pt_cmd_status(command_id)
-            if result.get("ok"):
-                return JSONResponse(result)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("paper/commands/%s: domain status lookup failed: %s", command_id, exc)
+            return JSONResponse(
+                {"ok": False, "command_id": command_id, "error": "command_status_unavailable"},
+                status_code=503,
+            )
+        status_code = 200 if result.get("ok") else 404
+        return JSONResponse(result, status_code=status_code)
+    # Pure prototype: commands are applied synchronously, so completed is honest.
     return JSONResponse({"command_id": command_id, "status": "completed", "result": None})
