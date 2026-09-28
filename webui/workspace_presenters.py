@@ -195,6 +195,8 @@ def build_capabilities(
         "can_trade": False,
         "can_finish": False,
         "can_pause_auto": False,
+        "can_resume_auto": False,
+        "can_close_auto": False,
         "can_view_report": False,
         "commands_enabled": False,  # B3 will enable
         "reason_code": None,
@@ -209,10 +211,18 @@ def build_capabilities(
         return caps
 
     state = day.get("state", "")
+    automation_state = day.get("automation_state")
     if state == "running":
         caps["can_trade"] = market_quality == "live"
         caps["can_finish"] = True
         caps["can_pause_auto"] = True
+        caps["can_close_auto"] = True
+        # ``resume_auto`` is only valid when the runner has been paused by the
+        # operator; other paused-adjacent states (risk_blocked, waiting_signal)
+        # are managed by the runner itself and are not user-resumable.
+        if automation_state == "paused":
+            caps["can_pause_auto"] = False
+            caps["can_resume_auto"] = True
     elif state in ("closing", "settlement_pending"):
         caps["reason_code"] = "closing_in_progress"
     elif state in ("closed", "reconciled"):

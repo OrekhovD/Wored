@@ -46,11 +46,12 @@ class TestSingleTradingCentre:
         assert resp.status_code == 200
         assert "tdStartBtn" in resp.text
 
-    async def test_trader_redirects_to_workspace(self, client):
+    async def test_trader_redirects_to_trading_day(self, client):
+        # /trader must keep its legacy destination until F08 Phase 4d ships.
         await _login(client)
         resp = await client.get("/trader", follow_redirects=False)
         assert resp.status_code == 307
-        assert resp.headers["location"] == "/workspace"
+        assert resp.headers["location"] == "/trading-day"
 
     async def test_trading_day_has_deal_ticket(self, client):
         await _login(client)

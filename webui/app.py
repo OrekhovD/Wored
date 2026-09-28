@@ -61,6 +61,7 @@ from services.sim_math import preview as simulate_preview, validate_order, settl
 from prediction_timeframes import period_to_minutes, STEP_MINUTES_MAP
 from ui_presenters import present_deck_ui, present_preview_ui
 from paper_api import router as paper_router
+from paper_api import _owner_from_request as _pt_owner_from_request
 from paper_store import PAPER_TABLES_SQL
 from trader_api import router as trader_router
 
@@ -1996,9 +1997,12 @@ app.include_router(trader_router)
 async def trader_page():
     """Trader Deck is retired as a competing action surface.
 
-    F08 RFC Phase 4a: redirects to V2 workspace (the primary entry point).
+    Per F08 RFC, this redirect target must remain /trading-day until Phase 4d
+    (full trader↔workspace UI merge with owner scoping + chart overlay) is
+    shipped. V2 workspace has its own nav entry; /trader keeps its legacy
+    destination so existing links do not break.
     """
-    return RedirectResponse(url="/workspace", status_code=307)
+    return RedirectResponse(url="/trading-day", status_code=307)
 
 
 @app.get("/trading-day", response_class=HTMLResponse)
@@ -4112,7 +4116,7 @@ async def results_page(request: Request):
     try:
         from paper_trading.adapter import list_day_reports as _pt_list_reports, owner_id_from_webui as _pt_owner
         if getattr(request.app.state, "pg_pool", None) is not None:
-            owner_id = _pt_owner("admin")
+            owner_id = _pt_owner_from_request(request)
             days = await _pt_list_reports(owner_id, limit=30)
     except Exception:
         source_error = "report source unavailable"
@@ -4132,7 +4136,7 @@ async def result_detail_page(request: Request, day_id: str):
     try:
         from paper_trading.adapter import get_day_report as _pt_day_report, owner_id_from_webui as _pt_owner
         if getattr(request.app.state, "pg_pool", None) is not None:
-            owner_id = _pt_owner("admin")
+            owner_id = _pt_owner_from_request(request)
             day_data = await _pt_day_report(owner_id, day_id)
             if day_data is None:
                 source_error = "day not found or not closed"
@@ -4152,7 +4156,7 @@ async def api_results_list(request: Request):
         from paper_trading.adapter import list_day_reports as _pt_list_reports, owner_id_from_webui as _pt_owner
         if getattr(request.app.state, "pg_pool", None) is None:
             return {"ok": True, "days": [], "source": "unavailable"}
-        owner_id = _pt_owner("admin")
+        owner_id = _pt_owner_from_request(request)
         days = await _pt_list_reports(owner_id, limit=30)
         return {"ok": True, "days": days, "source": "paper_trading"}
     except Exception as exc:
@@ -4167,7 +4171,7 @@ async def api_result_detail(request: Request, day_id: str):
         from paper_trading.adapter import get_day_report as _pt_day_report, owner_id_from_webui as _pt_owner
         if getattr(request.app.state, "pg_pool", None) is None:
             return JSONResponse({"ok": False, "error": "database unavailable"}, status_code=503)
-        owner_id = _pt_owner("admin")
+        owner_id = _pt_owner_from_request(request)
         report = await _pt_day_report(owner_id, day_id)
         if report is None:
             return JSONResponse({"ok": False, "error": "day not found"}, status_code=404)
@@ -4184,7 +4188,7 @@ async def api_result_export(request: Request, day_id: str, format: str = "json")
         from paper_trading.adapter import get_day_report as _pt_day_report, owner_id_from_webui as _pt_owner
         if getattr(request.app.state, "pg_pool", None) is None:
             return JSONResponse({"ok": False, "error": "database unavailable"}, status_code=503)
-        owner_id = _pt_owner("admin")
+        owner_id = _pt_owner_from_request(request)
         report = await _pt_day_report(owner_id, day_id)
         if report is None:
             return JSONResponse({"ok": False, "error": "day not found"}, status_code=404)

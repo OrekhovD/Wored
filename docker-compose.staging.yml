@@ -1,0 +1,121 @@
+# Disposable staging environment for V2 Workspace acceptance tests.
+#
+# Purpose: exercise `day.start → order.preview → order.submit → position.close
+# → day.finish → report` on a fresh PostgreSQL instance without touching the
+# production `wored_default` network, `htx_trading_bot_postgres` volume, or
+# live HTX feed.
+#
+# Isolation:
+#   - Run with `docker compose -p woredstg -f docker-compose.staging.yml ...`
+#     so the Docker project name (`woredstg`) differs from production
+#     (`wored`). Volumes and network are auto-prefixed with the project name,
+#     so `woredstg_postgres_data` never collides with `wored_postgres_data`.
+#   - Container names are prefixed with `woredstg_` explicitly to prevent
+#     Docker Compose from reusing the production `htx_trading_bot_*` names.
+#   - WebUI listens on host port 18081 (production uses 8080).
+#   - `collector` and `chatbot` are intentionally omitted:
+#       * A lightweight `runner` sidecar seeds a synthetic PerpetualSnapshot
+#         (price 64250) to Redis and executes paper_v2 commands.  The webui
+#         reads the same snapshot in `live` mode, so the full
+#         `preview → order → close → finish` cycle works without HTX WebSocket.
+#       * Telegram chatbot stays out of scope for staging acceptance.
+#
+# Setup:
+#   1. Copy `.env.staging.example` to `.env.staging` and set a fresh
+#      `WEBUI_ADMIN_PASSWORD` and `WEBUI_SESSION_SECRET`. Do NOT reuse
+#      production values.
+#   2. `docker compose -p woredstg -f docker-compose.staging.yml up -d --build`
+#   3. Playwright / browser: http://127.0.0.1:18081/workspace
+#   4. After the round: `docker compose -p woredstg -f docker-compose.staging.yml
+#      down -v` (this destroys only the woredstg volume; production is intact).
+services:
+  postgres:
+    image: postgres:16
+    container_name: woredstg_postgres
+    environment:
+      POSTGRES_USER: woredstg
+      POSTGRES_PASSWORD: woredstg-disposable-only
+      POSTGRES_DB: wored_staging
+      TZ: Asia/Bangkok
+      PGTZ: Asia/Bangkok
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U woredstg -d wored_staging"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    container_name: woredstg_redis
+    restart: unless-stopped
+
+  webui:
+    build: ./webui
+    container_name: woredstg_webui
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - .env.staging
+    volumes:
+      - ./webui:/app
+      - ./chatbot:/chatbot:ro
+      - ./paper_trading:/opt/paper_trading:ro
+      - ./trading_math:/opt/trading_math:ro
+      - ./forecast_engine:/opt/forecast_engine:ro
+      - ./config:/config:ro
+    environment:
+      PYTHONPATH: /app:/chatbot:/opt
+      TZ: Asia/Bangkok
+      DATABASE_URL: postgresql://woredstg:woredstg-disposable-only@postgres:5432/wored_staging
+      REDIS_URL: redis://redis:6379/0
+      # Live mode reads from Redis; the sidecar runner seeds a synthetic
+      # snapshot every 2 s so the webui always has a fresh price.
+      PAPER_MARKET_MODE: live
+      PAPER_MARKET_MAX_AGE_SECONDS: "10"
+      WEBUI_PORT: "18081"
+      # Local session cookie is fine here (http only, disposable data).
+      WEBUI_COOKIE_SECURE: "false"
+    command: uvicorn app:app --host 0.0.0.0 --port 8000
+    ports:
+      - '127.0.0.1:18081:8000'
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=5).read()",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  runner:
+    build: ./webui
+    container_name: woredstg_runner
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./paper_trading:/opt/paper_trading:ro
+      - ./trading_math:/opt/trading_math:ro
+      - ./scripts/staging_runner.py:/scripts/staging_runner.py:ro
+    environment:
+      PYTHONPATH: /opt
+      TZ: Asia/Bangkok
+      DATABASE_URL: postgresql://woredstg:woredstg-disposable-only@postgres:5432/wored_staging
+      REDIS_URL: redis://redis:6379/0
+    command: python /scripts/staging_runner.py
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

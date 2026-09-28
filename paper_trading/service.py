@@ -248,7 +248,10 @@ class PaperTradingService:
             command_id=uuid4(),
             owner_id=UUID(owner_id) if isinstance(owner_id, str) else owner_id,
             idempotency_key=key,
-            command_type=CommandType("place_order"),
+            # Enum name is `submit_order` (see paper_trading/contracts.py). The
+            # historical value `place_order` never existed on the enum and
+            # raised "'place_order' is not a valid CommandType" on submit.
+            command_type=CommandType.submit_order,
             payload={
                 "side": side,
                 "order_type": order_type,
@@ -403,7 +406,11 @@ class PaperTradingService:
         for day in days:
             positions = await self.repo.get_all_positions_by_day(day.day_id)
             closed = [p for p in positions if p.status.value == "closed"]
-            realized_pnl = sum((p.realized_net_pnl for p in closed), Decimal(0))
+            # Position.realized_net_pnl is already net of fees (see execution.
+            # close_position: realized_net = gross - close_fee - allocated_entry_fee).
+            # The card shows net_pnl directly and fees alongside as a breakdown,
+            # NOT a value to be subtracted from net_pnl again.
+            net_pnl_total = sum((p.realized_net_pnl for p in closed), Decimal(0))
             total_fees = sum((p.entry_fee + p.exit_fee for p in closed), Decimal(0))
             wins = sum(1 for p in closed if p.realized_net_pnl > Decimal(0))
             results.append({
@@ -414,7 +421,7 @@ class PaperTradingService:
                 "trades": len(closed),
                 "wins": wins,
                 "losses": len(closed) - wins,
-                "net_pnl": str(realized_pnl),
+                "net_pnl": str(net_pnl_total),
                 "fees": str(total_fees),
             })
         return results
@@ -448,16 +455,20 @@ class PaperTradingService:
             acct_closed = [p for p in acct_positions if p.status.value == "closed"]
             acct_open = [p for p in acct_positions if p.status.value == "open"]
 
-            realized_pnl = sum((p.realized_net_pnl for p in acct_closed), Decimal(0))
+            realized_net = sum((p.realized_net_pnl for p in acct_closed), Decimal(0))
+            realized_gross = sum((p.realized_gross_pnl for p in acct_closed), Decimal(0))
             total_fees = sum((p.entry_fee + p.exit_fee for p in acct_closed), Decimal(0))
             wins = sum(1 for p in acct_closed if p.realized_net_pnl > Decimal(0))
 
+            # format_report derives net_pnl = realized_pnl - total_fees, so we
+            # pass the GROSS figure here. Passing the net figure used to
+            # subtract fees a second time.
             report = format_report(
                 day_id=str(day.day_id),
                 account_id=str(acct.account_id),
                 account_label=kind_label,
                 opening_capital=acct.opening_deposit,
-                realized_pnl=realized_pnl,
+                realized_pnl=realized_gross,
                 total_fees=total_fees,
                 trades_count=len(acct_closed),
                 wins=wins,
@@ -470,13 +481,20 @@ class PaperTradingService:
             try:
                 postings = await self.repo.get_postings_for_account(acct.account_id)
                 actual_cash = await self.repo.get_account_balance(acct.account_id)
+                # ``get_account_balance`` sums non-pnl buckets, which already
+                # includes the opening deposit posting inserted in
+                # ``repo.create_account``. Passing ``opening_deposit`` as
+                # ``expected_cash`` on top of that used to double-count it.
+                # Similarly, ledger posts realised PnL under the *gross*
+                # bucket; comparing it to the position's net value was a
+                # unit mismatch. Reconcile gross-to-gross and net-to-net here.
                 recon = reconcile(
                     acct.account_id,
                     postings,
-                    expected_cash=acct.opening_deposit,
+                    expected_cash=Decimal(0),
                     expected_realized_pnl=Decimal(0),
                     actual_cash=actual_cash,
-                    actual_realized_pnl=realized_pnl,
+                    actual_realized_pnl=realized_gross,
                 )
                 report["reconciliation"] = {
                     "balanced": recon.balanced,

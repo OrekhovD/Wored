@@ -510,6 +510,9 @@ class PaperRepository:
                 # Idempotent replay: return existing result.
                 return _row_to_command(existing)
 
+            # Store the input payload in `result` so the runner can read
+            # order parameters (side, qty, stop_loss …) via cmd.result.
+            # complete_command will overwrite `result` with execution output.
             await conn.execute(
                 """
                     INSERT INTO paper_v2_commands
@@ -518,7 +521,7 @@ class PaperRepository:
                          expected_revision, status, result, error,
                          created_at, updated_at, schema_version)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'accepted',
-                            NULL, NULL, $9, $9, $10)
+                            $11, NULL, $9, $9, $10)
                     """,
                 str(command_id),
                 str(owner_id),
@@ -530,6 +533,7 @@ class PaperRepository:
                 expected_revision,
                 now,
                 SCHEMA_VERSION,
+                json.dumps(payload) if payload else None,
             )
 
         return Command(

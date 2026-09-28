@@ -18,6 +18,7 @@ try:
         _pt_available,
         _pt_get_state,
         _pt_owner_id,
+        _owner_from_request,
         _use_pt_domain,
         DEFAULT_SETTINGS,
     )
@@ -27,6 +28,7 @@ except ImportError:
         _pt_available,
         _pt_get_state,
         _pt_owner_id,
+        _owner_from_request,
         _use_pt_domain,
         DEFAULT_SETTINGS,
     )
@@ -59,7 +61,9 @@ async def get_workspace_state(request) -> Dict[str, Any]:
     use_domain = _pt_available and _use_pt_domain(request)
     if use_domain:
         try:
-            owner = _pt_owner_id(request)
+            # Identity resolution matches paper_api command paths so the day
+            # started via Drawer is the same day the workspace renders.
+            owner = _owner_from_request(request)
             state = await _pt_get_state(owner)
             if state.get("ok"):
                 domain_ok = True

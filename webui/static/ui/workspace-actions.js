@@ -64,9 +64,19 @@
     ctx.innerHTML = buildContextHtml(actionCode, opts || {});
     bodyEl.appendChild(ctx);
 
+    // B3: order.preview / order.submit render a real form so the payload
+    // carries risk / side / instrument / stop_price / take_profit from the
+    // user, not from a hardcoded default.
+    var isOrderFlow = actionCode === 'order.preview' || actionCode === 'order.submit';
+    if (isOrderFlow) {
+      renderOrderForm(actionCode, opts || {});
+    }
+
     // Enable submit if no typed confirmation needed
     if (def.confirm === 'none') {
-      submitBtn.disabled = false;
+      // Order-form has its own required-field validation; other actions
+      // are always submittable at 'none' gate.
+      submitBtn.disabled = isOrderFlow;
     } else if (def.confirm === 'acknowledge') {
       var ack = document.createElement('label');
       ack.className = 'ws-drawer-ack';
@@ -134,8 +144,26 @@
         statusEl.textContent = 'Команда принята (' + cmdId + '). Ожидание…';
         pollCommand(cmdId);
       } else if (resp.ok) {
-        statusEl.textContent = 'Выполнено';
-        refreshWorkspace();
+        // order.preview returns a synchronous 200 with the full quote.
+        // Transition the Drawer from "fill form" to "review + submit":
+        // render the calculation, swap the primary button to
+        // «Открыть позицию», keep the form DOM so `buildPayload` still
+        // reads the same field values when the user confirms.
+        if (actionCode === 'order.preview') {
+          var preview;
+          try { preview = await resp.json(); } catch (parseErr) { preview = null; }
+          if (preview && preview.allowed) {
+            showPreviewResult(preview, opts);
+          } else {
+            var reasons = (preview && preview.reasons) || [];
+            statusEl.textContent = '✗ Preview отклонён: ' + (reasons.join('; ') || 'unknown');
+            submitBtn.disabled = false;
+          }
+        } else {
+          statusEl.textContent = 'Выполнено';
+          refreshWorkspace();
+          setTimeout(closeDrawer, 1500);
+        }
       } else {
         var err = await resp.json().catch(function () { return {}; });
         statusEl.textContent = 'Отклонено (' + resp.status + '): ' + (err.detail || err.error || 'unknown');
@@ -198,11 +226,28 @@
   function buildPayload(actionCode, opts) {
     var p = {};
     switch (actionCode) {
+      case 'order.preview':
       case 'order.submit':
-        p = { instrument: opts.instrument || 'BTCUSDT', side: opts.side || 'buy',
-              order_type: opts.order_type || 'market', risk: opts.risk || '10',
-              leverage: opts.leverage || 10, stop_price: opts.stop_price || null,
-              take_profit: opts.take_profit || null };
+        // Prefer live form inputs (B3 Drawer order-form); fall back to opts
+        // so programmatic callers (fixtures, tests) keep working.
+        var form = document.getElementById('wsOrderForm');
+        if (form) {
+          p = {
+            instrument: (form.querySelector('[name="instrument"]') || {}).value || 'BTCUSDT',
+            side:       (form.querySelector('[name="side"]:checked') || {}).value || 'buy',
+            order_type: (form.querySelector('[name="order_type"]') || {}).value || 'market',
+            risk:       (form.querySelector('[name="risk"]') || {}).value || '',
+            leverage:   Number((form.querySelector('[name="leverage"]') || {}).value || 10),
+            stop_price: (form.querySelector('[name="stop_price"]') || {}).value || null,
+            take_profit: (form.querySelector('[name="take_profit"]') || {}).value || null,
+          };
+          if (p.take_profit === '') p.take_profit = null;
+        } else {
+          p = { instrument: opts.instrument || 'BTCUSDT', side: opts.side || 'buy',
+                order_type: opts.order_type || 'market', risk: opts.risk || '10',
+                leverage: opts.leverage || 10, stop_price: opts.stop_price || null,
+                take_profit: opts.take_profit || null };
+        }
         break;
       case 'position.close':
         p = { action: 'close' };
@@ -212,6 +257,64 @@
       case 'auto.close': p = { action: 'close_auto' }; break;
     }
     return p;
+  }
+
+  /**
+   * B3 order-form: real inputs so the preview/submit contract is satisfied.
+   * The form's own validation keeps `submitBtn` disabled until required
+   * fields are present and stop_price sits on the correct side of entry.
+   */
+  function renderOrderForm(actionCode, opts) {
+    var ask = Number(opts.market_ask || 0);
+    var bid = Number(opts.market_bid || 0);
+    // Suggested stop: 2% under ask for buy (worst case we can see).
+    var suggestedStop = bid > 0 ? (bid * 0.98).toFixed(2) : '';
+    var form = document.createElement('form');
+    form.id = 'wsOrderForm';
+    form.className = 'ws-drawer-form';
+    form.innerHTML =
+      '<div class="ws-form-row">'
+      + '<label>Инструмент <input type="text" name="instrument" value="BTCUSDT" required></label>'
+      + '<label>Тип <select name="order_type"><option value="market">market</option><option value="limit">limit</option></select></label>'
+      + '</div>'
+      + '<div class="ws-form-row">'
+      + '<label class="ws-radio"><input type="radio" name="side" value="buy" checked> Long</label>'
+      + '<label class="ws-radio"><input type="radio" name="side" value="sell"> Short</label>'
+      + '</div>'
+      + '<div class="ws-form-row">'
+      + '<label>Риск USDT <input type="number" name="risk" step="0.1" min="0.1" max="100" required></label>'
+      + '<label>Плечо <input type="number" name="leverage" min="1" max="20" value="10" required></label>'
+      + '</div>'
+      + '<div class="ws-form-row">'
+      + '<label>Stop <input type="number" name="stop_price" step="0.01" min="0" value="' + suggestedStop + '" required></label>'
+      + '<label>Take (опц.) <input type="number" name="take_profit" step="0.01" min="0"></label>'
+      + '</div>'
+      + '<p class="ws-form-hint">Рынок: bid=' + (bid || '—') + ' / ask=' + (ask || '—')
+      + ' (' + esc(opts.market_quality || 'unknown') + ')</p>'
+      + '<p class="ws-form-error" id="wsOrderFormError"></p>';
+    bodyEl.appendChild(form);
+
+    var errEl = form.querySelector('#wsOrderFormError');
+    function revalidate() {
+      var data = buildPayload(actionCode, opts);
+      var reason = '';
+      if (!data.instrument) reason = 'Instrument обязателен';
+      else if (!data.risk || Number(data.risk) <= 0) reason = 'Риск должен быть &gt; 0';
+      else if (!data.stop_price) reason = 'Stop обязателен';
+      else {
+        var stop = Number(data.stop_price);
+        var entry = data.side === 'buy' ? ask : bid;
+        if (entry > 0) {
+          if (data.side === 'buy' && stop >= entry) reason = 'Stop должен быть ниже цены Long';
+          if (data.side === 'sell' && stop <= entry) reason = 'Stop должен быть выше цены Short';
+        }
+      }
+      errEl.innerHTML = reason;
+      submitBtn.disabled = !!reason;
+    }
+    form.addEventListener('input', revalidate);
+    form.addEventListener('change', revalidate);
+    revalidate();
   }
 
   function buildContextHtml(code, opts) {
@@ -226,10 +329,49 @@
 
   function actionLabel(code) {
     var m = { 'day.start': 'Начать день', 'day.finish': 'Завершить день',
+              'order.preview': 'Предпросмотр заявки',
               'order.submit': 'Открыть позицию', 'position.close': 'Закрыть позицию',
               'auto.pause': 'Пауза автомата', 'auto.resume': 'Возобновить автомат',
               'auto.close': 'Отключить автомат', 'settings.update': 'Настройки' };
     return m[code] || code;
+  }
+
+  // ── B3 preview→submit UX transition ──
+  function showPreviewResult(preview, opts) {
+    // Do NOT remove the form; keeping it lets `buildPayload('order.submit', ...)`
+    // read the same values verbatim. We only append a summary and rewire Submit.
+    var existing = document.querySelector('.ws-preview-result');
+    if (existing) existing.remove();
+    var box = document.createElement('div');
+    box.className = 'ws-preview-result';
+    var rows = [
+      ['Цена входа', preview.entry_price + ' USDT'],
+      ['Сумма (quantity)', preview.quantity],
+      ['Notional', preview.notional + ' USDT'],
+      ['Reserved margin', preview.reserved_margin + ' USDT'],
+      ['Break-even', preview.break_even + ' USDT'],
+      ['Ликвидация', preview.liquidation_price + ' USDT (' + preview.liquidation_quality + ')'],
+      ['Комиссия вход/выход', preview.entry_fee + ' / ' + preview.estimated_exit_fee + ' USDT'],
+      ['Net при стопе', preview.estimated_net_at_sl + ' USDT'],
+    ];
+    if (preview.estimated_net_at_tp) rows.push(['Net при цели', preview.estimated_net_at_tp + ' USDT']);
+    if (preview.funding_rate) rows.push(['Funding rate', preview.funding_rate]);
+    var html = '<h4 class="ws-preview-title">Предпросмотр рассчитан</h4><dl class="ws-drawer-fields">';
+    for (var i = 0; i < rows.length; i++) {
+      html += '<dt>' + esc(rows[i][0]) + '</dt><dd>' + esc(rows[i][1]) + '</dd>';
+    }
+    html += '</dl><p class="ws-preview-expire">Котка действует до ' + esc(preview.expires_at) + '.</p>';
+    box.innerHTML = html;
+    bodyEl.appendChild(box);
+    // Rewire Submit button
+    submitBtn.textContent = 'Открыть позицию';
+    submitBtn.classList.add('ws-btn-primary');
+    submitBtn.disabled = false;
+    statusEl.textContent = 'Preview OK. Подтвердите открытие.';
+    submitBtn.onclick = function () {
+      // Same opts, action becomes order.submit. buildPayload reads DOM values.
+      executeCommand('order.submit', opts);
+    };
   }
 
   function refreshWorkspace() {

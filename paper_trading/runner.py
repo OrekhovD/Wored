@@ -1249,6 +1249,9 @@ class PaperTradingRunner:
                 log.warning("resume_auto: cannot resume — not recovered")
             return True
 
+        if ct == CommandType.submit_order:
+            return await self._handle_submit_order(cmd)
+
         # Unknown commands are acknowledged
         log.info("command %s acknowledged", ct.value)
         return True
@@ -1461,6 +1464,177 @@ class PaperTradingRunner:
         )
         return True
 
+    async def _handle_submit_order(self, cmd: Command) -> bool:
+        """Handle a manual submit_order command from the WebUI Drawer.
+
+        The preview API already validated risk and computed quantity. This
+        handler executes the fill at the current market price and commits
+        the position atomically (order → fill → position → ledger).
+
+        Returns True on success (processed), False for transient deferral
+        (snapshot unavailable — will be requeued).
+        """
+        payload = cmd.result if isinstance(cmd.result, dict) else None
+        if payload is None:
+            log.warning("submit_order %s: no payload in cmd.result", cmd.command_id)
+            return True  # acknowledge — nothing to do
+
+        account_id = cmd.account_id
+        day_id = cmd.day_id
+        if account_id is None or day_id is None:
+            log.warning("submit_order: missing account_id or day_id")
+            return True
+
+        # Extract order parameters from the stored payload.
+        side_str = str(payload.get("side", "buy")).lower()  # "buy" | "sell"
+        order_type_str = str(payload.get("order_type", "market")).lower()
+        qty_str = str(payload.get("qty", "0"))
+        stop_loss_str = payload.get("stop_loss")
+        take_profit_str = payload.get("take_profit")
+
+        try:
+            qty = Decimal(qty_str)
+        except Exception:
+            log.warning("submit_order: invalid qty %s", qty_str)
+            return True
+        if qty <= 0:
+            log.warning("submit_order: qty <= 0")
+            return True
+
+        stop_price = Decimal(stop_loss_str) if stop_loss_str else None
+        take_profit = Decimal(take_profit_str) if take_profit_str else None
+
+        direction = "long" if side_str == "buy" else "short"
+
+        # Fetch a fresh market snapshot for execution.
+        snapshot = await self._fetch_snapshot()
+        if snapshot is None:
+            log.info("submit_order: deferred — market snapshot unavailable")
+            self._last_decision = Decision(
+                reason_code=ReasonCode.waiting_data,
+                reason_detail="Manual order deferred: snapshot unavailable",
+                decided_at=datetime.now(timezone.utc),
+            )
+            return False  # requeue
+
+        # Manual orders bypass check_fill_risk: the preview API already
+        # validated risk limits, spread, margin, and stop placement. Requiring
+        # risk_tier for a user-confirmed manual fill would reject any snapshot
+        # without a pre-computed tier (which is the collector's auto path).
+        # We still guard against the snapshot being too stale or the market
+        # being completely absent (handled above).
+
+        # Execute market order.
+        order_id = uuid4()
+        fill_result: FillResult = execute_market_order(
+            snapshot=snapshot,
+            direction=direction,
+            requested_quantity=qty,
+            leverage=LEVERAGE,
+            stop_price=stop_price,
+            take_profit=take_profit,
+            position_id=str(order_id),
+            account_id=str(account_id),
+            instrument=INSTRUMENT,
+        )
+        if not fill_result.filled:
+            log.warning("submit_order: not filled: %s", fill_result.reason)
+            self._last_decision = Decision(
+                reason_code=ReasonCode.engine_error,
+                reason_detail=f"Manual order not filled: {fill_result.reason}",
+                decided_at=datetime.now(timezone.utc),
+            )
+            return True  # acknowledge as rejected
+
+        # Build persisted objects.
+        order_side = OrderSide.buy if direction == "long" else OrderSide.sell
+        position_side = PositionSide.long if direction == "long" else PositionSide.short
+        now_ts = datetime.now(timezone.utc)
+
+        order = Order(
+            order_id=order_id,
+            account_id=account_id,
+            day_id=day_id,
+            origin="user",
+            actor="user",
+            signal_id=None,
+            side=order_side,
+            order_type=OrderType(order_type_str),
+            instrument=INSTRUMENT,
+            qty=money(qty),
+            stop_loss=stop_price,
+            take_profit=take_profit,
+            state=OrderState.pending,
+        )
+        try:
+            await self.repository.create_order(order)
+        except Exception as exc:
+            log.warning("submit_order: create_order DB failed: %s", exc)
+            return False  # requeue
+
+        fill = Fill(
+            fill_id=uuid4(),
+            order_id=order_id,
+            account_id=account_id,
+            execution_quote_id=f"fill-{order_id}-{int(time.time())}",
+            instrument=INSTRUMENT,
+            side=order_side,
+            price=money(fill_result.fill_price),
+            qty=money(fill_result.filled_quantity),
+            fee=money(fill_result.entry_fee),
+            is_close=False,
+            source_timestamp=now_ts,
+            receive_timestamp=now_ts,
+            execute_timestamp=now_ts,
+        )
+        position = Position(
+            position_id=order_id,
+            account_id=account_id,
+            day_id=day_id,
+            instrument=INSTRUMENT,
+            side=position_side,
+            qty=money(fill_result.filled_quantity),
+            avg_entry_price=money(fill_result.fill_price),
+            isolated_margin=money(fill_result.reserved_margin),
+            stop_loss=stop_price,
+            take_profit=take_profit,
+            status=PositionStatus.open,
+            entry_fee=money(fill_result.entry_fee),
+        )
+        postings = build_fill_postings(
+            account_id=account_id,
+            fill_price=fill_result.fill_price,
+            fill_qty=fill_result.filled_quantity,
+            fee=fill_result.entry_fee,
+            is_close=False,
+            side=position_side,
+            day_id=day_id,
+            source_ref=str(fill.fill_id),
+            reserved_margin=money(fill_result.reserved_margin),
+        )
+        try:
+            await self.repository.commit_open_fill(
+                order_id=order_id,
+                fill=fill,
+                position=position,
+                postings=postings,
+            )
+        except Exception as exc:
+            self._last_error = str(exc)
+            log.exception("submit_order: atomic commit failed")
+            return False  # requeue for retry
+
+        self._positions[order_id] = position
+        log.info(
+            "submit_order: manual position opened (id=%s, side=%s, qty=%s, price=%s)",
+            order_id, direction, fill_result.filled_quantity, fill_result.fill_price,
+        )
+        self._last_decision = Decision(
+            reason_code=ReasonCode.waiting_trigger,
+            reason_detail=f"Manual order filled: {direction} {fill_result.filled_quantity} @ {fill_result.fill_price}",
+            decided_at=datetime.now(timezone.utc),
+        )
+        return True
 
     async def _auto_finish_expired_days(self) -> None:
         """Drive the day rollover through the canonical, persisted command path.

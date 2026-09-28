@@ -59,3 +59,7 @@ venv/
 scratch/
 # Duplicated source snapshots inside TASOCHKI bundles
 TASOCHKI/**/payload/
+# Staging secrets — real values never go to git (owner rule, 2026-09-28)
+.env.staging
+# Runtime logs (bonsai_serve.log etc.) are host state, not repo content
+logs/

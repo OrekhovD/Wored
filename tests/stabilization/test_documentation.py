@@ -26,7 +26,7 @@ class TestENVRegistry(unittest.TestCase):
         registry = ROOT / "docs" / "ENV-REGISTRY.md"
         if not registry.exists():
             self.skipTest("ENV-REGISTRY.md not found")
-        content = registry.read_text()
+        content = registry.read_text(encoding="utf-8")
         required_keys = [
             "DATABASE_URL",
             "REDIS_URL",
@@ -50,7 +50,7 @@ class TestENVRegistry(unittest.TestCase):
         registry = ROOT / "docs" / "ENV-REGISTRY.md"
         if not registry.exists():
             self.skipTest("ENV-REGISTRY.md not found")
-        content = registry.read_text()
+        content = registry.read_text(encoding="utf-8")
         self.assertIn("Secret", content, "ENV-REGISTRY.md missing Secret column")
 
 
@@ -65,7 +65,7 @@ class TestEnvExample(unittest.TestCase):
         env_example = ROOT / ".env.example"
         if not env_example.exists():
             self.skipTest(".env.example not found")
-        content = env_example.read_text()
+        content = env_example.read_text(encoding="utf-8")
         required_keys = [
             "WEBUI_AUTH_ENABLED",
             "WEBUI_ADMIN_PASSWORD",
@@ -90,7 +90,7 @@ class TestEnvExample(unittest.TestCase):
         env_wored = ROOT / ".env.wored.example"
         if not env_wored.exists():
             self.skipTest(".env.wored.example not found")
-        content = env_wored.read_text()
+        content = env_wored.read_text(encoding="utf-8")
         self.assertIn("WEBUI_INTERNAL_TOKEN", content,
                        ".env.wored.example must reference WEBUI_INTERNAL_TOKEN")
 
@@ -126,7 +126,7 @@ class TestDocumentationFiles(unittest.TestCase):
             path = ROOT / doc_path
             if not path.exists():
                 self.skipTest(f"{doc_path} not found")
-            content = path.read_text()
+            content = path.read_text(encoding="utf-8")
             self.assertGreater(len(content.strip()), 100,
                                f"{doc_path} is too short ({len(content)} chars)")
 

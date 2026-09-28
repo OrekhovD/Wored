@@ -170,11 +170,23 @@ def parse_live_snapshot(
     source_at = _timestamp(payload.get("source_at"), "source_at")
     received_at = _timestamp(payload.get("received_at"), "received_at")
     current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    age = (current - source_at).total_seconds()
-    if age < -2:
-        raise ValueError("source_at: timestamp is in the future")
-    if age > max_age_seconds:
-        raise ValueError(f"snapshot: stale by {age:.3f}s")
+
+    # `received_at` is written by OUR collector process; a big positive skew
+    # means the local clock jumped backwards (VM resume, NTP step). Tight.
+    receive_age = (current - received_at).total_seconds()
+    if receive_age < -2:
+        raise ValueError("received_at: collector clock is in the future")
+
+    # `source_at` is the HTX exchange timestamp. External venues keep their
+    # own NTP peers; a few seconds of forward drift relative to us is normal
+    # and must NOT block a fresh snapshot. Real staleness is caught below.
+    source_age = (current - source_at).total_seconds()
+    if source_age < -30:
+        raise ValueError(
+            f"source_at: exchange clock too far ahead by {-source_age:.3f}s"
+        )
+    if source_age > max_age_seconds:
+        raise ValueError(f"snapshot: stale by {source_age:.3f}s")
 
     component_times_raw = payload.get("component_times")
     if not isinstance(component_times_raw, dict):
@@ -183,8 +195,10 @@ def parse_live_snapshot(
         name: _timestamp(component_times_raw.get(name), f"component_times.{name}").isoformat()
         for name in ("ticker", "index", "mark", "funding")
     }
+    # Mark price also carries exchange clock; allow the same 30s forward drift
+    # but keep the freshness window (mark updates roughly every minute).
     mark_age = (current - _timestamp(component_times["mark"], "component_times.mark")).total_seconds()
-    if mark_age < -2 or mark_age > 90:
+    if mark_age < -30 or mark_age > 90:
         raise ValueError(f"mark price: stale by {mark_age:.3f}s")
 
     return PerpetualSnapshot(

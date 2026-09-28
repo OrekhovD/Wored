@@ -395,8 +395,9 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.get("/trader", include_in_schema=False)
     async def trader_page():
-        # Mirror production: /trader redirects to the V2 workspace (F08 Phase 4a).
-        return RedirectResponse(url="/workspace", status_code=307)
+        # Mirror production: /trader stays on the legacy destination until
+        # full F08 Phase 4d (owner scoping + chart overlay merge) is shipped.
+        return RedirectResponse(url="/trading-day", status_code=307)
 
     # ── Итоги / Обучение: read-only pages (mirror webui/app.py) ────────────────
     _RESULTS_DAYS_FIXTURE = [
@@ -568,10 +569,10 @@ def _register_routes(app: FastAPI) -> None:
             "stage": "prepare",
             "day": None,
             "accounts": [
-                {"kind": "manual", "currency": "USDT", "cash": "1000",
+                {"kind": "manual", "account_id": "ws-manual", "currency": "USDT", "cash": "1000",
                  "equity": "1000", "open_positions": 0, "realized_net": "0",
                  "object_ref": {"kind": "account", "id": "ws-manual", "source": "paper_trading"}},
-                {"kind": "auto", "currency": "USDT", "cash": "1000",
+                {"kind": "auto", "account_id": "ws-auto", "currency": "USDT", "cash": "1000",
                  "equity": "1000", "open_positions": 0, "realized_net": "0",
                  "object_ref": {"kind": "account", "id": "ws-auto", "source": "paper_trading"}},
             ],
@@ -585,7 +586,9 @@ def _register_routes(app: FastAPI) -> None:
             ],
             "capabilities": {"can_start": True, "can_trade": False,
                             "can_finish": False, "commands_enabled": True,
-                            "can_enter": False},
+                            "can_enter": False,
+                            "can_pause_auto": False, "can_resume_auto": False,
+                            "can_close_auto": False},
             "sources": [{"source_name": "paper_trading", "status": "ok"}],
             "status_bar": {
                 "stage": "prepare", "day_date": "—",

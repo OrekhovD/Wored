@@ -2811,8 +2811,50 @@ a:focus-visible {
 .ws-drawer-fields { display: grid; grid-template-columns: auto 1fr; gap: 4px var(--ui-space-3); margin: 0; }
 .ws-drawer-fields dt { color: var(--ui-muted); }
 .ws-drawer-fields dd { margin: 0; }
+
+/* B3 order-form inside Command Drawer */
+.ws-drawer-form { display: flex; flex-direction: column; gap: var(--ui-space-3); margin-top: var(--ui-space-3); }
+.ws-drawer-form .ws-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--ui-space-3); }
+.ws-drawer-form label { display: flex; flex-direction: column; gap: 4px; font-size: var(--ui-text-sm); color: var(--ui-muted); }
+.ws-drawer-form label.ws-radio { flex-direction: row; align-items: center; gap: var(--ui-space-2); color: var(--ui-text); }
+.ws-drawer-form input[type="text"],
+.ws-drawer-form input[type="number"],
+.ws-drawer-form select {
+  background: var(--ui-bg-elevated, #1e2330);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm, 4px);
+  padding: 6px 8px;
+  font-size: var(--ui-text-sm);
+}
+.ws-drawer-form input:focus,
+.ws-drawer-form select:focus { outline: 2px solid var(--ui-accent, #f0801e); border-color: transparent; }
+.ws-drawer-form .ws-form-hint { color: var(--ui-muted); font-size: var(--ui-text-xs); margin: 0; }
+.ws-drawer-form .ws-form-error { color: var(--ui-danger, #d63b3b); font-size: var(--ui-text-sm); margin: 0; min-height: 1.2em; }
+
+/* B3 preview→submit transition summary */
+.ws-preview-result { margin-top: var(--ui-space-4); padding: var(--ui-space-3); background: var(--ui-surface-raised, #151a24); border: 1px solid var(--ui-border); border-radius: var(--ui-radius-sm, 6px); }
+.ws-preview-result .ws-preview-title { margin: 0 0 var(--ui-space-2); font-size: var(--ui-text-md); color: var(--ui-text); }
+.ws-preview-result .ws-preview-expire { margin: var(--ui-space-2) 0 0; font-size: var(--ui-text-xs); color: var(--ui-muted); }
 .ws-drawer-ack, .ws-drawer-typed { margin-top: var(--ui-space-3); font-size: var(--ui-text-sm); }
 .ws-drawer-typed input { margin-top: var(--ui-space-1); padding: var(--ui-space-2); width: 100%; background: var(--ui-surface-raised); border: 1px solid var(--ui-border); border-radius: 6px; color: var(--ui-text); }
+
+/* Account action buttons (B3+ / Drawer wiring) */
+.ws-account-actions { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); margin-top: var(--ui-space-3); }
+.ws-btn {
+  padding: 6px 12px; background: var(--ui-surface-raised); color: var(--ui-text);
+  border: 1px solid var(--ui-border); border-radius: 6px; cursor: pointer;
+  font-size: var(--ui-text-sm); font-weight: 500;
+}
+.ws-btn:hover { border-color: var(--ui-accent); }
+.ws-btn-primary { background: var(--ui-accent); color: var(--ui-on-color); border-color: var(--ui-accent); }
+.ws-btn-danger { background: var(--ui-risk); color: var(--ui-on-color); border-color: var(--ui-risk); }
+.ws-btn-mini {
+  padding: 2px 8px; font-size: 12px; background: transparent;
+  border: 1px solid var(--ui-border); border-radius: 4px; color: var(--ui-text);
+  cursor: pointer; margin-left: 6px;
+}
+.ws-btn-mini:hover { border-color: var(--ui-accent); color: var(--ui-accent); }
 
 /* Quick links (B4) */
 .ws-quicklinks { grid-area: quicklinks; padding: var(--ui-space-4); }

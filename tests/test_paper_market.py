@@ -71,6 +71,39 @@ def test_live_snapshot_rejects_untrustworthy_data(mutation: str) -> None:
         parse_live_snapshot(payload, expected_contract="BTC-USDT", max_age_seconds=5)
 
 
+def test_live_snapshot_allows_modest_exchange_clock_skew() -> None:
+    """HTX exchange time can lead our collector by a few seconds.
+
+    Real-world cause: HTX keeps its own NTP peers, and Redis round-trip adds
+    jitter. Blocking `order.preview` for a <30 s drift is worse than
+    accepting a fresh snapshot; the staleness window still catches real
+    feed outages.
+    """
+    now = datetime.now(timezone.utc)
+    ahead = now + timedelta(seconds=8)
+    payload = live_payload(source_at=ahead)
+    # received_at stays at `now`, only source_at is ahead.
+    snapshot = parse_live_snapshot(payload, expected_contract="BTC-USDT", max_age_seconds=15)
+    assert snapshot.quality == "live"
+
+
+def test_live_snapshot_rejects_extreme_exchange_clock_skew() -> None:
+    now = datetime.now(timezone.utc)
+    way_ahead = now + timedelta(seconds=45)
+    payload = live_payload(source_at=way_ahead)
+    with pytest.raises(ValueError, match="too far ahead"):
+        parse_live_snapshot(payload, expected_contract="BTC-USDT", max_age_seconds=15)
+
+
+def test_live_snapshot_rejects_collector_clock_in_the_future() -> None:
+    """`received_at` is our own clock — if it is ahead of now, something
+    local went wrong (VM resume, NTP step). Must not be tolerated."""
+    payload = live_payload()
+    payload["received_at"] = (datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat()
+    with pytest.raises(ValueError, match="received_at"):
+        parse_live_snapshot(payload, expected_contract="BTC-USDT", max_age_seconds=15)
+
+
 class FakeRedis:
     def __init__(self, payload: dict[str, object] | None) -> None:
         self.payload = payload

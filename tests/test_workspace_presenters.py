@@ -63,6 +63,24 @@ class TestBuildCapabilities:
         assert caps["can_view_report"] is True
         assert caps["can_start"] is False
 
+    def test_running_exposes_auto_action_caps(self):
+        """The Drawer renders pause/close buttons only when these flags exist."""
+        caps = build_capabilities(day={"state": "running"}, ok=True, market_quality="live")
+        assert "can_pause_auto" in caps and "can_resume_auto" in caps
+        assert "can_close_auto" in caps
+        assert caps["can_pause_auto"] is True
+        assert caps["can_close_auto"] is True
+        # Not paused → resume is not offered.
+        assert caps["can_resume_auto"] is False
+
+    def test_paused_auto_swaps_pause_for_resume(self):
+        caps = build_capabilities(
+            day={"state": "running", "automation_state": "paused"},
+            ok=True, market_quality="live",
+        )
+        assert caps["can_pause_auto"] is False
+        assert caps["can_resume_auto"] is True
+
 
 class TestBuildAttention:
     def test_domain_error_critical(self):

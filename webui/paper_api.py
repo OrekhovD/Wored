@@ -56,6 +56,28 @@ def _use_pt_domain(request: Request) -> bool:
     return _pt_available and getattr(request.app.state, "pg_pool", None) is not None
 
 
+def _owner_from_request(request: Request) -> str:
+    """Resolve paper_trading owner UUID from the authenticated session.
+
+    Identity is derived ONLY from server-side session state (never from body
+    or query args). Priority:
+      1. Telegram auth → ``UUID5("wored:owner:{telegram_user_id}")`` — same
+         namespace as the chatbot, so Telegram and WebUI see one owner.
+      2. Password auth → ``UUID5("wored:owner:{username}")`` — the operator's
+         WebUI login.
+      3. Fallback ``"admin"`` for single-owner demo / unauth (kept for
+         backward compatibility until F08 Phase 4b enforces scoping).
+    """
+    session = getattr(request, "session", {}) or {}
+    if session.get("auth_type") == "telegram":
+        user = session.get("telegram_user") or {}
+        if isinstance(user.get("user_id"), int):
+            return _pt_owner_id("admin", telegram_user_id=user["user_id"])
+    if session.get("auth_type") == "password" and session.get("username"):
+        return _pt_owner_id(session["username"])
+    return _pt_owner_id("admin")
+
+
 DEFAULT_SETTINGS = {
     "end_time_local": "21:00",
     "timezone": "Asia/Bangkok",
@@ -203,12 +225,22 @@ def _map_domain_day_state(domain_state: str) -> str:
     The trading-day frontend keys on ``active`` (deal ticket enabled) and
     ``reconciled`` (final report). The domain service uses ``running`` and the
     settlement states; map them explicitly instead of guessing.
+
+    ``domain_state`` may arrive as the raw ``DayState`` enum instance when the
+    caller bypassed JSON round-trip. Python's ``str(SomeStrEnum.RUNNING)``
+    returns ``"DayState.running"`` (Enum.__str__), NOT the value. Normalise
+    here so both enum-typed and string-typed payloads reach the same branch.
     """
-    if domain_state in {"running", "active"}:
+    raw = getattr(domain_state, "value", domain_state)
+    state = str(raw)
+    if "." in state and not state.startswith(("running", "active", "finished")):
+        # e.g. "DayState.running" -> "running"
+        state = state.rsplit(".", 1)[-1]
+    if state in {"running", "active"}:
         return "active"
-    if domain_state in {"finished", "settling", "reconciled", "closed"}:
+    if state in {"finished", "settling", "reconciled", "closed"}:
         return "reconciled"
-    return domain_state
+    return state
 
 
 async def _ui_payload_from_domain(
@@ -374,7 +406,7 @@ async def get_current_day(request: Request) -> JSONResponse:
     # present it as a green, ready state (issue #2).
     if _use_pt_domain(request):
         try:
-            owner_id = _pt_owner_id("admin")  # TODO: resolve from session identity
+            owner_id = _owner_from_request(request)
             state = await _pt_get_state(owner_id)
             if not state.get("ok"):
                 raise RuntimeError(str(state.get("error") or "domain_state_unavailable"))
@@ -448,7 +480,7 @@ async def start_day(request: Request, body: Dict[str, Any] = Body(...)) -> JSONR
     # through the service and never fall through to a prototype write (split-brain).
     if _use_pt_domain(request):
         try:
-            owner_id = _pt_owner_id("admin")
+            owner_id = _owner_from_request(request)
             risk = body.get("risk_policy") or {}
             settings = {
                 "opening_capital": str(body.get("opening_capital", "1000")),
@@ -544,7 +576,7 @@ async def automation(request: Request, day_id: str, body: Dict[str, Any] = Body(
         if action not in {"pause", "resume", "close_auto"}:
             raise HTTPException(status_code=422, detail="Неизвестная команда автомата")
         try:
-            owner_id = _pt_owner_id("admin")
+            owner_id = _owner_from_request(request)
             if action == "resume":
                 result = await _pt_resume_auto(owner_id)
             else:
@@ -609,7 +641,7 @@ async def _domain_ui_state_or_block(request: Request) -> Dict[str, Any]:
     Used by the deal-ticket paths so preview and placement evaluate the real
     balances/positions rather than the prototype ledger.
     """
-    owner_id = _pt_owner_id("admin")
+    owner_id = _owner_from_request(request)
     state = await _pt_get_state(owner_id)
     if not state.get("ok"):
         raise HTTPException(
@@ -637,7 +669,7 @@ async def place_order(request: Request, account_id: str,
         except HTTPException as exc:
             return JSONResponse({"ok": False, "detail": exc.detail}, status_code=exc.status_code)
         try:
-            owner_id = _pt_owner_id("admin")
+            owner_id = _owner_from_request(request)
             result = await _pt_submit_order(
                 owner_id=owner_id,
                 account_id=account_id,
@@ -777,7 +809,7 @@ async def position_action(request: Request, position_id: str,
         if body.get("action") != "close":
             raise HTTPException(status_code=422, detail="Доступно только полное закрытие")
         try:
-            owner_id = _pt_owner_id("admin")
+            owner_id = _owner_from_request(request)
             result = await _pt_close_position(
                 owner_id=owner_id,
                 position_id=position_id,
@@ -853,7 +885,7 @@ async def finish_day(request: Request, day_id: str,
     # arrive via trading-day/current once settlement completes.
     if _use_pt_domain(request):
         try:
-            owner_id = _pt_owner_id("admin")
+            owner_id = _owner_from_request(request)
             result = await _pt_finish_day(owner_id)
             if not result.get("ok"):
                 raise RuntimeError(str(result.get("error") or "domain_finish_failed"))

@@ -164,6 +164,60 @@ class TestGetDayReport:
         assert len(manual["reconciliation"]["mismatches"]) > 0
 
     @pytest.mark.asyncio
+    async def test_net_pnl_not_double_subtracting_fees(self, service):
+        """Regression: passing ``realized_net`` into ``format_report`` used to
+        subtract fees a second time. Positions sum: net=850, fees=132, gross=982.
+        The report must show ``net_pnl`` = 850, not 850 - 132 = 718.
+        """
+        report = await service.get_day_report(str(OWNER_ID), str(DAY_ID))
+        manual = next(a for a in report["accounts"] if a["account_label"] == "manual")
+        summary = manual["summary"]
+        assert Decimal(summary["net_pnl"]) == Decimal("850"), (
+            "fees were double-subtracted — service must pass realized_gross "
+            "to format_report so ``net_pnl = realized_gross - fees``"
+        )
+        assert Decimal(summary["realized_pnl"]) == Decimal("982")
+        assert Decimal(summary["total_fees"]) == Decimal("132")
+
+    @pytest.mark.asyncio
+    async def test_ending_equity_matches_deposit_plus_net(self, service):
+        """``ending_equity`` = opening_capital + net_pnl (not net_pnl - fees).
+        The mock account opens with 1000 USDT and net is 850 → expected 1850.
+        """
+        report = await service.get_day_report(str(OWNER_ID), str(DAY_ID))
+        manual = next(a for a in report["accounts"] if a["account_label"] == "manual")
+        assert Decimal(manual["summary"]["ending_equity"]) == Decimal("1850")
+
+    @pytest.mark.asyncio
+    async def test_reconcile_does_not_double_count_deposit(self, service):
+        """Regression: the opening deposit lives as a posting AND as
+        ``acct.opening_deposit``. Passing both used to compare expected_cash
+        = deposit + deposit_posting vs actual_cash = deposit_posting, which is
+        always a mismatch of ``deposit``. Now ``expected_cash=0`` so the
+        ledger alone drives the check.
+        """
+        deposit_posting = JournalPosting(
+            posting_id=uuid4(),
+            account_id=MANUAL_ACCT_ID,
+            day_id=None,
+            event_id=uuid4(),
+            source_type=JournalSourceType.deposit,
+            currency="USDT",
+            bucket=JournalBucket.deposit,
+            amount=Decimal("1000"),
+            occurred_at=datetime(2026, 9, 20, 5, tzinfo=timezone.utc),
+        )
+        service.repo.get_postings_for_account = AsyncMock(return_value=[deposit_posting])
+        service.repo.get_account_balance = AsyncMock(return_value=Decimal("1000"))
+        report = await service.get_day_report(str(OWNER_ID), str(DAY_ID))
+        manual = next(a for a in report["accounts"] if a["account_label"] == "manual")
+        # No mismatch on cash — deposit posting alone accounts for balance.
+        cash_mismatches = [m for m in manual["reconciliation"]["mismatches"] if m.startswith("cash:")]
+        assert cash_mismatches == [], (
+            f"deposit double-counted in reconcile: {cash_mismatches}"
+        )
+
+    @pytest.mark.asyncio
     async def test_unknown_day_returns_none(self, service):
         service.repo.get_day = AsyncMock(return_value=None)
         result = await service.get_day_report(str(OWNER_ID), str(uuid4()))

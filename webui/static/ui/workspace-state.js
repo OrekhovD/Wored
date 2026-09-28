@@ -72,7 +72,8 @@
     renderAttention(s.attention || []);
 
     // Accounts context
-    renderAccounts(s.accounts || [], s.objects || [], s.capabilities || {});
+    var dayId = (s.day && (s.day.day_id || s.day.id)) || null;
+    renderAccounts(s.accounts || [], s.objects || [], s.capabilities || {}, dayId);
   }
 
   function stageLabel(stage) {
@@ -103,42 +104,109 @@
     }
   }
 
-  function renderAccounts(accounts, objects, caps) {
+  function renderAccounts(accounts, objects, caps, dayId) {
     if (!els.context) return;
     var html = '';
+    var commandsOn = !!caps.commands_enabled;
     for (var i = 0; i < accounts.length; i++) {
       var acc = accounts[i];
-      html += '<div class="ws-account-card" data-kind="' + esc(acc.kind || '?') + '">';
-      html += '<h4 class="ws-account-title">' + esc(acc.kind === 'manual' ? 'Ручной счёт' : 'Автоматический счёт') + '</h4>';
+      var kind = acc.kind || '?';
+      // Domain uses `id`; some fixtures use `account_id`. Accept both so
+      // the Drawer click payload always carries a real UUID.
+      var accId = esc(acc.account_id || acc.id || '');
+      html += '<div class="ws-account-card" data-kind="' + esc(kind) + '" data-account-id="' + accId + '">';
+      html += '<h4 class="ws-account-title">' + esc(kind === 'manual' ? 'Ручной счёт' : 'Автоматический счёт') + '</h4>';
       html += '<dl class="ws-account-stats">';
       html += '<div><dt>Equity</dt><dd>' + esc(str(acc.equity || acc.cash)) + ' USDT</dd></div>';
       html += '<div><dt>Позиции</dt><dd>' + (acc.open_positions || 0) + '</dd></div>';
       html += '<div><dt>Реализовано</dt><dd>' + esc(str(acc.realized_net)) + '</dd></div>';
       html += '</dl>';
       // Objects for this account
-      var accObjects = objects.filter(function (o) { return o.object_ref && o.object_ref.account_id === acc.kind; });
+      var accObjects = objects.filter(function (o) { return o.object_ref && o.object_ref.account_id === kind; });
       if (accObjects.length) {
         html += '<ul class="ws-object-list">';
         for (var j = 0; j < accObjects.length; j++) {
           var obj = accObjects[j];
           html += '<li class="ws-object-item" data-obj-id="' + esc(obj.object_ref.id) + '" data-obj-kind="' + esc(obj.object_ref.kind) + '">';
           html += esc(obj.summary || obj.type);
+          if (commandsOn && obj.object_ref.kind === 'position') {
+            html += ' <button type="button" class="ws-btn-mini" data-action="position.close" '
+                 +  'data-pos-id="' + esc(obj.object_ref.id) + '" data-account-id="' + accId + '">Закрыть</button>';
+          }
           html += '</li>';
         }
         html += '</ul>';
       }
-      // Disabled action buttons (B2)
-      if (!caps.commands_enabled) {
-        html += '<p class="ws-action-disabled">Действия будут доступны в V2 B3</p>';
+      // Action buttons wired to Command Drawer (B3+)
+      if (commandsOn) {
+        html += '<div class="ws-account-actions">';
+        if (kind === 'manual' && caps.can_enter) {
+          html += '<button type="button" class="ws-btn" data-action="order.preview" '
+               +  'data-account-id="' + accId + '">Новая заявка</button>';
+        }
+        if (kind === 'auto') {
+          if (caps.can_pause_auto) {
+            html += '<button type="button" class="ws-btn" data-action="auto.pause" '
+                 +  'data-account-id="' + accId + '" data-day-id="' + esc(dayId || '') + '">Пауза</button>';
+          }
+          if (caps.can_resume_auto) {
+            html += '<button type="button" class="ws-btn" data-action="auto.resume" '
+                 +  'data-account-id="' + accId + '" data-day-id="' + esc(dayId || '') + '">Возобновить</button>';
+          }
+          if (caps.can_close_auto) {
+            html += '<button type="button" class="ws-btn ws-btn-danger" data-action="auto.close" '
+                 +  'data-account-id="' + accId + '" data-day-id="' + esc(dayId || '') + '">Стоп авто</button>';
+          }
+        }
+        html += '</div>';
+      } else {
+        html += '<p class="ws-action-disabled">Команды будут доступны при подключении к домену.</p>';
       }
       html += '</div>';
     }
     if (!html) {
-      html = '<div class="wored-empty-state">Нет активного дня. '
-        + (caps.can_start ? 'Готов к запуску.' : 'Ожидание данных…')
-        + '</div>';
+      html = '<div class="wored-empty-state">';
+      if (commandsOn && caps.can_start) {
+        html += 'Нет активного дня. '
+             + '<button type="button" class="ws-btn ws-btn-primary" data-action="day.start">Начать день</button>';
+      } else if (commandsOn && caps.can_finish && dayId) {
+        html += 'День активен, но данных нет. '
+             + '<button type="button" class="ws-btn ws-btn-danger" data-action="day.finish" '
+             +  'data-day-id="' + esc(dayId) + '">Завершить день</button>';
+      } else if (caps.can_start) {
+        html += 'Нет активного дня. Ожидание домена для запуска.';
+      } else {
+        html += 'Ожидание данных…';
+      }
+      html += '</div>';
     }
     els.context.innerHTML = html;
+    wireDrawerButtons(els.context);
+  }
+
+  function wireDrawerButtons(scope) {
+    if (!window.WsDrawer) return;
+    var btns = scope.querySelectorAll('[data-action]');
+    for (var i = 0; i < btns.length; i++) {
+      if (btns[i].__wsWired) continue;
+      btns[i].__wsWired = true;
+      btns[i].addEventListener('click', function (ev) {
+        var el = ev.currentTarget;
+        // Pass the current market snapshot so Drawer can compute a
+        // suggested stop_price for order.* actions. `lastState.market` is
+        // the same object the read model returned to `render()`.
+        var mkt = (lastState && lastState.market) || {};
+        window.WsDrawer.open(el.getAttribute('data-action'), {
+          account_id: el.getAttribute('data-account-id') || '',
+          position_id: el.getAttribute('data-pos-id') || '',
+          day_id: el.getAttribute('data-day-id') || '',
+          market_ask: mkt.ask || '',
+          market_bid: mkt.bid || '',
+          market_mark: mkt.mark || '',
+          market_quality: mkt.quality || 'unknown'
+        });
+      });
+    }
   }
 
   function str(v) { return v != null ? String(v) : '—'; }

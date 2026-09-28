@@ -147,7 +147,10 @@ class TestF08TraderMode:
         # With prepare stage + no day, can_enter should be False
         assert "can_enter" in caps
 
-    async def test_trader_page_redirects_to_workspace(self, client):
+    async def test_trader_page_keeps_legacy_destination(self, client):
+        # F08 Phase 4a exposes trader_mode in workspace BFF; the /trader
+        # route itself is not repointed until Phase 4d (owner scoping +
+        # chart overlay merge), so /trading-day remains the target.
         resp = await client.get("/trader", follow_redirects=False)
         assert resp.status_code == 307
-        assert resp.headers["location"] == "/workspace"
+        assert resp.headers["location"] == "/trading-day"
