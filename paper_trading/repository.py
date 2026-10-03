@@ -480,6 +480,7 @@ class PaperRepository:
         """
         request_hash = _hash_payload(payload)
         now = _now_utc()
+        conflict_id: str | None = None
 
         async with self._pool.acquire() as conn, conn.transaction():
             existing = await conn.fetchrow(
@@ -493,26 +494,35 @@ class PaperRepository:
 
             if existing is not None:
                 if existing["request_hash"] != request_hash:
-                    # Mark as conflict in DB, then raise.
-                    await conn.execute(
-                        """
-                            UPDATE paper_v2_commands
-                            SET status = 'conflict', updated_at = $1
-                            WHERE command_id = $2
-                            """,
-                        now,
-                        existing["command_id"],
-                    )
-                    raise IdempotencyConflict(
-                        f"Idempotency key '{idempotency_key}' already used "
-                        f"with a different payload"
-                    )
-                # Idempotent replay: return existing result.
-                return _row_to_command(existing)
+                    conflict_id = existing["command_id"]
+                else:
+                    # Idempotent replay: return existing result.
+                    return _row_to_command(existing)
 
-            # Store the input payload in `result` so the runner can read
-            # order parameters (side, qty, stop_loss …) via cmd.result.
-            # complete_command will overwrite `result` with execution output.
+        if conflict_id is not None:
+            # Stamp the conflict in its own committed write, *then* raise.
+            # Doing it inside the insert transaction would roll the status back
+            # with the exception and leave the duplicate attempt invisible
+            # (MC-15: a conflicting retry must be auditable).
+            async with self._pool.acquire() as conn:
+                await conn.execute(
+                    """
+                        UPDATE paper_v2_commands
+                        SET status = 'conflict', updated_at = $1
+                        WHERE command_id = $2
+                        """,
+                    now,
+                    conflict_id,
+                )
+            raise IdempotencyConflict(
+                f"Idempotency key '{idempotency_key}' already used "
+                f"with a different payload"
+            )
+
+        # Store the input payload in `result` so the runner can read
+        # order parameters (side, qty, stop_loss …) via cmd.result.
+        # complete_command will overwrite `result` with execution output.
+        async with self._pool.acquire() as conn, conn.transaction():
             await conn.execute(
                 """
                     INSERT INTO paper_v2_commands
@@ -992,8 +1002,19 @@ class PaperRepository:
         realized_net_pnl: Decimal,
         exit_fee: Decimal,
         postings: Sequence[JournalPosting],
+        status: PositionStatus = PositionStatus.closed,
     ) -> None:
-        """Atomically commit a full close fill, position state and journal."""
+        """Atomically commit a full close fill, position state and journal.
+
+        ``status`` is the terminal position state and defaults to ``closed``.
+        A mark-triggered liquidation passes ``PositionStatus.liquidated`` so the
+        forced exit and the voluntary exit share one executor and one ledger
+        path while staying distinguishable in the position record (MC-16).  Any
+        still-open status is rejected here — a close fill always terminates the
+        position.
+        """
+        if status not in (PositionStatus.closed, PositionStatus.liquidated):
+            raise ValueError(f"close commit requires a terminal status: {status.value}")
         if fill.order_id != position_id:
             raise ValueError("close fill must reference the originating order/position id")
         validated = post_entry(fill.account_id, postings)
@@ -1033,14 +1054,14 @@ class PaperRepository:
             await conn.execute(
                 """
                 UPDATE paper_v2_positions
-                SET qty = 0, status = 'closed', closed_at = $1,
+                SET qty = 0, status = $7, closed_at = $1,
                     close_price = $2, realized_gross_pnl = $3,
                     realized_net_pnl = $4, exit_fee = $5
                 WHERE position_id = $6
                 """,
                 now, str(money(close_price)), str(money(realized_gross_pnl)),
                 str(money(realized_net_pnl)), str(money(exit_fee)),
-                str(position_id),
+                str(position_id), status.value,
             )
             await self._insert_postings(conn, validated, now)
 
