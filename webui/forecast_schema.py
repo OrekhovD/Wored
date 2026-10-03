@@ -91,4 +91,20 @@ CREATE TABLE IF NOT EXISTS forecast_reports (
 
 CREATE INDEX IF NOT EXISTS idx_forecast_reports_request_id ON forecast_reports (request_id);
 CREATE INDEX IF NOT EXISTS idx_forecast_reports_evaluated ON forecast_reports (evaluated_at);
+
+-- Additive V3 identity for the forecast command (G2 step 3, db/migrations/
+-- 20260930_forecast_request_v3_identity.sql). Nullable, no backfill, legacy rows
+-- unaffected. Kept to single statements on purpose: app.ensure_prediction_schema
+-- splits this script on the semicolon character, so the DO-block CHECK guards
+-- live only in the psql migration file. See that file header for rationale and
+-- rollback plan. CAUTION: never put a raw semicolon inside these -- comment
+-- lines, the naive split would isolate a comment-only fragment and asyncpg
+-- raises a nil command tag on it.
+ALTER TABLE forecast_requests ADD COLUMN IF NOT EXISTS instrument_key TEXT;
+ALTER TABLE forecast_requests ADD COLUMN IF NOT EXISTS period TEXT;
+ALTER TABLE forecast_requests ADD COLUMN IF NOT EXISTS horizon TEXT;
+ALTER TABLE forecast_requests ADD COLUMN IF NOT EXISTS horizon_steps INTEGER;
+ALTER TABLE forecast_requests ADD COLUMN IF NOT EXISTS base_snapshot_id TEXT;
+ALTER TABLE forecast_requests ADD COLUMN IF NOT EXISTS market_data_source TEXT;
+CREATE INDEX IF NOT EXISTS idx_forecast_requests_v3_identity ON forecast_requests (instrument_key, period, horizon, created_at DESC) WHERE instrument_key IS NOT NULL;
 """

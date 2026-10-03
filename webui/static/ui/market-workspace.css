@@ -1,0 +1,400 @@
+/*
+ * WORED V3 Market Workspace — isolated styles for the /workspace market
+ * section introduced in P1.2b.  Everything is namespaced under .v3-market*
+ * so this file does not modify or shadow the base design system in styles.css.
+ *
+ * Palette follows the WORED command deck: dark surface, orange accent for
+ * actionable marks, green for OK/live, red for risk/blocked, blue for chart
+ * line.  Colors come from tokens.css custom properties when available, with
+ * hard fallbacks so this file works even if a page is rendered before tokens
+ * are loaded.
+ */
+
+.v3-market {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  margin: 0 0 1rem 0;
+  background: var(--ui-surface, #111827);
+  border: 1px solid var(--ui-border, #1f2937);
+  border-radius: 8px;
+}
+
+.v3-market-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.v3-market-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ui-text, #f3f4f6);
+  margin: 0;
+}
+
+.v3-market-selectors {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}
+
+.v3-market-select {
+  background: var(--ui-surface-2, #0b1220);
+  color: var(--ui-text, #f3f4f6);
+  border: 1px solid var(--ui-border, #1f2937);
+  border-radius: 4px;
+  padding: 0.35rem 0.6rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+}
+
+.v3-market-select:focus {
+  outline: 2px solid var(--ui-accent, #f97316);
+  outline-offset: 1px;
+}
+
+.v3-market-entrybadge {
+  display: inline-block;
+  padding: 0.3rem 0.65rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.v3-market-entrybadge.is-live {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--ui-success, #22c55e);
+  border: 1px solid var(--ui-success, #22c55e);
+}
+
+.v3-market-entrybadge.is-blocked {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--ui-danger, #ef4444);
+  border: 1px solid var(--ui-danger, #ef4444);
+}
+
+.v3-market-entrybadge.is-unknown {
+  background: rgba(107, 114, 128, 0.15);
+  color: var(--ui-muted, #9ca3af);
+  border: 1px solid var(--ui-muted, #9ca3af);
+}
+
+.v3-market-quality {
+  display: flex;
+  gap: 0.9rem;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--ui-muted, #9ca3af);
+}
+
+.v3-market-qitem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.v3-market-qdot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ui-muted, #6b7280);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.v3-market-qdot[data-quality="live"]    { background: var(--ui-success, #22c55e); }
+.v3-market-qdot[data-quality="stale"]   { background: var(--ui-accent, #f97316); }
+.v3-market-qdot[data-quality="missing"] { background: var(--ui-danger, #ef4444); }
+
+.v3-market-qworst {
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  background: rgba(107, 114, 128, 0.18);
+  color: var(--ui-text, #f3f4f6);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+}
+
+.v3-market-qworst[data-quality="live"]  { background: rgba(34, 197, 94, 0.18); color: var(--ui-success, #22c55e); }
+.v3-market-qworst[data-quality="stale"] { background: rgba(249, 115, 22, 0.18); color: var(--ui-accent, #f97316); }
+.v3-market-qworst[data-quality="missing"] { background: rgba(239, 68, 68, 0.22); color: var(--ui-danger, #ef4444); }
+
+.v3-market-quote {
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--ui-text-2, #d1d5db);
+}
+
+.v3-market-chart {
+  width: 100%;
+  min-height: 320px;
+  background: var(--ui-surface-2, #0b1220);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.v3-market-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  color: var(--ui-muted, #9ca3af);
+  font-size: 0.85rem;
+}
+
+.v3-market-status {
+  font-size: 0.75rem;
+  color: var(--ui-muted, #9ca3af);
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* ── Forming-candle state + gap list (P1.3 / MC-02) ─────────────────────── */
+.v3-market-forming {
+  font-size: 0.75rem;
+  color: var(--ui-text, #e5e7eb);
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  border-left: 3px solid var(--ui-accent, #f97316);
+  padding: 0.15rem 0.5rem;
+}
+.v3-market-forming[data-forming-state="due"] {
+  border-left-color: var(--ui-warn, #eab308);
+}
+.v3-market-gaps {
+  margin: 0.25rem 0 0 0;
+  padding-left: 1.1rem;
+  list-style: square;
+  font-size: 0.7rem;
+  color: var(--ui-danger, #ef4444);
+  font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* ── Forecast overlay controls (P2.2 / MC-05…07) ── */
+.v3-market-forecast {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 0.25rem;
+  border-top: 1px dashed var(--ui-border, #1f2937);
+}
+
+.v3-market-forecast-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.v3-market-forecast-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--ui-muted, #9ca3af);
+}
+
+.v3-market-forecast-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ui-text-2, #d1d5db);
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.v3-market-forecast-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--ui-accent, #f97316);
+}
+
+.v3-market-forecast-legend {
+  font-size: 0.72rem;
+  color: var(--ui-muted, #9ca3af);
+}
+
+.v3-market-forecast-legend[hidden] { display: none; }
+
+/* Blue matches the forecast median line drawn on the chart. */
+.v3-market-forecaststatus {
+  color: var(--ui-text-2, #d1d5db);
+}
+
+/* MC-08 holdout verdict: neutral until known, green/red on skill sign. */
+.v3-market-accuracy { color: var(--ui-muted, #9ca3af); }
+.v3-market-accuracy[data-accuracy-verdict="beats_baseline"]   { color: var(--ui-success, #22c55e); }
+.v3-market-accuracy[data-accuracy-verdict="worse_than_baseline"] { color: var(--ui-danger, #ef4444); }
+.v3-market-accuracy[data-accuracy-verdict="N/A"]              { color: var(--ui-muted, #9ca3af); }
+
+.v3-market-banner {
+  display: block;
+  padding: 0.5rem 0.85rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  border: 1px solid transparent;
+}
+
+.v3-market-banner[hidden] { display: none; }
+
+.v3-market-banner.is-warn {
+  background: rgba(249, 115, 22, 0.12);
+  color: var(--ui-accent, #f97316);
+  border-color: var(--ui-accent, #f97316);
+}
+
+.v3-market-banner.is-danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--ui-danger, #ef4444);
+  border-color: var(--ui-danger, #ef4444);
+}
+
+/* Compact layout on mobile: quality strip wraps, chart stays above fold. */
+@media (max-width: 640px) {
+  .v3-market {
+    padding: 0.75rem 0.85rem;
+    gap: 0.6rem;
+  }
+  .v3-market-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .v3-market-quality {
+    gap: 0.6rem;
+    font-size: 0.75rem;
+  }
+  .v3-market-quote {
+    font-size: 0.75rem;
+    word-break: break-all;
+  }
+  /* MC-04: interactive selectors must be ≥44×44px tap targets on a phone and
+     never force horizontal overflow from a long contract name. font-size 1rem
+     also avoids iOS Safari auto-zoom on sub-16px inputs. */
+  .v3-market-selectors {
+    width: 100%;
+  }
+  .v3-market-select {
+    flex: 1 1 140px;
+    min-height: 44px;
+    min-width: 44px;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 0.5rem 0.7rem;
+    font-size: 1rem;
+  }
+  .v3-market-chart {
+    min-height: 240px;
+  }
+}
+
+/* ── P5.3b positions dashboard (MC-17) ───────────────────────────────────────
+   Isolated under .v3-positions* so it inherits the command-deck palette but
+   never rewrites the base styles or the market block above it. */
+.v3-positions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--ui-border, #1f2937);
+}
+.v3-positions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.v3-positions-title {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--ui-text, #e5e7eb);
+}
+.v3-positions-filters {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.v3-positions-filters label {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--ui-muted, #9ca3af);
+}
+.v3-positions-updated {
+  font-size: 0.78rem;
+  color: var(--ui-muted, #9ca3af);
+}
+.v3-positions-bucket {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.v3-positions-bucket h4 {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ui-accent, #f97316);
+}
+.v3-positions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.v3-positions-table th,
+.v3-positions-table td {
+  text-align: left;
+  padding: 0.28rem 0.5rem;
+  border-bottom: 1px solid var(--ui-border, #1f2937);
+  color: var(--ui-text, #e5e7eb);
+  white-space: nowrap;
+}
+.v3-positions-table th {
+  color: var(--ui-muted, #9ca3af);
+  font-weight: 600;
+}
+.v3-positions-empty {
+  color: var(--ui-muted, #6b7280);
+  text-align: center;
+}
+/* MC-04 mobile: the wide position tables must never push the market section
+   past the viewport or force horizontal scroll.  On phones we pin the table to
+   a fixed layout the width of its container and clip each cell with an ellipsis,
+   so every descendant sits inside the screen. */
+@media (max-width: 768px) {
+  .v3-positions-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+@media (max-width: 640px) {
+  .v3-positions-body {
+    overflow: hidden;
+    max-width: 100%;
+  }
+  .v3-positions-table {
+    table-layout: fixed;
+    width: 100%;
+    font-size: 0.62rem;
+  }
+  .v3-positions-table th,
+  .v3-positions-table td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0.2rem 0.3rem;
+  }
+}

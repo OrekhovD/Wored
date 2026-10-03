@@ -1,0 +1,199 @@
+/* V3 session constructor (P3.2) — dense Command Deck styling, isolated from
+   market-workspace.css; same tokens: dark surface, orange accent, red risk. */
+
+.v3-sim {
+  margin: 0.75rem 0 1rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--ws-surface, #141820);
+  border: 1px solid var(--ws-border, #262b36);
+  border-radius: 10px;
+}
+
+.v3-sim-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.v3-sim-title {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  color: var(--ws-text, #e8ebf0);
+}
+
+.v3-sim-hint {
+  font-size: 0.75rem;
+  color: var(--ws-muted, #8b93a5);
+}
+
+.v3-sim-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.v3-sim-group {
+  border: 1px solid var(--ws-border, #262b36);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem 0.65rem;
+  margin: 0;
+}
+
+.v3-sim-group legend {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ws-muted, #8b93a5);
+  padding: 0 0.35rem;
+}
+
+.v3-sim-group .v3-sim-field,
+.v3-sim-fields {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0.25rem 0.75rem 0.25rem 0;
+  font-size: 0.78rem;
+  color: var(--ws-muted, #8b93a5);
+}
+
+.v3-sim-input {
+  background: var(--ws-input, #0d1016);
+  color: var(--ws-text, #e8ebf0);
+  border: 1px solid var(--ws-border, #262b36);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+  min-height: 32px;
+}
+
+.v3-sim-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-right: 0.6rem;
+  font-size: 0.82rem;
+  color: var(--ws-text, #e8ebf0);
+}
+
+.v3-sim-locked {
+  font-size: 0.72rem;
+  color: var(--ws-muted, #8b93a5);
+  align-self: center;
+}
+
+.v3-sim-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.v3-sim-btn {
+  background: #1c2230;
+  color: var(--ws-text, #e8ebf0);
+  border: 1px solid var(--ws-border, #2c3446);
+  border-radius: 7px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.85rem;
+  min-height: 36px;
+  cursor: pointer;
+}
+
+.v3-sim-btn:hover:not(:disabled) { border-color: var(--ws-accent, #f7931a); }
+.v3-sim-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.v3-sim-btn-approve { border-color: var(--ws-ok, #16c784); }
+.v3-sim-btn-start { border-color: var(--ws-accent, #f7931a); }
+
+.v3-sim-status {
+  font-size: 0.8rem;
+  color: var(--ws-muted, #8b93a5);
+}
+
+.v3-sim-status[data-sim-verdict="ok"],
+.v3-sim-status[data-sim-verdict="approved"] { color: var(--ws-ok, #16c784); }
+.v3-sim-status[data-sim-verdict="violations"] { color: var(--ws-risk, #ea3943); }
+.v3-sim-status[data-sim-verdict="error"] { color: var(--ws-risk, #ea3943); }
+.v3-sim-status[data-sim-verdict="started"] { color: var(--ws-accent, #f7931a); }
+
+.v3-sim-violations {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.76rem;
+  color: var(--ws-risk, #ea3943);
+}
+
+.v3-sim-hash {
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: var(--ws-muted, #8b93a5);
+  word-break: break-all;
+}
+
+/* ── P4 AI proposal (MC-12/MC-13) — isolated, same token palette ── */
+
+.v3-sim-proposal-status {
+  margin-top: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--ws-text, #d7dbe3);
+}
+
+.v3-sim-proposal-status[data-prop-verdict="failed"],
+.v3-sim-proposal-status[data-prop-verdict="vetoed"] {
+  color: var(--ws-risk, #ea3943);
+}
+
+.v3-sim-proposal-status[data-prop-verdict="completed"] {
+  color: var(--ws-ok, #2ebd85);
+}
+
+.v3-sim-prop-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.v3-sim-prop-table th,
+.v3-sim-prop-table td {
+  text-align: left;
+  padding: 0.22rem 0.5rem 0.22rem 0;
+  border-bottom: 1px solid var(--ws-border, #2a2f3a);
+  vertical-align: top;
+}
+
+.v3-sim-prop-table th {
+  color: var(--ws-muted, #8b93a5);
+  font-weight: 600;
+}
+
+.v3-sim-prop-rationale {
+  color: var(--ws-muted, #8b93a5);
+}
+
+.v3-sim-prop-meta {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--ws-muted, #8b93a5);
+}
+
+.v3-sim-prop-violations {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.76rem;
+  color: var(--ws-risk, #ea3943);
+}
+
+@media (max-width: 640px) {
+  .v3-sim-field, .v3-sim-group .v3-sim-field {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+  .v3-sim-input, .v3-sim-btn {
+    min-height: 44px;
+    font-size: 1rem;
+  }
+}

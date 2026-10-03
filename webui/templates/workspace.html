@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{% block head_extra %}
+  <link rel="stylesheet" href="/static/ui/market-workspace.css?v=20260930-1">
+  <link rel="stylesheet" href="/static/ui/simulation-workspace.css?v=20260929-4">
+{% endblock %}
 {% block content %}
 <main class="ws-layout" data-controller="workspace" data-state-url="/api/workspace/state">
 
@@ -21,6 +25,203 @@
       <li class="ws-step" data-stage="learning">Обучение</li>
     </ol>
   </nav>
+
+  {# ── V3 market panel (P1.2b) — perpetual instrument, live via SSE ── #}
+  <section class="v3-market" data-v3-market-root aria-label="Рынок (perpetual)">
+    <div class="v3-market-header">
+      <h2 class="v3-market-title">Рынок</h2>
+      <div class="v3-market-selectors">
+        <select class="v3-market-select" data-role="instrument" aria-label="Инструмент"></select>
+        <select class="v3-market-select" data-role="period" aria-label="Период"></select>
+      </div>
+      <span class="v3-market-entrybadge is-unknown" data-role="entry-badge">—</span>
+    </div>
+    <div class="v3-market-quality" data-role="quality" aria-label="Свежесть компонентов рынка"></div>
+    <div class="v3-market-quote" data-role="quote" aria-live="polite">—</div>
+    <div class="v3-market-chart" data-role="chart" aria-label="График свечей"></div>
+    <div class="v3-market-status" data-role="status">—</div>
+    <div class="v3-market-forming" data-role="forming" hidden aria-live="polite">—</div>
+    <ul class="v3-market-gaps" data-role="gaps" hidden aria-label="Пропуски в истории свечей"></ul>
+    <div class="v3-market-forecast" data-role="forecast">
+      <div class="v3-market-forecast-controls">
+        <label class="v3-market-forecast-label">Горизонт
+          <select class="v3-market-select" data-role="horizon" aria-label="Горизонт прогноза">
+            <option value="15m" selected>15m</option>
+            <option value="1h">1h</option>
+            <option value="4h">4h</option>
+            <option value="24h">24h</option>
+          </select>
+        </label>
+        <label class="v3-market-forecast-toggle">
+          <input type="checkbox" data-role="forecast-toggle" checked />
+          <span>Оверлей прогноза</span>
+        </label>
+      </div>
+      <div class="v3-market-forecast-legend" data-role="forecast-legend">
+        линия медиана + полоса q10–q90 (прогноз не рисуется свечами)
+      </div>
+      <div class="v3-market-status v3-market-forecaststatus" data-role="forecast-status" aria-live="polite">Прогноз: загрузка…</div>
+      <div class="v3-market-status v3-market-accuracy" data-role="forecast-accuracy" aria-live="polite">Точность: загрузка…</div>
+    </div>
+    <div class="v3-market-banner" data-role="banner" hidden></div>
+
+    {# ── P5.3b positions dashboard (MC-17): order→fill→position→close/liq ── #}
+    <div class="v3-positions" data-role="positions">
+      <div class="v3-positions-header">
+        <h3 class="v3-positions-title">Позиции</h3>
+        <div class="v3-positions-filters">
+          <label>Статус
+            <select class="v3-market-select" data-role="positions-status" aria-label="Фильтр статуса позиций">
+              <option value="all" selected>Все</option>
+              <option value="open">Открытые</option>
+              <option value="pending">Ожидают</option>
+              <option value="closed">Закрытые</option>
+              <option value="liquidated">Ликвидированы</option>
+            </select>
+          </label>
+          <label>Счёт
+            <select class="v3-market-select" data-role="positions-account" aria-label="Фильтр счёта">
+              <option value="all" selected>Оба</option>
+              <option value="manual">Ручной</option>
+              <option value="auto">Авто</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="v3-positions-updated v3-market-status" data-role="positions-updated" aria-live="polite">Позиции: загрузка…</div>
+      <div class="v3-positions-bucket" data-bucket="open">
+        <h4>Открыты</h4>
+        <div class="v3-positions-body" data-role="positions-open"></div>
+      </div>
+      <div class="v3-positions-bucket" data-bucket="pending">
+        <h4>Ожидают</h4>
+        <div class="v3-positions-body" data-role="positions-pending"></div>
+      </div>
+      <div class="v3-positions-bucket" data-bucket="closed">
+        <h4>Закрыты</h4>
+        <div class="v3-positions-body" data-role="positions-closed"></div>
+      </div>
+      <div class="v3-positions-bucket" data-bucket="liquidated">
+        <h4>Ликвидированы</h4>
+        <div class="v3-positions-body" data-role="positions-liquidated"></div>
+      </div>
+    </div>
+  </section>
+
+  {# ── V3 session constructor (P3.2) — SimulationPlanV1, draft→approve→start ── #}
+  <section class="v3-sim" data-v3-simulation-root aria-label="Конструктор сессии">
+    <div class="v3-sim-header">
+      <h2 class="v3-sim-title">Конструктор сессии</h2>
+      <span class="v3-sim-hint">Симуляция: только paper/replay, заявок на биржу не отправляет</span>
+    </div>
+    <form class="v3-sim-form" data-role="sim-form" autocomplete="off">
+      <fieldset class="v3-sim-group v3-sim-proposal">
+        <legend>AI-предложение (анкета → черновик)</legend>
+        <label class="v3-sim-field">Цель
+          <select class="v3-sim-input" data-role="simq-goal">
+            <option value="learning" selected>обучение</option>
+            <option value="comparison">сравнение</option>
+            <option value="risk_control">контроль риска</option>
+          </select></label>
+        <label class="v3-sim-field">Длительность, ч
+          <input class="v3-sim-input" type="number" data-role="simq-duration" min="1" max="168" value="24"></label>
+        <label class="v3-sim-field">Стороны
+          <select class="v3-sim-input" data-role="simq-side">
+            <option value="both" selected>both</option>
+            <option value="long">long</option>
+            <option value="short">short</option>
+          </select></label>
+        <label class="v3-sim-field">Участие
+          <select class="v3-sim-input" data-role="simq-involvement">
+            <option value="supervised" selected>supervised</option>
+            <option value="manual">manual</option>
+            <option value="autonomous">autonomous</option>
+          </select></label>
+        <label class="v3-sim-field">Manual бюджет
+          <input class="v3-sim-input" type="text" inputmode="decimal" data-role="simq-manual" value="100"></label>
+        <label class="v3-sim-field">Auto бюджет
+          <input class="v3-sim-input" type="text" inputmode="decimal" data-role="simq-auto" value="50"></label>
+        <label class="v3-sim-field">Макс. приемлемый убыток
+          <input class="v3-sim-input" type="text" inputmode="decimal" data-role="simq-maxloss" value="30"></label>
+        <label class="v3-sim-field">Часы торговли
+          <input class="v3-sim-input" type="text" data-role="simq-hours" value="any" size="12"></label>
+        <div class="v3-sim-actions">
+          <button type="button" class="v3-sim-btn" data-role="sim-propose">Запросить предложение</button>
+          <button type="button" class="v3-sim-btn" data-role="sim-accept" disabled>Принять как черновик</button>
+        </div>
+        <div class="v3-sim-proposal-status" data-role="sim-proposal-status" aria-live="polite">Предложение: заполните анкету. AI возвращает только черновик; утверждение и запуск — отдельные действия.</div>
+        <div class="v3-sim-proposal-compare" data-role="sim-proposal-compare" hidden></div>
+      </fieldset>
+      <fieldset class="v3-sim-group">
+        <legend>Режим и окно</legend>
+        <label class="v3-sim-field">Режим
+          <select class="v3-sim-input" data-role="sim-mode">
+            <option value="live_paper" selected>Live paper</option>
+            <option value="historical_replay">Historical replay</option>
+          </select></label>
+        <label class="v3-sim-field">Начало (UTC)
+          <input class="v3-sim-input" type="datetime-local" data-role="sim-start" step="60" required></label>
+        <label class="v3-sim-field">Конец (UTC)
+          <input class="v3-sim-input" type="datetime-local" data-role="sim-end" step="60" required></label>
+        <label class="v3-sim-field">Часовой пояс
+          <input class="v3-sim-input" type="text" data-role="sim-tz" value="Asia/Bangkok" pattern="[A-Za-z0-9_/+-]+" size="14"></label>
+        <label class="v3-sim-field v3-sim-seed" hidden>Seed replay
+          <input class="v3-sim-input" type="number" data-role="sim-seed" min="0" max="2147483647" value="42"></label>
+      </fieldset>
+      <fieldset class="v3-sim-group">
+        <legend>Бюджеты счетов (USDT)</legend>
+        <label class="v3-sim-field">Manual
+          <input class="v3-sim-input" type="text" inputmode="decimal" data-role="sim-manual-budget" value="1000" required></label>
+        <label class="v3-sim-field">Auto
+          <input class="v3-sim-input" type="text" inputmode="decimal" data-role="sim-auto-budget" value="500" required></label>
+      </fieldset>
+      <fieldset class="v3-sim-group">
+        <legend>Стратегия (реализованный каталог)</legend>
+        <label class="v3-sim-field">Стратегия
+          <select class="v3-sim-input" data-role="sim-strategy"><option value="baseline_v1" selected>baseline_v1</option></select></label>
+        <label class="v3-sim-field">Стиль
+          <select class="v3-sim-input" data-role="sim-style"><option value="default" selected>default</option></select></label>
+        <span class="v3-sim-field">Стороны
+          <label class="v3-sim-check"><input type="checkbox" data-role="sim-side-long" checked><span>long</span></label>
+          <label class="v3-sim-check"><input type="checkbox" data-role="sim-side-short" checked><span>short</span></label></span>
+      </fieldset>
+      <fieldset class="v3-sim-group">
+        <legend>Лимиты риска</legend>
+        <label class="v3-sim-field">Плечо макс
+          <input class="v3-sim-input" type="number" data-role="sim-leverage" min="1" max="10" value="10" required></label>
+        <label class="v3-sim-field">Риск/ордер
+          <input class="v3-sim-input" type="text" inputmode="decimal" data-role="sim-risk" value="10" required></label>
+        <label class="v3-sim-field">Loss/день
+          <input class="v3-sim-input" type="text" inputmode="decimal" data-role="sim-daily-loss" value="50" required></label>
+        <label class="v3-sim-field">Loss/сессия
+          <input class="v3-sim-input" type="text" inputmode="decimal" data-role="sim-session-loss" value="100" required></label>
+        <label class="v3-sim-field">Экспозиция макс
+          <input class="v3-sim-input" type="text" inputmode="decimal" data-role="sim-exposure" value="200" required></label>
+        <label class="v3-sim-field">Позиций одновр.
+          <input class="v3-sim-input" type="number" data-role="sim-positions" min="1" max="10" value="2" required></label>
+        <label class="v3-sim-field">Пауза, мин
+          <input class="v3-sim-input" type="number" data-role="sim-cooldown" min="0" max="1440" value="5" required></label>
+        <label class="v3-sim-field">Часы торговли
+          <input class="v3-sim-input" type="text" data-role="sim-hours" value="any" size="12"></label>
+      </fieldset>
+      <fieldset class="v3-sim-group">
+        <legend>Правила выхода и модель рынка</legend>
+        <label class="v3-sim-field">Тейк-профит
+          <select class="v3-sim-input" data-role="sim-tp"><option value="mark" selected>mark</option><option value="none">none</option></select></label>
+        <span class="v3-sim-field v3-sim-locked" title="Принудительное закрытие в конце сессии — единственная реализуемая политика">
+          Закрытие в конце: всегда · стоп: mark · комиссии: taker_6bps_v1 · проскальзывание: adverse_2bps_v1 · funding: htx_mark_funding_v1 · данные: closed_candles_only</span>
+      </fieldset>
+      <div class="v3-sim-actions">
+        <button type="button" class="v3-sim-btn" data-role="sim-validate">Проверить</button>
+        <button type="button" class="v3-sim-btn" data-role="sim-save">Сохранить черновик</button>
+        <button type="button" class="v3-sim-btn v3-sim-btn-approve" data-role="sim-approve" disabled>Утвердить</button>
+        <button type="button" class="v3-sim-btn v3-sim-btn-start" data-role="sim-start-btn" disabled>Запустить сессию</button>
+      </div>
+      <div class="v3-sim-status" data-role="sim-status" aria-live="polite">План: заполните поля и нажмите «Проверить».</div>
+      <ul class="v3-sim-violations" data-role="sim-violations" hidden></ul>
+      <div class="v3-sim-hash" data-role="sim-hash" hidden></div>
+    </form>
+  </section>
 
   {# ── Context panel (center) ── #}
   <section class="ws-context" id="wsContext" aria-label="Контекст работы">
@@ -60,4 +261,6 @@
 
 <script src="/static/ui/workspace-state.js"></script>
 <script src="/static/ui/workspace-actions.js"></script>
+<script type="module" src="/static/ui/market-workspace.js?v=20260930-2"></script>
+<script type="module" src="/static/ui/simulation-workspace.js?v=20260929-4"></script>
 {% endblock %}

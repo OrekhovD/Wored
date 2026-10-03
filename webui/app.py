@@ -11,6 +11,7 @@ import secrets
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -58,12 +59,28 @@ from principal import Principal, create_from_cookie, create_from_telegram, creat
 from services.market_data import fresh_ticker, timestamp_age
 from services.sim_math import preview as simulate_preview, validate_order, settlement
 
-from prediction_timeframes import period_to_minutes, STEP_MINUTES_MAP
+from prediction_timeframes import (
+    normalize_period as normalize_period_v3,
+    period_to_minutes,
+    STEP_MINUTES_MAP,
+)
 from ui_presenters import present_deck_ui, present_preview_ui
 from paper_api import router as paper_router
 from paper_api import _owner_from_request as _pt_owner_from_request
 from paper_store import PAPER_TABLES_SQL
 from trader_api import router as trader_router
+from market_workspace import router as market_v3_router
+from forecast_workspace import router as forecast_v3_router
+from forecast_command_v3 import (
+    router as forecast_command_v3_router,
+    _closed_candles as v3_closed_candles,
+    HISTORY_TABLE as V3_PERP_TABLE,
+)
+from instrument_registry import load_registry
+from market_workspace import CandleSourceError, _require_spec as v3_require_spec
+from simulation_api import router as simulation_v3_router
+from simulation_proposal import router as proposal_v3_router
+from positions_workspace import router as positions_v3_router
 
 
 log = logging.getLogger("webui")
@@ -604,6 +621,113 @@ async def fetch_recent_symbol_journal(request: Request, symbol: str, limit: int 
         if len(items) >= limit:
             break
     return items
+
+
+def _adapt_perp_candle(candle: dict[str, Any]) -> dict[str, Any]:
+    """Map a ``_closed_candles`` item (ISO start_at, string OHLCV) to the
+    ``{time:int_epoch_s, open/high/low/close/volume:float}`` shape the indicator
+    and pattern helpers already consume. No synthesis, closed candles only (§4/§57)."""
+    ts = int(datetime.fromisoformat(candle["start_at"]).timestamp())
+    return {
+        "time": ts,
+        "open": float(Decimal(candle["open"])),
+        "high": float(Decimal(candle["high"])),
+        "low": float(Decimal(candle["low"])),
+        "close": float(Decimal(candle["close"])),
+        "volume": float(Decimal(candle["volume"])),
+    }
+
+
+async def build_prediction_context_perpetual(
+    connection: Any, v3: dict[str, Any], *, horizon_steps: int, depth: int = 3,
+) -> dict[str, Any]:
+    """Build the model's pattern context from validated CLOSED perpetual candles.
+
+    ТЗ §51: a perpetual instrument is never forecast from a spot series. The
+    history comes from the same ``trader_v1_perp_candles`` path the V3 command and
+    chart read (``v3_closed_candles``), so base, candles and features can never
+    disagree. Short or gapped history fails closed - there is no spot backfill.
+    """
+    instrument_key = str(v3["instrument_key"])
+    period = str(v3["period"])
+    # V3 periods come in the workspace vocabulary ("15m"), which app's own
+    # normalize_period (ALLOWED_PERIODS: "15min") would reject. Use the alias-aware
+    # prediction_timeframes normalizer so "15m" maps to the canonical "15min".
+    normalized_timeframe = normalize_period_v3(period)
+    step_minutes = period_to_minutes(normalized_timeframe)
+
+    spec = v3_require_spec(load_registry(), instrument_key)  # 404/410 semantics
+
+    history_limit = min(720 * 2, MAX_KLINE_SIZE) if step_minutes >= 60 else MAX_KLINE_SIZE
+    now = datetime.now(timezone.utc)
+    try:
+        raw = await v3_closed_candles(connection, spec, period, history_limit, now)
+    except CandleSourceError as exc:
+        raise ValueError(f"perpetual_history:{exc.reason_code}") from exc  # fail-closed, no spot
+    candles = [_adapt_perp_candle(item) for item in raw]
+    if len(candles) < 30:
+        raise ValueError("perpetual_history:insufficient")
+
+    recent_candles = candles[-36:]
+    rsi_points = compute_rsi_series(recent_candles, 14)
+    macd_payload = compute_macd_payload(recent_candles)
+    sma20 = compute_sma_series(recent_candles, 20)
+    sma50 = compute_sma_series(recent_candles, 50)
+
+    pattern_matches: list[dict[str, Any]] = []
+    try:
+        from pattern_matcher import find_seasonal_patterns, pattern_matches_to_context
+        current_window = candles[-12:]
+        matches = find_seasonal_patterns(candles, current_window, normalized_timeframe, depth=depth)
+        pattern_matches = pattern_matches_to_context(matches, include_candles=False)
+    except Exception as exc:  # noqa: BLE001 - pattern degrade is non-fatal, source is not
+        log.warning("Perpetual pattern matching failed for %s: %s", instrument_key, exc)
+
+    base_price = float(Decimal(str(v3["base_price"])))  # §57 pinned base
+    base_time = str(v3["base_time"])
+    price_values = [item["close"] for item in recent_candles]
+
+    return {
+        "symbol": spec.contract_code.upper(),
+        "base_timeframe": normalized_timeframe,
+        "step_minutes": step_minutes,
+        "horizon_steps": horizon_steps,
+        "horizon_hours": int((horizon_steps * step_minutes) / 60) or 1,
+        "depth": depth,
+        "base_price": round(base_price, 8),
+        "requested_at": serialize_dt(now),
+        "market_snapshot": {
+            "kind": "perpetual_closed_candle",
+            "price": round(base_price, 8),
+            "base_time": base_time,
+            "base_snapshot_id": str(v3.get("base_snapshot_id", "")),
+            "source": str(v3.get("market_data_source", V3_PERP_TABLE)),
+        },
+        "market_data_source": str(v3.get("market_data_source", V3_PERP_TABLE)),
+        "instrument_key": instrument_key,
+        "contract_code": spec.contract_code,
+        "period": period,
+        "market_features": {
+            "return_1step_pct": compute_return_pct(recent_candles, 1),
+            "return_4step_pct": compute_return_pct(recent_candles, 4),
+            "return_12step_pct": compute_return_pct(recent_candles, 12),
+            "range_steps_low": round(min(price_values), 8) if price_values else None,
+            "range_steps_high": round(max(price_values), 8) if price_values else None,
+            "sma20": sma20[-1]["value"] if sma20 else None,
+            "sma50": sma50[-1]["value"] if sma50 else None,
+            "rsi14": rsi_points[-1]["value"] if rsi_points else None,
+            "macd": macd_payload["macd"][-1]["value"] if macd_payload["macd"] else None,
+            "macd_signal": macd_payload["signal"][-1]["value"] if macd_payload["signal"] else None,
+            "macd_histogram": macd_payload["histogram"][-1]["value"] if macd_payload["histogram"] else None,
+        },
+        "seasonal_patterns": pattern_matches,
+        "recent_candles": compact_candle_context(recent_candles, limit=36),
+        "output_contract": {
+            "steps": list(range(1, horizon_steps + 1)),
+            "change_pct_basis": "relative to base_price",
+            "neutrality": "do not force directional bias without evidence",
+        },
+    }
 
 
 async def build_prediction_context(
@@ -1590,16 +1714,30 @@ async def run_prediction_request_async(
     base_timeframe: str = "60min",
     depth: int = 3,
     connection: Any = None,
+    v3: dict[str, Any] | None = None,
 ) -> None:
     """Background completion of a pending prediction request."""
     fake_request = _FakeRequest(app)
     normalized_symbol = ensure_prediction_symbol(symbol)
     normalized_timeframe = normalize_period(base_timeframe)
-    log.info("Starting background prediction request %s for %s", request_id, normalized_symbol)
-    context_payload = await build_prediction_context(
-        fake_request, normalized_symbol, horizon_steps, base_timeframe=base_timeframe, depth=depth
+    is_perpetual = bool(v3) and str(v3.get("market_data_source")) == V3_PERP_TABLE
+    log.info(
+        "Starting background prediction request %s for %s (source=%s)",
+        request_id, normalized_symbol, "perpetual" if is_perpetual else "spot",
     )
-    as_of = datetime.now(timezone.utc)
+    if is_perpetual:
+        normalized_timeframe = normalize_period_v3(str(v3["period"]))
+        context_payload = await build_prediction_context_perpetual(
+            connection, v3, horizon_steps=horizon_steps, depth=depth
+        )
+        # §57: count steps from the CLOSED base candle, not wall-clock now()
+        as_of = datetime.fromisoformat(str(v3["base_time"]))
+    else:
+        context_payload = await build_prediction_context(
+            fake_request, normalized_symbol, horizon_steps,
+            base_timeframe=base_timeframe, depth=depth,
+        )
+        as_of = datetime.now(timezone.utc)
     role_results = list((await generate_role_prediction_bundle(context_payload)).values())
     if not any(r.status == "completed" and r.points for r in role_results):
         raise ValueError("No valid model predictions")
@@ -1991,6 +2129,17 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.include_router(paper_router)
 app.include_router(trader_router)
+app.include_router(market_v3_router)
+app.include_router(forecast_v3_router)
+# V3 forecast *command* (ТЗ §55). Mounted after the read-model so a 202 response's
+# result_path (/api/v3/forecast/{id}) is served by the router that owns it. The
+# worker's pattern context is still spot-derived — see
+# docs/V3-ACCEPTANCE-MATRIX-20260930.md residual risk #7 — so this command is
+# accepted-and-stored, not a perpetual-correct end-to-end forecast.
+app.include_router(forecast_command_v3_router)
+app.include_router(simulation_v3_router)
+app.include_router(proposal_v3_router)
+app.include_router(positions_v3_router)
 
 
 @app.get("/trader", include_in_schema=False)
