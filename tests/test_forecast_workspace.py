@@ -9,12 +9,15 @@ Covers the deterministic core the browser and DB layers will lean on:
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
 import pytest
 from fastapi import FastAPI
 
+from forecast_queue import SCHEMA as FORECAST_QUEUE_SCHEMA
+from forecast_schema import PREDICTION_TABLES_SQL
 from forecast_workspace import (
     build_forecast_prediction,
     compute_forecast_accuracy,
@@ -33,12 +36,16 @@ def _req_row(**over):
     row = {
         "id": 7,
         "symbol": "btcusdt",
+        # V3 identity columns (additive migration 20260930) — the detail route
+        # reads provenance from the row, never from a fabricated constant.
+        "instrument_key": INSTR,
+        "period": "15m",
+        "horizon": "1h",
         "base_price": "100.0",
         "horizon_hours": 1,
         "base_timeframe": "15min",
         "created_at": BASE_TIME,
         "execution_state": "completed",
-        "plan_version": "v3",
         "rationale": "ensemble median",
     }
     row.update(over)
@@ -319,7 +326,7 @@ class TestForecastEndpoints:
                    skill_vs_baseline="0.5", in_range=True)
             for i in range(6)
         ]
-        app = _app(FakePool([_req_row(contract_code="BTC-USDT", base_timeframe="15m")], pts))
+        app = _app(FakePool([_req_row(base_timeframe="15m")], pts))
         async for c in _client(app):
             r = await c.get("/api/v3/forecast/7")
             assert r.status_code == 200
@@ -330,7 +337,7 @@ class TestForecastEndpoints:
 
     async def test_detail_includes_holdout(self):
         pts = _three_role_points(0, (100, 90, 95), actual_price="95")
-        app = _app(FakePool([_req_row(contract_code="BTC-USDT", base_price="100.0", base_timeframe="15m")], pts))
+        app = _app(FakePool([_req_row(base_price="100.0", base_timeframe="15m")], pts))
         async for c in _client(app):
             r = await c.get("/api/v3/forecast/7")
             assert r.status_code == 200
@@ -376,3 +383,126 @@ class TestForecastEndpoints:
         async for c in _client(app):
             r = await c.get(f"/api/v3/forecasts/accuracy?instrument_key={INSTR}&horizon=1h&period=15m")
             assert r.status_code == 503
+
+
+# ── detail route: row identity + SQL↔DDL column contract ────────────────────
+
+_CREATE_TABLE = re.compile(
+    r"CREATE TABLE IF NOT EXISTS (?P<name>\w+) \((?P<body>.*?)\n\);", re.S)
+_ADD_COLUMN = re.compile(
+    r"ALTER TABLE (?P<name>\w+) ADD COLUMN IF NOT EXISTS (?P<col>\w+)")
+_TABLE_CONSTRAINT_WORDS = {"PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "CONSTRAINT"}
+
+
+def _strip_comments(script: str) -> str:
+    return "\n".join(line.split("--", 1)[0] for line in script.splitlines())
+
+
+def _ddl_columns_of_forecast_requests() -> set[str]:
+    cols: set[str] = set()
+    for script in (PREDICTION_TABLES_SQL, FORECAST_QUEUE_SCHEMA):
+        text = _strip_comments(script)
+        for match in _CREATE_TABLE.finditer(text):
+            if match.group("name") != "forecast_requests":
+                continue
+            for line in match.group("body").splitlines():
+                token = line.strip().split(" ")[0].rstrip(",")
+                if token and token.upper() not in _TABLE_CONSTRAINT_WORDS:
+                    cols.add(token)
+        for match in _ADD_COLUMN.finditer(text):
+            if match.group("name") == "forecast_requests":
+                cols.add(match.group("col"))
+    return cols
+
+
+def _module_sql(fragment_marker: str) -> str:
+    """The **module's own** statement text, read from the source file.
+
+    ``FakePool`` answers any statement, so a column the real table never had
+    (the 2026-10-03 ``contract_code``/``plan_version`` incidents) stays green
+    at L1 unless the test pins the actual SQL against the DDL. Deterministic
+    string scan: no cross-literal regex tricks that can silently drift.
+    """
+    import forecast_workspace
+    from pathlib import Path
+
+    src = Path(forecast_workspace.__file__).read_text(encoding="utf-8")
+    start = src.index('"SELECT ')
+    while start != -1:
+        # collect the run of adjacent literals (whitespace-only gaps between)
+        i, chunks = start, []
+        while i < len(src) and src[i] == '"':
+            j = src.index('"', i + 1)
+            chunks.append(src[i + 1:j])
+            i = j + 1
+            while i < len(src) and src[i] in " \t\r\n":
+                i += 1
+        sql = " ".join(" ".join(chunks).split())
+        if fragment_marker == "detail" and "FROM forecast_requests WHERE id = $1" in sql:
+            return sql
+        if fragment_marker == "list" and "FROM forecast_requests WHERE symbol" in sql:
+            return sql
+        nxt = src.find('"SELECT ', start + 1)
+        if nxt == -1 or nxt == start:
+            break
+        start = nxt
+    raise AssertionError(
+        f"{fragment_marker} SELECT not found in the module — the guard needs review")
+
+
+def _select_cols(fragment_marker: str) -> set[str]:
+    sql = _module_sql(fragment_marker).replace("\n", " ")
+    inner = sql[sql.index("SELECT") + len("SELECT"):sql.index("FROM")]
+    return {item.strip() for item in inner.split(",") if item.strip()}
+
+
+class TestDetailRowIdentityAndDdl:
+    async def test_detail_reads_identity_from_the_row(self):
+        pts = _three_role_points(0, (100, 90, 95)) + _three_role_points(1, (101, 91, 96)) \
+            + _three_role_points(2, (102, 92, 97)) + _three_role_points(3, (103, 93, 98))
+        app = _app(FakePool([_req_row()], pts))
+        async for c in _client(app):
+            r = await c.get("/api/v3/forecast/7")
+            assert r.status_code == 200
+            body = r.json()
+            assert body["instrument_key"] == INSTR
+            assert body["contract_code"] == "BTC-USDT"
+            assert body["period"] == "15m"
+            assert body["horizon"] == "1h"
+            assert len(body["intervals"]) == 4  # 1h at 15m, exact candle count
+
+    async def test_detail_never_invents_identity_for_a_legacy_row(self):
+        """A row predating the V3 migration is derived from the symbol — the
+        route must not fabricate the clean perpetual contract code."""
+        pts = _three_role_points(0, (100, 90, 95))
+        app = _app(FakePool([_req_row(instrument_key=None, period=None, horizon=None)], pts))
+        async for c in _client(app):
+            r = await c.get("/api/v3/forecast/7")
+            assert r.status_code == 200
+            body = r.json()
+            assert body["instrument_key"] == "htx:linear-swap:BTCUSDT"
+            assert body["contract_code"] == "BTCUSDT"
+
+    def test_detail_select_reads_only_columns_the_ddl_declares(self):
+        cols = _select_cols("detail")
+        assert cols, "no columns parsed — the guard needs review"
+        known = _ddl_columns_of_forecast_requests()
+        assert known, "DDL parser lost the known columns — the guard is vacuous"
+        assert "contract_code" not in cols, "contract_code was never a forecast_requests column"
+        assert "plan_version" not in cols, "plan_version was never a forecast_requests column"
+        missing = cols - known
+        assert not missing, f"detail query reads unknown columns: {sorted(missing)}"
+
+    def test_list_select_reads_only_columns_the_ddl_declares(self):
+        cols = _select_cols("list")
+        assert cols, "no columns parsed — the guard needs review"
+        known = _ddl_columns_of_forecast_requests()
+        assert "plan_version" not in cols, "plan_version was never a forecast_requests column"
+        missing = cols - known
+        assert not missing, f"list query reads unknown columns: {sorted(missing)}"
+
+    def test_ddl_column_extraction_is_itself_sane(self):
+        known = _ddl_columns_of_forecast_requests()
+        for col in ("symbol", "horizon_hours", "base_price", "status", "created_at",
+                    "execution_state", "instrument_key", "period", "horizon"):
+            assert col in known, col

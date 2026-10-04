@@ -472,7 +472,7 @@ async def list_forecasts(
     try:
         rows = await pool.fetch(
             "SELECT id, symbol, base_price, horizon_hours, base_timeframe, created_at, "
-            "execution_state, plan_version "
+            "execution_state "
             "FROM forecast_requests WHERE symbol = $1 AND status = 'completed' "
             "ORDER BY created_at DESC LIMIT $2",
             symbol, limit,
@@ -539,8 +539,8 @@ async def get_forecast_detail(request: Request, forecast_id: int) -> JSONRespons
     now = datetime.now(timezone.utc)
     try:
         req = await pool.fetchrow(
-            "SELECT id, symbol, contract_code, base_price, horizon_hours, base_timeframe, "
-            "created_at, execution_state, plan_version FROM forecast_requests WHERE id = $1",
+            "SELECT id, symbol, instrument_key, period, horizon, base_price, horizon_hours, base_timeframe, "
+            "created_at, execution_state FROM forecast_requests WHERE id = $1",
             forecast_id,
         )
         if req is None:
@@ -565,7 +565,10 @@ async def get_forecast_detail(request: Request, forecast_id: int) -> JSONRespons
 
     req = dict(req)
     point_dicts = [dict(p) for p in points]
-    contract = req.get("contract_code") or (req.get("symbol", "").upper() or "UNKNOWN")
+    # Identity comes from the row when the additive V3 migration filled it; a
+    # legacy row is derived from the symbol and never guessed to be V3.
+    instrument_key = req.get("instrument_key") or f"htx:linear-swap:{req.get('symbol', '').upper() or 'UNKNOWN'}"
+    contract = instrument_key.rsplit(":", 1)[-1] if ":" in instrument_key else str(req.get("symbol", "")).upper()
     horizon = "1h"  # detail view echoes the request's own horizon bucket if mappable
     hh = req.get("horizon_hours")
     if hh is not None:
@@ -575,12 +578,12 @@ async def get_forecast_detail(request: Request, forecast_id: int) -> JSONRespons
         except (TypeError, ValueError):
             pass
     prediction = build_forecast_prediction(
-        instrument_key=f"htx:linear-swap:{contract}",
+        instrument_key=instrument_key,
         contract_code=contract,
         request_row=req,
         points=point_dicts,
-        horizon=horizon,
-        period=req.get("base_timeframe") or "1h",
+        horizon=req.get("horizon") or horizon,
+        period=req.get("period") or req.get("base_timeframe") or "1h",
         now=now,
     )
     prediction["accuracy"] = compute_forecast_accuracy(point_dicts)
