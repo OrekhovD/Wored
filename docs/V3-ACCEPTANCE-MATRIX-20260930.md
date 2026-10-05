@@ -7,7 +7,7 @@ Updated again with the **G3/G4 supplement** (SSE resync/fallback §53, URL-state
 L4 **re-executed after G3/G4** (`webui` rebuilt/restarted); the earlier stale-asset caveat is closed — see "L4 re-verify after G3/G4".
 Updated again with the **G2 staged supplement** (`webui/forecast_command_v3.py` + 35 tests) — **written and tested, but NOT mounted in `webui/app.py`**, so §55 is not yet closed at runtime.
 **G2 step 3** then added the additive row-level identity DDL (§117) — see "G2 step-3 supplement"; routes are **still unmounted** and the live database has **not** been migrated in this session.
-**G2 step 4** mounted the router in `webui/app.py` (see "G2 step-4 supplement"); the Captain then chose **close-without-L4** — the serving-level restart is *waived and recorded*, not silently skipped. Pre-restart probing found a **live-runtime incident** (collector wedged) — see "Live-runtime incident". **Update 2026-10-02:** the host wedge cleared on reboot; the collector feed is restored; a step-3 comment bug that broke the webui DB bootstrap was fixed; and **G2 step 5 was executed** (`docker compose restart webui`) — see "Recovery + step-5 execution". **Update 2026-10-03:** the §51 worker perpetual-context was proven by **read-only execution** against live `trader_v1_perp_candles` (surfacing and fixing a real `normalize_period` 400-on-`15m` bug), and the **disposable-PG DDL rehearsal (risk 8b) executed — 4 passed** on isolated `wored_qa`; the only G2 item left is the Captain-declined authenticated live `POST`.
+**G2 step 4** mounted the router in `webui/app.py` (see "G2 step-4 supplement"); the Captain then chose **close-without-L4** — the serving-level restart is *waived and recorded*, not silently skipped. Pre-restart probing found a **live-runtime incident** (collector wedged) — see "Live-runtime incident". **Update 2026-10-02:** the host wedge cleared on reboot; the collector feed is restored; a step-3 comment bug that broke the webui DB bootstrap was fixed; and **G2 step 5 was executed** (`docker compose restart webui`) — see "Recovery + step-5 execution". **Update 2026-10-03:** the §51 worker perpetual-context was proven by **read-only execution** against live `trader_v1_perp_candles` (surfacing and fixing a real `normalize_period` 400-on-`15m` bug), the **disposable-PG DDL rehearsal (risk 8b) executed — 4 passed** on isolated `wored_qa`, and finally the **authenticated live `POST` was executed** — `request_id=181` accepted, worker logged `source=perpetual`, terminal `partial`/`status=completed` with `market_data_source=trader_v1_perp_candles` and 8 real forecast points. **G2 is now CLOSED without caveat at L4** (see "G2 executed authenticated live POST").
 
 Evidence levels used below:
 
@@ -424,13 +424,52 @@ of the **running** worker confirms `build_prediction_context_perpetual` uses `no
 shadowed `normalize_period(period)` call is gone, and `run_prediction_request_async` carries `v3`.
 **Remaining for a caveat-free G2 close:** an *authenticated* `POST /api/v3/forecasts` that runs to
 `completed` (writes a real forecast + calls the model = financial-state, gated on Captain approval).
+*(This gap is now CLOSED — see the "G2 executed authenticated live POST" section below.)*
+
+### G2 executed authenticated live POST — caveat-free closure (2026-10-03)
+
+Captain granted the fresh "go" for the deferred financial write. An **authenticated**
+`POST /api/v3/forecasts` was executed in-container (driver `scratch/g2_live_post.py` via
+`docker compose exec -T webui python -`), producing **`request_id = 181`**. Full L4 chain, each
+link re-verified in this turn against the running service and the live `trading` DB:
+
+| Link | Evidence | Result |
+|---|---|---|
+| Auth guard (L4) | `docker compose logs webui` — unauthenticated `POST /api/v3/forecasts` from `172.18.0.1` | **401 Unauthorized** (route is live and guarded) |
+| Command accepted | authenticated `POST /api/v3/forecasts` from `127.0.0.1` | **202 Accepted** → request 181 created |
+| **§51 perpetual worker** | webui INFO line `Starting background prediction request 181 for btcusdt (source=perpetual)` | the **worker** (not just the command) routed 181 through `build_prediction_context_perpetual` — the previously-deferred executed proof |
+| Poll to terminal | `GET /api/v3/forecasts/requests/181` | **200** repeatedly until terminal |
+| Stored V3 identity | `psql -U bot -d trading` on `forecast_requests` id 181 | `instrument_key=htx:linear-swap:BTC-USDT`, `period=1h`, `horizon=4h`, `market_data_source=trader_v1_perp_candles`, `execution_state=partial`, `status=completed` |
+| Real forecast output | `forecast_points` + `forecast_model_runs` for 181 | **8 points**; bull `glm-5.3:cloud` `completed`, bear `glm-5.3-flash:cloud` `completed`, arbiter `bonsai-27b:lmstudio-q1` `failed` → honest terminal `partial` (not every role succeeded) |
+
+Contrast: legacy rows 174–179 have **empty** `instrument_key/period/horizon/market_data_source`
+(old spot-path writes), so 181 is genuinely the V3 perpetual path. (180 = the same driver on
+`1m/15m` reached `failed` with `forecast_deadline_missed` — a 1-minute budget cannot fit the ~9-minute
+AI chain; this is a parameter choice, not a defect, and is why 181 used `1h/4h`.)
+
+**G2 is therefore CLOSED without caveat at L4:** §55 command live + auth-guarded, additive DDL on
+the real DB, §51 perpetual worker **executed end-to-end** to a stored completed/partial forecast.
+
+**Adjacent finding (NOT part of G2, disclosed honestly):** while viewing 181, the read-model detail
+endpoint `GET /api/v3/forecast/{id}` (MC-07/08 read path, distinct from the §55 command-status route)
+returned **503** — `column "contract_code" does not exist`. This is a real pre-existing bug in
+`forecast_workspace.get_forecast_detail`, unrelated to the G2 command. Fixed in the working tree (the
+detail SELECT now reads `instrument_key/period/horizon` from the row; `plan_version` read defensively);
+`pytest tests\test_forecast_workspace.py` → **33 passed**. Because `webui` runs uvicorn without
+`--reload`, the fix needed a Captain-gated restart to go live; **on 2026-10-04 the Captain said
+"go" and `docker compose restart webui` was executed** (only `webui` recycled — `collector` stayed
+`Up 18 hours`, `restart` does not recreate `depends_on`), `bootstrap complete (attempt 1)`, `/readyz`
+`ready:true`, no Traceback. An **authenticated** `GET /api/v3/forecast/181` then returned **200 OK**
+from the running process (`instrument_key=htx:linear-swap:BTC-USDT`, `execution_state=partial`, 4
+intervals, `accuracy` block present) — the `contract_code` 503 is **resolved at L4**. G2's own
+endpoints (`POST` + `…/requests/{id}`) were unaffected throughout.
 
 ## Residual ТЗ items (audit of 2026-09-30, gaps G1–G5)
 
 | ID | ТЗ item | Status | Evidence / reason |
 |---|---|---|---|
 | G1 | §9/§129 — F01–F16 non-regression as a P6 exit gate | **CLOSED** | "F01–F16 non-regression" section below — no F-ID dropped |
-| G2 | §55 — `POST /api/v3/forecasts` async command (`request_id`) | **CLOSED at serving+DDL (L4); perpetual-context IMPLEMENTED code+L1, executed/L4 pending** | steps 1/3/4/5 as above (routes live, `POST → 401`, six identity columns + index on the real `trading` DB). The §51 worker gap is now **coded**: `run_prediction_request_async` accepts the `v3` block (fixes a latent `TypeError` that failed every V3 job) and routes perpetual jobs through a new `build_prediction_context_perpetual` that reads the same `trader_v1_perp_candles` source as the command/chart and fails closed — see "Worker perpetual-context path". **Live now, executed-proof pending:** the new code is live in the running `webui` after the approved restart (`v3` param present → latent `TypeError` gone; builder exposed; `/readyz` 200; 19 paths), and the perpetual **context builder was executed read-only against live candles** (see "Executed read-only §51 proof") — which surfaced and fixed a real `normalize_period` 400-on-`15m` bug — but **no authenticated live `POST` was performed** (Captain: restart only), so an executed perpetual forecast (`completed` with `market_data_source=trader_v1_perp_candles`) is not yet observed. The read-model rows and MC-05…08 are unaffected |
+| G2 | §55 — `POST /api/v3/forecasts` async command (`request_id`) | **CLOSED without caveat (L4)** | steps 1/3/4/5 as above (routes live, `POST → 401`), plus the **authenticated live `POST` executed 2026-10-03**: `request_id=181` accepted (`202`), the **worker** logged `source=perpetual` (routes through `build_prediction_context_perpetual`), polled to terminal, and the row stored full V3 identity with `market_data_source=trader_v1_perp_candles` and 8 real forecast points (bull+bear `completed`, arbiter `failed` → `partial`). See "G2 executed authenticated live POST". The §51 spot-context gap is thus closed **at L4**, not only code+read-only. (Read-model detail `GET /api/v3/forecast/{id}` has a separate `contract_code` bug — found, fixed on disk, 33 tests pass, pending restart; it is MC-07/08, not the §55 command.) |
 | G3 | §53 — SSE resync/backoff | **CLOSED (with a stated limit)** | Server tags snapshot frames with `id: <sequence>`; client falls back to `/state` polling and resumes SSE. **Limit:** the server does not *replay* from `Last-Event-ID` — on reconnect the browser sends it, and the stream resumes with the newest snapshot; no missed-frame replay |
 | G4 | §39 — URL-state persistence of market selections | **CLOSED** | instrument/period/horizon/positions-status/account mirrored via `history.replaceState`; validated against real option/registry values; browser tests above |
 | G5 | §5 — scenario mode | **DEFERRED (documented)** | Returns the exact reason code `mode_not_supported`; a separate product decision, not a defect |
@@ -545,10 +584,15 @@ paths, `POST → 401`), the additive identity DDL is applied on the real `tradin
 (six columns + `idx_forecast_requests_v3_identity`) and rehearsed clean on disposable
 `wored_qa` (4 passed), and the §51 worker now routes perpetual jobs through
 `build_prediction_context_perpetual` (proven by read-only execution against live
-candles, which surfaced and fixed a real `normalize_period` bug). **The one thing not
-done is an authenticated live `POST → completed`** (a financial write the Captain
-declined), so G2 is honestly *serving+DDL+context-correct, executed-forecast-declined*,
-not fully caveat-free. **G5 (scenario mode) remains deliberately deferred**. The
+candles, which surfaced and fixed a real `normalize_period` bug), **and the authenticated
+live `POST` was executed 2026-10-03** — `request_id=181` accepted (`202`), the worker logged
+`source=perpetual`, and the row reached terminal `partial`/`status=completed` with
+`market_data_source=trader_v1_perp_candles` and 8 real forecast points. **G2 is now CLOSED
+without caveat at L4.** The only separate item surfaced while *viewing* 181 is a read-model
+detail bug (`GET /api/v3/forecast/{id}` → 503 `column "contract_code" does not exist`) which is
+MC-07/08, not the §55 command; it was fixed on disk (33 tests pass) and, after the Captain's
+2026-10-04 "go", **`docker compose restart webui` was executed** so the running process now serves
+`GET /api/v3/forecast/181 → 200` (no Traceback). **G5 (scenario mode) remains deliberately deferred**. The
 overall MC verdict above does not depend on G2 or G5, and neither is presented as
 satisfied.
 
@@ -583,16 +627,18 @@ satisfied.
 6. Screenshots under `artifacts/v3-browser/` were produced by the browser suites
    in the earlier P1–P5 runs; the same tests were re-executed green in this run,
    but fresh screenshot files were not re-saved here.
-7. **G2 spot-context gap — RESOLVED in code, executed read-only (2026-10-02/03).**
-   The queue worker no longer builds V3 pattern context from HTX **spot**: for a
-   perpetual job (`v3.market_data_source == trader_v1_perp_candles`) it routes through
+7. **G2 spot-context gap — RESOLVED and EXECUTED at L4 (2026-10-02/03).** For a
+   perpetual job (`v3.market_data_source == trader_v1_perp_candles`) the worker routes through
    `build_prediction_context_perpetual`, which reads the same `trader_v1_perp_candles`
    source as the command/chart, pins `base_price`/`as_of` to the closed base candle (§57)
-   and **fails closed** on short/gapped history (no spot backfill, §51). This builder was
-   **executed read-only against live candles** (proving perpetual provenance, no spot),
-   which is how the `normalize_period` 400-on-`15m` bug was found and fixed. **Residual:**
-   an *authenticated live `POST → completed`* (financial write) was declined, so a stored
-   `completed` V3 forecast with perpetual-derived context has not been observed.
+   and **fails closed** on short/gapped history (no spot backfill, §51). Beyond the read-only
+   proof (which found and fixed the `normalize_period` 400-on-`15m` bug), the **authenticated
+   live `POST` was executed** (2026-10-03, `request_id=181`): the worker logged `source=perpetual`
+   and the stored row carries `market_data_source=trader_v1_perp_candles` with 8 real forecast
+   points. The former residual (a completed perpetual forecast not observed) is **closed**.
+   A separate read-model detail bug (`contract_code` in `get_forecast_detail`) was found while
+   viewing 181 — fixed on disk, then **live after the 2026-10-04 Captain-approved `restart webui`**
+   (`GET /api/v3/forecast/181 → 200`); MC-07/08 read path, not §55.
 8. **G2 step-3 DDL — EXECUTED (2026-10-02/03).** (a) Step 5 (`docker compose restart
    webui`, Captain-approved) applied the DDL to the **live `trading` DB**: the six identity
    columns + `idx_forecast_requests_v3_identity` were confirmed present (`psql -U bot -d
