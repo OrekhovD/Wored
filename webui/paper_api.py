@@ -86,7 +86,7 @@ DEFAULT_SETTINGS = {
     "max_risk_per_order_usdt": "10",
     "max_leverage": 10,
 }
-FEE_RATE = Decimal("0.0006")
+FEE_RATE = Decimal("0.0005")  # HTX USDT-M Prime 0 taker (0.0500%)
 
 
 def _decimal(value: Any, field: str, *, positive: bool = True) -> Decimal:

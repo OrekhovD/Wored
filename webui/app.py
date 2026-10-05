@@ -4425,7 +4425,7 @@ async def api_open_position(request: Request, payload: dict[str, Any] = Body(...
     # Insert directly
     notional = margin * leverage
     size = notional / entry_price
-    fee = notional * 0.0006  # taker fee
+    fee = notional * 0.0005  # HTX USDT-M Prime 0 taker fee
     telegram_user = _get_telegram_user(request)
     user_id = telegram_user["user_id"] if telegram_user else 0  # authenticated dashboard administrator
 

@@ -35,7 +35,7 @@ __all__ = [
     "check_reduce_only",
 ]
 
-FEE_RATE = Decimal("0.0006")  # 0.06% taker fee
+FEE_RATE = Decimal("0.0005")  # HTX USDT-M Prime 0 taker fee (0.0500%)
 DEFAULT_MAINTENANCE_MARGIN_RATE = Decimal("0.0028")
 
 # Default risk settings (USDT)

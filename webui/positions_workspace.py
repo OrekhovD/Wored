@@ -72,7 +72,7 @@ try:  # pragma: no cover - exercised through both branches in tests
     _DOMAIN_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _calculate_liq = None
-    _TAKER_FEE_RATE = Decimal("0.0006")
+    _TAKER_FEE_RATE = Decimal("0.0005")  # HTX USDT-M Prime 0 taker (matches paper_trading.execution.FEE_RATE)
     _DEFAULT_LEVERAGE = 10
     _owner_id_from_webui = None
     _DOMAIN_AVAILABLE = False

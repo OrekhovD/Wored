@@ -484,7 +484,7 @@ class BaselineV1Strategy:
         atr = atr_at_trigger
         frac = cfg.entry_atr_fraction
         sl_frac = cfg.sl_atr_fraction
-        fee_rate = Decimal("0.0006")
+        fee_rate = Decimal("0.0005")  # HTX USDT-M Prime 0 taker
 
         lookback = bars_1m[-cfg.sl_lookback_bars:] if len(bars_1m) >= cfg.sl_lookback_bars else bars_1m
         if not lookback:

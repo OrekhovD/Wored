@@ -66,7 +66,7 @@ def test_open_and_close_use_same_contract_multiplier() -> None:
     )
     assert opened.filled
     assert opened.notional == Decimal("100.000")
-    assert opened.entry_fee == Decimal("0.0600000")
+    assert opened.entry_fee == Decimal("0.0500000")
     assert opened.position is not None
 
     closed = execute_close(
@@ -76,5 +76,5 @@ def test_open_and_close_use_same_contract_multiplier() -> None:
     )
 
     assert closed.gross_pnl == Decimal("1.000")
-    assert closed.close_fee == Decimal("0.0606000")
-    assert closed.realized_net == Decimal("0.8794000")
+    assert closed.close_fee == Decimal("0.0505000")
+    assert closed.realized_net == Decimal("0.8995000")

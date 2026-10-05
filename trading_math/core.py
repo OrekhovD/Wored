@@ -45,7 +45,7 @@ __all__ = [
     "one",
 ]
 
-TAKER_FEE_RATE = Decimal("0.0006")
+TAKER_FEE_RATE = Decimal("0.0005")  # HTX USDT-M Prime 0 taker = 0.0500%
 MAINTENANCE_MARGIN_RATE = Decimal("0.005")
 MAX_LEVERAGE = 100
 MARGIN_MODES = ("isolated",)

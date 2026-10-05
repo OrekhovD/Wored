@@ -193,10 +193,10 @@ def test_single_entry_window_matches_engine_golden():
         _bar(1, "10050", "10100", "10000", "10100"),  # inside stop/tp, session end
     ]
     oc = run_window(_window("w1", "holdout", bars), budget=_BUDGET)
-    # entry fill 10000*1.0002=10002; entry fee 10002*0.0006=6.0012
-    # exit  10100*0.9998=10097.98; close fee 10097.98*0.0006=6.058788
-    # net   (10097.98-10002) - 6.058788 - 6.0012 = 83.920012
-    assert oc.net_pnl == Decimal("83.920012")
+    # entry fill 10000*1.0002=10002; entry fee 10002*0.0005=5.001
+    # exit  10100*0.9998=10097.98; close fee 10097.98*0.0005=5.04899
+    # net   (10097.98-10002) - 5.04899 - 5.001 = 85.93001
+    assert oc.net_pnl == Decimal("85.93001")
     assert oc.data_hash.startswith("sha256:")
 
 

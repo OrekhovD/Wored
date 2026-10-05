@@ -9,7 +9,7 @@ HTX BTC-USDT USDT-margined isolated perpetual:
   contract multiplier: 0.001
   price tick: 0.1
   quantity step: 0.001
-  taker fee: 0.0006 (0.06%)
+  taker fee: 0.0005 (0.05%  HTX USDT-M Prime 0)
 """
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ __all__ = [
     "execute_stop_market",
 ]
 
-FEE_RATE = Decimal("0.0006")  # 0.06% taker
+FEE_RATE = Decimal("0.0005")  # HTX USDT-M Prime 0 taker (0.05%)
 
 
 # ---------------------------------------------------------------------------
