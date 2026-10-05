@@ -115,6 +115,17 @@ class TestNormalizePlan:
         assert plan is None
         assert any(v.field == "start_at" and v.code == "field_type" for v in violations)
 
+    def test_empty_datetime_is_required_not_malformed(self):
+        """A blank window field is a missing-required, not a format error: the
+        message the user sees must not say "ISO-8601" when nothing was entered."""
+        raw = _plan(start_at="", end_at=None)
+        plan, violations = normalize_plan(raw)
+        assert plan is None
+        by = {v.field: v for v in violations}
+        assert by["start_at"].code == "field_required"
+        assert by["end_at"].code == "field_required"
+        assert "required" in by["start_at"].message.lower()
+
     def test_replay_requires_seed(self):
         raw = _plan("historical_replay")
         del raw["seed"]

@@ -59,7 +59,9 @@ PLAN_TYPE = "SimulationPlanV1"
 # ── implemented catalogs (grounded in runtime code, ТЗ §5) ──────────────────
 # strategy: paper_trading/strategy.py BaselineV1Strategy.VERSION
 STRATEGY_CATALOG: dict[str, tuple[str, ...]] = {"baseline_v1": ("default",)}
-# fee: paper_trading/execution.py FEE_RATE = 0.0006 taker
+# fee: paper_trading/execution.py FEE_RATE = 0.0005 taker (HTX USDT-M Prime 0)
+# NOTE: the schedule version TAG is still "taker_6bps_v1" (opaque id); it should be
+# renamed to reflect 5bps in a coordinated server+JS+HTML+tests pass (separate task).
 FEE_SCHEDULE_VERSIONS = ("taker_6bps_v1",)
 # slippage: paper_trading/market.py DEFAULT_SLIPPAGE_BPS = 2, adverse direction
 SLIPPAGE_MODEL_VERSIONS = ("adverse_2bps_v1",)
@@ -291,12 +293,20 @@ def normalize_plan(raw: Any) -> tuple[dict[str, Any] | None, list[Violation]]:
             bad("timezone", "field_enum", f"unknown IANA timezone {tz_name!r}")
 
     # window
-    start_dt = _parse_dt(raw.get("start_at"))
+    raw_start = raw.get("start_at")
+    raw_end = raw.get("end_at")
+    start_dt = _parse_dt(raw_start)
     if start_dt is None:
-        bad("start_at", "field_type", "start_at must be an ISO-8601 datetime with timezone")
-    end_dt = _parse_dt(raw.get("end_at"))
+        if not isinstance(raw_start, str) or not raw_start.strip():
+            bad("start_at", "field_required", "start_at is required (UTC window start)")
+        else:
+            bad("start_at", "field_type", "start_at must be an ISO-8601 datetime with timezone")
+    end_dt = _parse_dt(raw_end)
     if end_dt is None:
-        bad("end_at", "field_type", "end_at must be an ISO-8601 datetime with timezone")
+        if not isinstance(raw_end, str) or not raw_end.strip():
+            bad("end_at", "field_required", "end_at is required (UTC window end)")
+        else:
+            bad("end_at", "field_type", "end_at must be an ISO-8601 datetime with timezone")
     if start_dt is not None:
         plan["start_at"] = _iso(start_dt)
     if end_dt is not None:
