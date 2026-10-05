@@ -22,6 +22,21 @@
    same migration run once.
 6. **Heartbeat timeout** — evaluate_forecasts 5min/12min, execution_watch 10sec/30sec, market_context 30sec/90sec.
 7. **Simulation versioning** — existing positions keep their calculation version (1 or 2); new positions use v3 (Decimal, ROUND_HALF_UP). No automatic migration of v1/v2 positions.
+7b. **HTX perpetual kline backfill ceiling (~33h)** — `GET /linear-swap-ex/market/history/kline`
+   ignores **every** range parameter (`start_ms`, `end_ms`, `since`, `start`, `end`, `from`,
+   `start_date`/`end_date`, verified live) and returns only the latest ≤2000 candles
+   (~33 hours at 1min). So `scripts/backfill_perp_candles.py` cannot reach a hole older than
+   that ceiling, and a historical gap in `trader_v1_perp_candles` beyond ~33h is **unrecoverable
+   from the public API** (e.g. the 2026-09-30 15:00→23:00 UTC 1m gap is permanent). Only
+   `collector/htx/gap_monitor.py` self-heals, and only within its rolling
+   `GAP_WINDOW_MINUTES=360` window; older gaps are a known limit, not a bug. The non-history
+   `/market/kline` variant returns `404`.
+7c. **`candle_gap_count` window alignment (RESOLVED 2026-10-05)** — `check_candle_gaps` built
+   its expected-bucket grid from `now - 360min` with seconds/microseconds intact, so
+   `generate_series` buckets landed on non-`:00` seconds and never matched minute-aligned
+   candle `open_time`; the `LEFT JOIN` then counted the whole window missing, pinning the
+   gauge at ~360 (false positive). Fixed by flooring `now` to the minute in
+   `collector/htx/gap_monitor.py` (verified: `check_candle_gaps()` returns 1, not 360).
 
 ## LLM / Provider Limits
 
