@@ -69,11 +69,19 @@ export function mountMarketChart(container, { height = 320 } = {}) {
       vertLines: { color: 'rgba(64,64,64,0.15)' },
       horzLines: { color: 'rgba(64,64,64,0.15)' },
     },
-    rightPriceScale: { borderColor: 'rgba(64,64,64,0.3)' },
+    rightPriceScale: {
+      borderColor: 'rgba(64,64,64,0.3)',
+      // Give the candle body vertical room so the price-axis tags (Mark, entry,
+      // forecast) don't pile up against the top/bottom edges.
+      scaleMargins: { top: 0.1, bottom: 0.15 },
+    },
     timeScale: {
       borderColor: 'rgba(64,64,64,0.3)',
       timeVisible: true,
       secondsVisible: false,
+      // Default rightOffset (60 bars) left a wide dead margin right of the last
+      // candle; 15 keeps just enough future room for the forecast band.
+      rightOffset: 15,
     },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
   });
@@ -92,6 +100,9 @@ export function mountMarketChart(container, { height = 320 } = {}) {
     priceFormat: { type: 'volume' },
     priceScaleId: '',
     color: 'rgba(59,130,246,0.35)',
+    // Volume is a background histogram; its own price-axis tag only adds noise.
+    priceLineVisible: false,
+    lastValueVisible: false,
   });
   chart.priceScale('').applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
@@ -119,18 +130,21 @@ export function mountMarketChart(container, { height = 320 } = {}) {
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: true,
-      title: 'Forecast (median)',
+      title: 'Прогноз',
     });
-    const bandOpts = (title) => ({
+    // Band edges stay as dotted guide lines but carry NO price-axis tag: with
+    // q90/q10/Mark/entry/forecast all landing in a narrow price band their
+    // labels overlapped into an unreadable stack. The band edges are already
+    // explained by the HTML legend ("полоса q10–q90").
+    const bandOpts = () => ({
       color: 'rgba(59,130,246,0.45)',
       lineWidth: 1,
       lineStyle: LightweightCharts.LineStyle.Dotted,
       priceLineVisible: false,
       lastValueVisible: false,
-      title,
     });
-    forecastBandHi = _addSeries(chart, 'Line', bandOpts('q90'));
-    forecastBandLo = _addSeries(chart, 'Line', bandOpts('q10'));
+    forecastBandHi = _addSeries(chart, 'Line', bandOpts());
+    forecastBandLo = _addSeries(chart, 'Line', bandOpts());
   }
   function _clearForecast() {
     if (forecastMid) { forecastMid.setData([]); forecastBandHi.setData([]); forecastBandLo.setData([]); }
@@ -188,6 +202,7 @@ export function mountMarketChart(container, { height = 320 } = {}) {
     const intervals = prediction && Array.isArray(prediction.intervals) ? prediction.intervals : [];
     if (intervals.length === 0) {
       _clearForecast();
+      try { chart.timeScale().fitContent(); } catch (_) { /* ignore */ }
       return 0;
     }
     _ensureForecastSeries();
@@ -207,6 +222,10 @@ export function mountMarketChart(container, { height = 320 } = {}) {
     forecastMid.setData(mid);
     forecastBandHi.setData(hi);
     forecastBandLo.setData(lo);
+    // Re-fit so the future forecast band sits snugly in view for any horizon,
+    // instead of relying on a fixed right margin (which left dead space on
+    // short horizons and clipped the band on long ones).
+    try { chart.timeScale().fitContent(); } catch (_) { /* ignore */ }
     return mid.length;
   }
 

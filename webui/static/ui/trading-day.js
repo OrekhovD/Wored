@@ -4,6 +4,7 @@
  * Two accounts (manual + auto), shared chart, manual ticket, auto controls.
  */
 import WORED from './core.js?v=20260910-1';
+import { mountMarketChart } from './market-chart.js?v=20261004-1';
 
 const TD = (() => {
   'use strict';
@@ -11,9 +12,8 @@ const TD = (() => {
   let _dayData = null;
   let _poller = null;
   let _ticketDir = 'long';
-  let _marketChart = null;
-  let _marketSeries = null;
-  let _marketPoints = [];
+  let _marketChartCtrl = null;
+  let _marketChartKey = null;
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, char => ({
@@ -213,7 +213,7 @@ const TD = (() => {
     renderEvents(d.events || []);
   }
 
-  function renderLiveMarket(market) {
+  async function renderLiveMarket(market) {
     const quote = document.getElementById('tdMarketQuote');
     const container = document.getElementById('tdLiveChart');
     if (!quote || !container) return;
@@ -229,37 +229,41 @@ const TD = (() => {
       + '<span>Index <b>' + WORED.fmtPrice(market.index) + '</b></span>'
       + '<span>Funding <b>' + funding.toFixed(4) + '%</b></span>';
 
-    const time = Math.floor(new Date(market.source_at).getTime() / 1000);
-    const value = Number(market.mark);
-    if (!Number.isFinite(time) || !Number.isFinite(value)) return;
-    const previous = _marketPoints[_marketPoints.length - 1];
-    if (!previous || time > previous.time) {
-      _marketPoints.push({ time, value });
-      _marketPoints = _marketPoints.slice(-240);
-    } else if (time === previous.time) {
-      previous.value = value;
+    // Reuse the workspace candle renderer (HTX perpetual history + live mark
+    // line) instead of a self-accumulated mark-price line, which started blank
+    // and only filled one point per 15s poll — unreadable and not informative.
+    if (!_marketChartCtrl) _marketChartCtrl = mountMarketChart(container, { height: 280 });
+    if (!_marketChartCtrl) return;
+
+    // The v3 instrument key is venue:market_type:contract_code, exactly what
+    // /api/v3/market/{key}/candles expects; built from backend facts, never
+    // guessed.
+    const key = [market.venue, market.market_type, market.contract_code]
+      .filter(Boolean).join(':');
+    if (key && key !== _marketChartKey) {
+      _marketChartKey = key;
+      try {
+        const r = await WORED.apiFetch(
+          '/api/v3/market/' + encodeURIComponent(key) + '/candles?period=1m&limit=200',
+          { resourceKey: 'td-candles', timeout: 10000 },
+        );
+        if (r.ok) {
+          const data = await r.json();
+          const candles = data.candles || [];
+          const last = candles.length ? candles[candles.length - 1] : null;
+          _marketChartCtrl.setData(candles, {
+            last_candle_time: last ? Math.floor(Date.parse(last.start_at) / 1000) : null,
+          });
+        }
+      } catch (_) { /* keep the last drawn history; the mark line still updates */ }
     }
 
-    if (!_marketChart && window.LightweightCharts) {
-      _marketChart = window.LightweightCharts.createChart(container, {
-        height: 280,
-        layout: { background: { color: '#11151b' }, textColor: '#9ba7b4' },
-        grid: { vertLines: { color: '#202731' }, horzLines: { color: '#202731' } },
-        rightPriceScale: { borderColor: '#343e4a' },
-        timeScale: { borderColor: '#343e4a', timeVisible: true, secondsVisible: true },
-      });
-      _marketSeries = _marketChart.addSeries(window.LightweightCharts.LineSeries, {
-        color: '#4f9cf9', lineWidth: 2, lastValueVisible: true, priceLineVisible: true,
-      });
-      new ResizeObserver(entries => {
-        const width = entries[0]?.contentRect?.width;
-        if (width) _marketChart.applyOptions({ width });
-      }).observe(container);
-    }
-    if (_marketSeries) {
-      _marketSeries.setData(_marketPoints);
-      _marketChart.timeScale().fitContent();
-    }
+    // Move the mark line to the latest backend quote every poll — a fact, never
+    // a fabricated candle (the store persists only closed candles).
+    _marketChartCtrl.applyState({
+      quote: { mark: market.mark },
+      as_of: market.source_at,
+    });
   }
 
   function renderPositions(positions) {

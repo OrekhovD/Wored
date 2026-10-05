@@ -2687,18 +2687,26 @@ a:focus-visible {
   display: grid;
   grid-template-areas:
     "status status status"
-    "route context attention"
+    "market market market"
+    "sim    sim    sim"
+    "route  context attention"
     "quicklinks quicklinks quicklinks";
   grid-template-columns: 180px 1fr 320px;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto auto 1fr auto;
   gap: var(--ui-space-3);
   min-height: calc(100vh - 80px);
 }
+/* V3 market + session-constructor sections span the full content width. Without
+   an explicit grid-area they were auto-placed into the implicit 180px/1fr cells,
+   squeezing the candle chart into the 180px route column (cramped, overlapping
+   axis labels) while the 320px attention column dangled beside a narrow form. */
+.v3-market { grid-area: market; }
+.v3-sim { grid-area: sim; }
 @media (max-width: 900px) {
   .ws-layout {
-    grid-template-areas: "status" "attention" "context" "quicklinks";
+    grid-template-areas: "status" "market" "sim" "attention" "context" "quicklinks";
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: auto auto auto auto 1fr auto;
   }
   .ws-route { display: none; }
 }

@@ -27,7 +27,7 @@
  *   SSE /api/v3/market/{key}/stream    → events snapshot | keepalive | error | bye
  */
 
-import { mountMarketChart } from './market-chart.js?v=20260929-2';
+import { mountMarketChart } from './market-chart.js?v=20261004-1';
 
 const DEFAULT_PERIOD = '1m';
 const DEFAULT_HORIZON = '1h';
