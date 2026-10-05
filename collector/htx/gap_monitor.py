@@ -73,7 +73,7 @@ async def check_candle_gaps() -> int:
 
     redis = deps["get_redis"]()
     pool = await deps["get_pool"]()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     window_start = now - timedelta(minutes=GAP_WINDOW_MINUTES)
     total_gaps = 0
     for contract_code in _contracts():
