@@ -47,6 +47,48 @@ async def alert_listener(bot: Bot):
                 log.error(f"Push alert failed: {e}")
 
 
+async def _poll_watchdog(bot: Bot):
+    """Detect a hung aiogram HTTP session and self-exit so Docker restarts the container.
+
+    Failure mode we care about: long-poll `getUpdates` socket half-opens after a
+    transient network/Docker-Desktop hiccup and never returns; `aiogram.event`
+    logs stay silent, users see no reply. A fresh `get_webhook_info` request
+    shares the same aiohttp ClientSession; if the session is broken it will
+    time out too. Two consecutive misses (over ~90 s) are treated as wedged
+    and the process exits with code 1 — Docker's `restart: unless-stopped`
+    brings it back with a fresh connection pool.
+
+    Tuning: interval=45 s, timeout=15 s, threshold=2. Worst-case recovery
+    latency ≈ 90 s + image pull 0 s (rebuild not needed).
+    """
+    consecutive_failures = 0
+    # Give startup a grace period — DB migrations and initial poll setup.
+    await asyncio.sleep(30)
+    log.info("Poll watchdog started (interval=45s timeout=15s threshold=2)")
+    while True:
+        try:
+            await asyncio.wait_for(bot.get_webhook_info(), timeout=15)
+            if consecutive_failures:
+                log.info("Poll watchdog: session recovered")
+            consecutive_failures = 0
+        except asyncio.TimeoutError:
+            consecutive_failures += 1
+            log.warning(
+                "Poll watchdog: get_webhook_info timeout (%d/2)", consecutive_failures
+            )
+        except Exception as exc:  # network / auth errors — still worth restarting on
+            consecutive_failures += 1
+            log.warning(
+                "Poll watchdog: get_webhook_info failed: %s (%d/2)", exc, consecutive_failures
+            )
+        if consecutive_failures >= 2:
+            log.error("Poll watchdog: Telegram session wedged, exiting for Docker restart")
+            # Force immediate process termination; `os._exit` skips cleanup by
+            # design so a hung shutdown handler cannot block the restart.
+            os._exit(1)
+        await asyncio.sleep(45)
+
+
 async def _sim_ai_monitor(bot: Bot):
     """Periodic check of AI-managed sim positions. Runs every 3 minutes."""
     import json
@@ -156,6 +198,7 @@ async def main():
     log.info("Chatbot started polling")
     asyncio.create_task(alert_listener(bot))
     asyncio.create_task(_sim_ai_monitor(bot))
+    asyncio.create_task(_poll_watchdog(bot))
     
     # Configure the system Menu Button to open WORED WebApp Dashboard
     from aiogram.types import MenuButtonWebApp, WebAppInfo

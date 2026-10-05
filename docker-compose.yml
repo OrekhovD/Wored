@@ -80,6 +80,21 @@ services:
       - LOCAL_LLM_BASE_URL=http://host.docker.internal:8088
     command: python main.py
     restart: unless-stopped
+    # Healthcheck: outbound reachability to api.telegram.org from inside the
+    # container. This provides `unhealthy` status visibility in `docker compose
+    # ps` — actual self-healing on wedged aiogram sessions is done by the
+    # in-process `_poll_watchdog` task in main.py, which exits with code 1 and
+    # relies on the `restart: unless-stopped` policy above.
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import os,sys,urllib.request;\ntry:\n    tok = os.environ['TELEGRAM_BOT_TOKEN']\n    urllib.request.urlopen('https://api.telegram.org/bot' + tok + '/getMe', timeout=8)\nexcept Exception:\n    sys.exit(1)\n"
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
