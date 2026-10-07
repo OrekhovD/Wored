@@ -8,7 +8,7 @@ logs/
 __pycache__/
 *.pyc
 .env*
-.venv/
+**/.venv/
 scratch/
 *.md
 *.json
@@ -21,7 +21,13 @@ scratch/
 !collector/
 !docker/
 !migrations/
-# UI-11 acceptance fixture (single file; rest of TASOCHKI stays excluded)
-!TASOCHKI/
+# UI-11 acceptance fixture + QA dependency lock (single files; rest of TASOCHKI stays
+# excluded — the folder carries ~150 MB of archives and a local virtualenv).
 !TASOCHKI/HERMES-WORED-UIUX/
 !TASOCHKI/HERMES-WORED-UIUX/fixtures.json
+!TASOCHKI/HERMES-WORED/
+!TASOCHKI/HERMES-WORED/requirements-qa.txt
+# Stabilization docs assert these templates exist inside /repo. They are key-name
+# only (no secret values), so the QA image may carry them.
+!.env.example
+!.env.wored.example
