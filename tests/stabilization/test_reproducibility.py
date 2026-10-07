@@ -8,6 +8,7 @@ Tests R08-01..04:
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -15,8 +16,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PAYLOAD = Path(r"D:\WORED\TASOCHKI\HERMES-WORED")
-TOOLS = Path(r"D:\WORED\TASOCHKI\HERMES-WORED\tools")
+# The Hermes payload directory lives inside the repository, so the QA image can find
+# it too. An absolute host path here would make the suite pass on one workstation only.
+PAYLOAD = Path(os.getenv("WORED_HERMES_PAYLOAD_DIR",
+                         str(ROOT / "TASOCHKI" / "HERMES-WORED")))
 
 
 class TestQALockFiles(unittest.TestCase):

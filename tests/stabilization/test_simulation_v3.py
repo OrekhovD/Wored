@@ -124,12 +124,17 @@ class TestInvalidLeverage(unittest.TestCase):
 
 
 class TestLegacyCalculationsUnchanged(unittest.TestCase):
-    """R05-08: Legacy v1/v2 calculations unchanged."""
+    """R05-08: Legacy v1/v2 calculations unchanged.
+
+    Only the v1 path is frozen at the pre-unification numbers. The v2 path is the
+    canonical policy in :mod:`trading_math`, so its goldens move with
+    ``TAKER_FEE_RATE`` (0.0005 since 6b5e9cc, HTX USDT-M Prime 0).
+    """
     def test_v2_unchanged_price_net_loss(self):
         """v2: unchanged price has net loss from two fees + funding."""
         pnl, fee = settlement("long", 100, 100, 10, 0.6, 0.1, calculation_version=2)
-        self.assertAlmostEqual(fee, 0.6)  # close fee at exit price
-        self.assertAlmostEqual(pnl, -1.3)  # two fees + funding
+        self.assertAlmostEqual(fee, 0.5)  # close fee at exit price: 10 * 100 * 0.0005
+        self.assertAlmostEqual(pnl, -1.2)  # two fees + funding
 
     def test_v1_closing_fee_uses_entry_notional(self):
         """v1: closing fee uses entry notional, not exit notional."""
@@ -154,12 +159,12 @@ class TestLegacyCalculationsUnchanged(unittest.TestCase):
     def test_v2_liquidation_long(self):
         """v2 long liquidation price unchanged."""
         liq = liquidation_price(100, 10, "long", calculation_version=2)
-        self.assertAlmostEqual(liq, 100 * (1 - 1/10 + 0.0006) / (1 - 0.005), places=6)
+        self.assertAlmostEqual(liq, 100 * (1 - 1/10 + 0.0005) / (1 - 0.005), places=6)
 
     def test_v2_liquidation_short(self):
         """v2 short liquidation price unchanged."""
         liq = liquidation_price(100, 10, "short", calculation_version=2)
-        self.assertAlmostEqual(liq, 100 * (1 + 1/10 - 0.0006) / (1 + 0.005), places=6)
+        self.assertAlmostEqual(liq, 100 * (1 + 1/10 - 0.0005) / (1 + 0.005), places=6)
 
     def test_v1_liquidation(self):
         """v1 liquidation price unchanged."""

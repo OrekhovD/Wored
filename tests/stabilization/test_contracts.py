@@ -113,14 +113,15 @@ class SimulationTests(unittest.TestCase):
                 validate_order(direction, leverage, margin, price)
 
     def test_unchanged_price_has_net_loss_from_two_fees_and_funding(self):
+        # Goldens track trading_math.TAKER_FEE_RATE = 0.0005 (HTX USDT-M Prime 0).
         pnl, fee = settlement("long", 100, 100, 10, .6, .1)
-        self.assertAlmostEqual(fee, .6)
-        self.assertAlmostEqual(pnl, -1.3)
+        self.assertAlmostEqual(fee, .5)  # 10 * 100 * 0.0005
+        self.assertAlmostEqual(pnl, -1.2)  # 0 - .6 entry - .5 close - .1 funding
 
     def test_closing_fee_uses_closing_notional(self):
         pnl, fee = settlement("short", 100, 90, 10, .6)
-        self.assertAlmostEqual(fee, .54)
-        self.assertAlmostEqual(pnl, 98.86)
+        self.assertAlmostEqual(fee, .45)  # 10 * 90 * 0.0005, exit notional
+        self.assertAlmostEqual(pnl, 98.95)  # 100 gross - .6 entry - .45 close
 
     def test_preview_limits_loss_at_simulated_liquidation(self):
         for direction, loss_key in (("long", "-5%"), ("short", "+5%")):
@@ -230,22 +231,30 @@ class QueueTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProviderTests(unittest.IsolatedAsyncioTestCase):
-    async def test_native_adapter_rejects_thinking_only_and_truncated_response(self):
+    async def test_native_adapter_rejects_thinking_only_and_incomplete_response(self):
         import os
         import httpx
         from prediction_engine import MODEL_CONFIGS, _build_runtime_candidates, _ollama_chat
         candidate = _build_runtime_candidates(MODEL_CONFIGS["analyst"])[0]
         context = {"horizon_steps": 1, "base_price": 100, "symbol": "btcusdt"}
-        for body in ({"done": True, "message": {"thinking": "private", "reasoning": "private"}},
-                     {"done": True, "done_reason": "length", "message": {"content": "{}"}},
-                     {"done": False, "message": {"content": "{}"}}):
+        # 8a2d403 deliberately widened the accept rule: a reasoning model that hits the
+        # token limit still counts when it produced final content. Only a response with
+        # no content, or one that never finished, is rejected.
+        rejected = ({"done": True, "message": {"thinking": "private", "reasoning": "private"}},
+                    {"done": False, "message": {"content": "{}"}})
+        accepted = {"done": True, "done_reason": "length", "message": {"content": "{}"}}
+        for body, should_raise in [(b, True) for b in rejected] + [(accepted, False)]:
             client = AsyncMock()
             client.post.return_value = httpx.Response(200, json=body, request=httpx.Request("POST", "https://example.test"))
             manager = AsyncMock()
             manager.__aenter__.return_value = client
             with patch.dict(os.environ, {candidate.api_key_env: "test-token"}), patch("httpx.AsyncClient", return_value=manager):
-                with self.assertRaises(ValueError):
-                    await _ollama_chat(candidate, MODEL_CONFIGS["analyst"], context)
+                if should_raise:
+                    with self.assertRaises(ValueError):
+                        await _ollama_chat(candidate, MODEL_CONFIGS["analyst"], context)
+                else:
+                    self.assertEqual(
+                        await _ollama_chat(candidate, MODEL_CONFIGS["analyst"], context), "{}")
 
 
 VALID_FORECAST_JSON = json.dumps({
@@ -291,7 +300,7 @@ class LocalModelRoleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(providers, {"worker": "ollama_local", "analyst": "ollama_local",
                                      "premium": "ollama_local", "minimax": "ollama_local"})
 
-    async def test_local_adapter_forces_thinking_off_and_appends_schema(self):
+    async def test_local_adapter_thinking_toggle_and_appends_schema(self):
         import os
         import httpx
         from prediction_engine import MODEL_CONFIGS, _local_ollama_chat
@@ -304,20 +313,36 @@ class LocalModelRoleTests(unittest.IsolatedAsyncioTestCase):
         manager.__aenter__.return_value = client
         env = dict(self.no_cloud, LOCAL_LLM_ROLES="analyst",
                    LOCAL_LLM_BASE_URL="http://127.0.0.1:8088/v1")
-        with patch.dict(os.environ, env, clear=False), patch("httpx.AsyncClient", return_value=manager):
-            content = await _local_ollama_chat(candidate, MODEL_CONFIGS["analyst"], self.context)
+        with patch.dict(os.environ, env, clear=False):
+            # 81753b9 made thinking the default; drop any ambient toggle so this call
+            # exercises the real default instead of the host environment.
+            os.environ.pop("LOCAL_LLM_THINK", None)
+            with patch("httpx.AsyncClient", return_value=manager):
+                content = await _local_ollama_chat(candidate, MODEL_CONFIGS["analyst"], self.context)
         self.assertEqual(content, VALID_FORECAST_JSON)
 
         args, kwargs = client.post.call_args
         # A "/v1" base URL must not produce "/v1/api/chat".
         self.assertEqual(args[0], "http://127.0.0.1:8088/api/chat")
         payload = kwargs["json"]
-        self.assertIs(payload["think"], False)
+        # Quality mode: the 27B workstation model reasons unless told otherwise.
+        self.assertIs(payload["think"], True)
         self.assertEqual(payload["options"]["num_predict"], MODEL_CONFIGS["analyst"].max_tokens)
         # The workstation server has no auth; sending a bearer token would be noise.
         self.assertNotIn("Authorization", kwargs["headers"])
         user_text = payload["messages"][-1]["content"]
         self.assertGreater(user_text.find("Output ONLY one JSON object"), user_text.find("btcusdt"))
+
+        # LOCAL_LLM_THINK=false must still switch the fast path back on.
+        client_off = AsyncMock()
+        client_off.post.return_value = httpx.Response(
+            200, json=body, request=httpx.Request("POST", "http://127.0.0.1:8088/api/chat"))
+        manager_off = AsyncMock()
+        manager_off.__aenter__.return_value = client_off
+        with patch.dict(os.environ, dict(env, LOCAL_LLM_THINK="false"), clear=False), \
+                patch("httpx.AsyncClient", return_value=manager_off):
+            await _local_ollama_chat(candidate, MODEL_CONFIGS["analyst"], self.context)
+        self.assertIs(client_off.post.call_args.kwargs["json"]["think"], False)
 
     def _candidates_local_first(self, key):
         return self._candidates(key, roles=key)[0]
@@ -359,16 +384,20 @@ class LocalModelRoleTests(unittest.IsolatedAsyncioTestCase):
         import os
         import prediction_engine
         from prediction_engine import MODEL_CONFIGS, generate_model_prediction
+        # The cloud model names churn with the Ollama Pro registry (50ca344, 22425c3),
+        # so the contract is "the head of the role's cloud chain answered", not a
+        # literal model id that breaks on every rename.
+        cloud = next(c for c in self._candidates("analyst") if c.provider != "ollama_local")
         env = dict(self.no_cloud, LOCAL_LLM_ROLES="analyst", OLLAMA_API_KEY="test-token")
         with patch.dict(os.environ, env, clear=False):
             with patch.object(prediction_engine, "_local_ollama_chat",
                               AsyncMock(side_effect=RuntimeError("connection refused"))), \
                  patch.object(prediction_engine, "_ollama_chat",
-                              AsyncMock(return_value=VALID_FORECAST_JSON)) as cloud:
+                              AsyncMock(return_value=VALID_FORECAST_JSON)) as cloud_call:
                 result = await generate_model_prediction(MODEL_CONFIGS["analyst"], self.context, role="bull")
         self.assertEqual(result.status, "completed")
-        self.assertEqual(result.model_id, "glm-5.1")
-        self.assertEqual(cloud.await_count, 1)
+        self.assertEqual(result.model_id, cloud.model_id)
+        self.assertEqual(cloud_call.await_count, 1)
 
 
 class ConfidenceCalibrationTests(unittest.IsolatedAsyncioTestCase):

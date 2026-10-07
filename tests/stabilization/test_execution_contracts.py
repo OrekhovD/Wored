@@ -50,13 +50,15 @@ class CalculationCompatibilityTests(unittest.TestCase):
             value = liquidation_price(100, 50, direction)
             self.assertAlmostEqual(calc_liquidation_price(100, 50, direction), value, places=7)
             gross = (value - 100) * (1 if direction == "long" else -1)
-            self.assertAlmostEqual(2 + gross - .06, value * .005)
+            # 2 margin units + gross - entry fee (100 notional * 0.0005) = maintenance.
+            self.assertAlmostEqual(2 + gross - .05, value * .005)
 
     def test_old_and_new_closing_fee_are_explicit(self):
+        # v1 keeps the frozen 0.0006 constant from before the ADR-01 unification.
         self.assertAlmostEqual(settlement("long", 100, 110, 2, .12, .03, 1)[0], 19.73)
         pnl, fee = settlement("long", 100, 110, 2, .12, .03, 2)
-        self.assertAlmostEqual(fee, .132)
-        self.assertAlmostEqual(pnl, 19.718)
+        self.assertAlmostEqual(fee, .11)  # 2 * 110 exit notional * 0.0005
+        self.assertAlmostEqual(pnl, 19.74)  # 20 gross - .12 entry - .11 close - .03 funding
 
     def test_session_leverage_rejects_unsafe_and_coerced_values(self):
         for leverage in (True, 10.0, "10", 0, 125, 200):
