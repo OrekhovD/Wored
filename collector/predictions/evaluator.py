@@ -169,7 +169,7 @@ async def evaluate_due_forecasts():
                             verdict = $8,
                             evaluated_at = $9,
                             metrics_version = 2,
-                            failure_score = 100 - $5,
+                            failure_score = 100 - $5::numeric,
                             baseline_error_pct = $11,
                             skill_vs_baseline = $12
                         WHERE id = $10 AND evaluated_at IS NULL
