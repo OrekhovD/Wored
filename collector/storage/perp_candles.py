@@ -297,6 +297,47 @@ async def load_candles(
     return [dict(r) for r in rows]
 
 
+async def list_contracts(pool: asyncpg.Pool, timeframe: str = "1min") -> list[str]:
+    """Contracts the collector actually persists, newest data first.
+
+    Lets callers resolve a forecast ``symbol`` (``btcusdt``) back onto a stored
+    ``contract_code`` without hard-coding dash placement.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT DISTINCT contract_code FROM trader_v1_perp_candles "
+            "WHERE venue = $1 AND timeframe = $2",
+            _VENUE, timeframe,
+        )
+    return [row["contract_code"] for row in rows]
+
+
+async def load_closes_at(
+    pool: asyncpg.Pool,
+    contract_code: str,
+    buckets: Sequence[datetime],
+) -> dict[datetime, Decimal]:
+    """Return ``open_time -> close`` for exactly the requested 1m buckets.
+
+    Matching is exact on purpose: a bucket that was never persisted yields no
+    entry, so a caller cannot silently substitute a neighbouring candle across
+    a gap in the series.
+    """
+    if not buckets:
+        return {}
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT open_time, close
+              FROM trader_v1_perp_candles
+             WHERE venue = $1 AND contract_code = $2 AND timeframe = '1min'
+               AND open_time = ANY($3::timestamptz[])
+            """,
+            _VENUE, contract_code, list(buckets),
+        )
+    return {row["open_time"]: row["close"] for row in rows}
+
+
 async def load_recent_candles(
     pool: asyncpg.Pool,
     contract_code: str,
