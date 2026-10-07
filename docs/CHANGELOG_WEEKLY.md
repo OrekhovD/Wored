@@ -1,5 +1,52 @@
 # Weekly Changelog
 
+## 2026-10-07 — Self-learning history recovered + isolated QA gate closed
+
+**Verification date**: 2026-10-07
+**Runtime baseline**: `e379f55` (the `$5::numeric` evaluation fix, pushed earlier today)
+
+### Changed behaviour (collector)
+- **Forecast evaluation is venue-correct and no longer capped by the HTX reach-back**:
+  `collector/predictions/evaluator.py` resolves the realised price from
+  `trader_v1_perp_candles` (the declared source-of-truth, same venue as the V3 base price)
+  through the new exact-bucket helper `load_closes_at()` plus `list_contracts()` in
+  `collector/storage/perp_candles.py`; the HTX **spot** call stays only as a fallback for
+  contracts the collector does not persist (`ethusdt`). Measured perp/spot basis removed:
+  **0.035 %** on rows `1210`/`1214`.
+- Recovered backlog: evaluated points went **379 → 747** of 1231; only **2** due points
+  remain pending inside local coverage. `metrics_version` deliberately stays `2`
+  (WebUI/prediction_engine filter on `= 2`). See `docs/KNOWN_LIMITS.md` 7d.
+
+### Known limits recorded
+- **7e** — 476 due points with targets before 2026-09-19 are permanently un-evaluable;
+  `evaluated_at` stays `NULL`, no invented numbers.
+- **7f** — `candle_gap_count` in `/healthz` is a *pre-heal* self-repair counter, not an
+  unresolved hole (gauge 6 in the same cycle as `6 rows re-persisted`, DB contiguity query
+  over the rolling 360-minute window returned 1 leading-edge bucket).
+
+### Tests / QA
+- Golden assertions recalculated for the 0.0005 taker fee (6b5e9cc) in
+  `tests/stabilization/test_contracts.py`, `test_execution_contracts.py`,
+  `test_simulation_v3.py`; the v1 path stays frozen at its original numbers.
+- Stale model contracts updated to the committed behaviour: `think` defaults to `true`
+  with `LOCAL_LLM_THINK=false` still honoured (81753b9), `done_reason=length` with content
+  is accepted (8a2d403), and the cloud-fallback assertion reads the model id from
+  `_build_runtime_candidates` instead of pinning the renamed `glm-5.1` (50ca344, 22425c3).
+- `tests/stabilization/test_reproducibility.py` no longer hardcodes a Windows absolute
+  payload path; it resolves from the repo root (`WORED_HERMES_PAYLOAD_DIR` overrides).
+- New `.github/workflows/stabilization.yml` runs the same isolated gate as the workstation.
+- `.dockerignore`: `**/.venv/`, TASOCHKI re-include narrowed to the two files the suite
+  actually reads, `.env.example`/`.env.wored.example` re-included. Build context went from
+  ~300 MB to ~1 MB.
+- **Gate result**: `docker compose -p wored-qa -f docker-compose.qa.yml run --rm --build checks`
+  → stabilization suite `Ran 227 tests ... OK` with **0 failures and 0 skips**, plus
+  `webui/tests`, `collector/tests/test_predictions.py`, the two chatbot suites, `ruff`
+  (E9,F821,F822,F823) and `mypy` all clean.
+
+### Docs
+- `AGENTS.md`: the legacy/caution zone files are verified **dead code** (zero importers
+  repo-wide, including dynamic `import_module` paths); no files were deleted.
+
 ## 2026-09-26 — Trading-day P0 (settlement_pending stall) + doc truth-sync
 
 **Verification date**: 2026-09-26

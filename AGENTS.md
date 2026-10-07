@@ -147,6 +147,13 @@ UI Acceptance: `python scripts/run_ui_acceptance.py --host 127.0.0.1 --port 1808
 
 Правило: не чинить и не развивать эти зоны как runtime-critical без явного запроса.
 
+Проверено 2026-10-07: у всех перечисленных файлов **ноль импортеров** по всему репозиторию
+(поиск по `loader` / `context.builder` / `ui.formatter|keyboards|onboarding` /
+`alerts.detector` и по динамическим `import_module`-паттернам; единственное совпадение —
+`from alembic import context` в `hypercube/alembic/env.py`, к этим зонам не относится).
+Статус: **DEAD CODE** — не являются частью runtime-графа, удалять только по отдельному
+явному запросу. Любое новое использование этих путей требует предварительного обсуждения.
+
 ## Security rules — DESTRUCTIVE GUARDRAILS
 
 ### 🚫 КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО (без исключений)
