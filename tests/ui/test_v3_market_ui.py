@@ -457,11 +457,12 @@ class TestV3PositionsContract:
 
     async def test_cache_buster_bumped_for_p5(self, auth_client):
         # The cache-busters were re-bumped in P1.3 (forming/gap indicators) and
-        # again for G3/G4 (stream fallback + URL-state).  This guards that both
-        # market assets are served versioned and current.
+        # again for G3/G4 (stream fallback + URL-state); the JS token moved once
+        # more on 2026-10-04.  This guards that both market assets are served
+        # versioned and current — keep in sync with webui/templates/workspace.html.
         resp = await auth_client.get("/workspace")
         assert "market-workspace.css?v=20260930-1" in resp.text
-        assert "market-workspace.js?v=20260930-2" in resp.text
+        assert "market-workspace.js?v=20261004-1" in resp.text
 
     async def test_p13_forming_and_gap_styles_present(self, client):
         """P1.3: the fresh indicators have dedicated CSS — an accent-bordered

@@ -20,7 +20,16 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 import pytest
-from playwright.async_api import TimeoutError as PWTimeout
+
+# Module-level playwright import used to abort collection of the whole `pytest
+# tests/` gate in the QA image, where the browser stack is intentionally absent
+# (tests/ui/conftest.py already skips per-fixture). importorskip turns the
+# missing dependency into a module skip instead of a hard error.
+_playwright_async = pytest.importorskip(
+    "playwright.async_api",
+    reason="browser evidence requires playwright (host-only, not in the QA image)",
+)
+PWTimeout = _playwright_async.TimeoutError
 
 pytestmark = pytest.mark.asyncio
 
@@ -103,7 +112,23 @@ async def test_chart_paints_candles_MC04(browser, base):
             "MC-04 FAIL: no chart canvas painted. "
             f"fallback='{reason}'. pageerrors={errors[:3]}"
         )
-    # status line reports a non-zero candle count from the validated source
+    # status line reports a non-zero candle count from the validated source.
+    # The canvas is created when the chart library initialises, i.e. *before*
+    # the history request resolves and setStatusLine() writes the count — so
+    # reading the line once right after the canvas appeared raced against the
+    # XHR and failed on wall-clock timing, not on behaviour.  Wait for the
+    # count the same bounded way every other async V3 assertion does.
+    try:
+        await browser.wait_for_function(
+            """() => {
+                const el = document.querySelector('[data-role="status"]');
+                return !!el && /\\b([1-9]\\d*)\\s*свечей/.test(el.textContent || '');
+            }""",
+            timeout=8000,
+        )
+    except PWTimeout:
+        status = await browser.text_content('[data-role="status"]') or ""
+        pytest.fail(f"MC-04 FAIL: status line never reported candles (status={status!r}) errors={errors[:3]}")
     status = await browser.text_content('[data-role="status"]') or ""
     assert "свечей" in status
     ART_DIR.mkdir(parents=True, exist_ok=True)

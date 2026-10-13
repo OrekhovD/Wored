@@ -257,12 +257,18 @@ class TestSSERouteGuards:
     def test_stream_route_is_registered(self) -> None:
         # Route-level streaming assertions are fragile with TestClient (needs
         # to close a live connection mid-iteration); instead, we just prove
-        # the route exists and its return type is StreamingResponse.  The
-        # generator itself is covered by the tests above.
+        # the route exists and is wired to the expected handler.
+        #
+        # FastAPI >= 0.141 no longer flattens include_router() onto app.routes as
+        # APIRoute objects: the whole router arrives as a single _IncludedRouter
+        # that exposes no .routes, so an isinstance(r, APIRoute) scan matched
+        # nothing and the assertion failed against an empty dict while the route
+        # itself worked.  The OpenAPI schema is the version-stable public view of
+        # registration, and its operationId is generated from the endpoint name.
         from market_workspace import v3_market_stream
-        from fastapi.routing import APIRoute
 
         app = self._app(ScriptedRedis([]))
-        paths = {r.path: r for r in app.routes if isinstance(r, APIRoute)}
-        assert "/api/v3/market/{instrument_key}/stream" in paths
-        assert paths["/api/v3/market/{instrument_key}/stream"].endpoint is v3_market_stream
+        entry = app.openapi()["paths"].get("/api/v3/market/{instrument_key}/stream")
+        assert entry is not None, "stream route must be registered"
+        assert "get" in entry
+        assert entry["get"]["operationId"].startswith(f"{v3_market_stream.__name__}_")
