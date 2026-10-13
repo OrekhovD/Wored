@@ -97,6 +97,25 @@ async def _call_bonsai_native(
     return content
 
 
+def strip_code_fence(raw: str) -> str:
+    """Drop the ```` ``` ```` wrapper chat models put around JSON.
+
+    Every machine-readable answer here goes through the same two-line peel, and
+    each call site used to carry its own copy of it.  One helper means a model
+    that fences inline (```json on its own line) is handled in exactly one place,
+    including by the proposal agent that reads answers through :func:`call_raw`.
+    """
+    text = (raw or "").strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
 def format_badge(tier: str, model_id: str, elapsed: float) -> str:
     badges = {
         "worker": "🤖 Р",
@@ -243,6 +262,69 @@ async def _call_with_fallback(
     return f"❌ Все AI-модули сейчас недоступны.{error_detail} Попробуйте позже."
 
 
+async def call_raw(
+    tier_key: str,
+    system_prompt: str,
+    user_content: str,
+    *,
+    max_tokens: int | None = None,
+    temperature: float = 0.2,
+    think: bool | None = None,
+) -> str:
+    """One model, one attempt, the raw assistant text — no badge, no chain.
+
+    :func:`_call_with_fallback` answers a *chat message*: it walks the chain
+    itself and always returns printable HTML, so a structured caller cannot use
+    it — "❌ Все AI-модули сейчас недоступны" would come back as if it were the
+    model's JSON.  This helper makes a single attempt through the same transport
+    as every other call (client cache, resilience handler, local Bonsai native
+    API) and lets the error propagate, so the caller decides what a dead tier
+    means for its own feature (TB-03: one transport, two shapes of answer).
+    """
+    from ai.models import MODELS
+
+    if tier_key not in MODELS:
+        raise KeyError(f"unknown AI model key '{tier_key}'")
+    cfg = MODELS[tier_key]
+    client = get_client(tier_key)
+    if client is None:
+        raise RuntimeError(f"AI '{tier_key}' has no client: {cfg.api_key_env} is not set")
+
+    handler = get_resilience_handler(tier_key)
+    if not await handler.circuit_breaker.can_execute():
+        raise CircuitBreakerError(f"circuit OPEN for '{tier_key}'")
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+    budget = int(max_tokens or cfg.max_tokens)
+
+    async def _do_call():
+        if _is_bonsai_endpoint(cfg):
+            if think is None:
+                think_mode = os.getenv("LOCAL_LLM_THINK", "true").lower() in ("1", "true", "yes", "on")
+            else:
+                think_mode = bool(think)
+            content = await _call_bonsai_native(cfg, messages, budget, temperature, think=think_mode)
+            # shaped like an OpenAI response so the read below is one path
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+            )
+        return await client.chat.completions.create(
+            model=cfg.model_id,
+            messages=messages,
+            max_tokens=budget,
+            temperature=temperature,
+        )
+
+    started = time.monotonic()
+    response = await handler.execute(_do_call)
+    text = response.choices[0].message.content
+    log.info("AI raw '%s' (%s) answered in %.2fs", tier_key, cfg.model_id, time.monotonic() - started)
+    return text if isinstance(text, str) else (text or "")
+
+
 async def _route_trade_plan(message: str, intent: dict, context: list[dict] | None = None) -> str:
     """Two-tier trade plan: flash normalizes request → pro generates trade plan."""
     from ai.models import MODELS, WORKER_MODEL_CHAIN, PREMIUM_MODEL_CHAIN
@@ -273,14 +355,7 @@ async def _route_trade_plan(message: str, intent: dict, context: list[dict] | No
                 return await client.chat.completions.create(**request_kwargs)
 
             response = await _normalize()
-            raw = (response.choices[0].message.content or "").strip()
-            if raw.startswith("```"):
-                lines = raw.splitlines()
-                if lines and lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith("```"):
-                    lines = lines[:-1]
-                raw = "\n".join(lines).strip()
+            raw = strip_code_fence(response.choices[0].message.content or "")
             plan_request = json.loads(raw)
             log.info("Trade plan normalized by %s: %s", cfg.model_id, plan_request)
             break
@@ -589,14 +664,7 @@ async def _route_trade_sim(message: str, intent: dict, context: list[dict] | Non
                 return await client.chat.completions.create(**request_kwargs)
 
             response = await _parse_sim()
-            raw = (response.choices[0].message.content or '').strip()
-            if raw.startswith('```'):
-                lines = raw.splitlines()
-                if lines and lines[0].startswith('```'):
-                    lines = lines[1:]
-                if lines and lines[-1].startswith('```'):
-                    lines = lines[:-1]
-                raw = '\n'.join(lines).strip()
+            raw = strip_code_fence(response.choices[0].message.content or "")
             try:
                 sim_params = json.loads(raw)
             except (json.JSONDecodeError, ValueError):

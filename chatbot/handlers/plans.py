@@ -1,5 +1,11 @@
 """
-Plans handler — /plans command shows plan revision history, accuracy, and diffs.
+Plans handler — plan revision history of the LEGACY daily pipeline.
+
+TB-03 (ТЗ Telegram Bot V1 §2): ``/plans``, ``/diff`` and ``/accuracy`` are not
+bound here anymore.  They are answered by ``handlers/deprecated.py``, which calls
+the console screen for the same user intent, so one command can never render two
+different data sets.  The functions below stay as legacy read helpers over
+``session_plans`` and are no longer reachable from the command surface.
 """
 from __future__ import annotations
 
@@ -7,7 +13,6 @@ import json
 import logging
 
 from aiogram import Router
-from aiogram.filters import Command
 from aiogram.types import Message
 
 from services.session_manager import get_active_session
@@ -16,7 +21,6 @@ router = Router()
 log = logging.getLogger(__name__)
 
 
-@router.message(Command("plans"))
 async def cmd_plans(message: Message):
     """Show plan revision history with accuracy summary."""
     user_id = message.from_user.id
@@ -106,7 +110,6 @@ async def cmd_plans(message: Message):
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
-@router.message(Command("diff"))
 async def cmd_diff(message: Message):
     """Compare two plan versions: /diff 1 2"""
     user_id = message.from_user.id
@@ -156,7 +159,6 @@ async def cmd_diff(message: Message):
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
-@router.message(Command("accuracy"))
 async def cmd_accuracy(message: Message):
     """Detailed accuracy report."""
     user_id = message.from_user.id

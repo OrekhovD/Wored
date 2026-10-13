@@ -16,7 +16,9 @@ from typing import Optional
 
 from aiogram import Router, F
 from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.filters import Command
+# NOTE: /session and /plan are not bound in this router anymore (TB-03). The
+# console owns the commands (handlers/now.py) and handlers/deprecated.py
+# redirects the old names, so the Command filter is no longer needed here.
 
 log = logging.getLogger(__name__)
 router = Router(name="pipeline")
@@ -79,6 +81,16 @@ ERR_MARKET_STALE = "⚠️ Данные рынка временно недост
 
 ERR_BACKEND = "⚠️ Временная ошибка сервиса. Попробуй позже."
 
+ERR_DOMAIN_UNAVAILABLE = (
+    "🔴 <b>BACKEND_UNAVAILABLE</b>\n"
+    "Сервис paper-сессий (paper_trading) не ответил — сессия НЕ запущена.\n"
+    "Старая дневная сессия (trading_sessions) больше не используется как запасной "
+    "вариант: один запуск = одна доменная команда, иначе у одного владельца "
+    "появятся два разных баланса.\n"
+    "Повтори попытку через минуту; если повторяется — проверь webui/postgres и "
+    "PAPER_ENGINE_ENABLED."
+)
+
 
 # ── Router handlers (ТЗ §10.2 — regex-first) ──
 
@@ -119,19 +131,12 @@ def _risk_mode_kb() -> InlineKeyboardMarkup:
     ])
 
 
-@router.message(Command("session"))
-async def cmd_session(message: Message):
-    """ТЗ §6.1 — /session = inline-меню управления сессией."""
-    text, _ = await _build_status_response(message.from_user.id)
-    await message.answer(text, reply_markup=_session_control_kb(), parse_mode="HTML")
-
-
-@router.message(Command("plan"))
-async def cmd_plan(message: Message):
-    """Показать активный план сессии."""
-    text = await _handle_plan(message.from_user.id)
-    kb = _no_session_kb() if text == ERR_NO_SESSION else None
-    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+# /session and /plan are no longer bound here (ТЗ Telegram Bot V1 §2, P2):
+# the console router (``handlers/now.py``) and the redirect router own those
+# command names, and one command name must not have two implementations. The
+# same screens remain reachable through the text phrases below and the
+# ``pipeline_status`` / ``pipeline_plan`` callbacks, which call
+# ``_build_status_response`` and ``_handle_plan`` directly.
 
 
 @router.message(F.text.regexp(r"(?i)(старт сессии|начать сессию|daily session|запусти сессию|старт торговли|запусти дневную)"))
@@ -421,21 +426,48 @@ def classify_pipeline_intent(message: str) -> dict | None:
 async def _handle_start_safe(user_id: int, intent: dict) -> tuple[str, InlineKeyboardMarkup | None]:
     """ТЗ §8.5 — старт сессии, безопасный ответ. §5 — trade profile support.
 
-    T06: delegates to paper_trading.adapter when available, falls back to legacy.
+    Q-01 (curator decision, 2026-10-08) + ТЗ Telegram Bot V1 §0: the paper_trading
+    domain is the only start path.  The former silent fallthrough to
+    ``services.session_manager`` — which wrote ``trading_sessions``/``session_plans``
+    whenever the adapter import failed — is removed: a failed start now returns an
+    explicit ``BACKEND_UNAVAILABLE`` and writes nothing anywhere.
     """
     budget = intent.get("budget", 100.0)
     risk = intent.get("risk_mode", "balanced")
     trade_profile = intent.get("trade_profile")
 
-    # ── Try paper_trading domain service (T06) ──
+    # ── paper_trading domain service (the only start path) ──
     try:
         from paper_trading.adapter import start_day as pt_start_day, owner_id_from_telegram, get_current_state
 
         owner_id = owner_id_from_telegram(user_id)
         existing = await get_current_state(owner_id)
         if existing.get("day"):
-            # Idempotent — return current session
-            text, _ = await _build_status_response(user_id)
+            # Idempotent — the running day is reported from the domain state.
+            # The legacy trading_sessions renderer is deliberately not used here:
+            # it answers "нет сессии" when there is no legacy row, i.e. it would
+            # contradict a paper_v2 day that is actually running (Q-01).
+            day = existing.get("day") or {}
+            accounts = existing.get("accounts") or []
+            from application import presenters as _ui
+            from integrations.wored_api import enum_value
+
+            # the domain hands back a raw DayState member; str() would print
+            # "DayState.running" where the dashboard says "running"
+            day_state = str(enum_value(day.get("state")) or "unknown").upper()
+
+            account_lines = "\n".join(
+                f"Счёт {a.get('kind')}: {_ui.money(a.get('cash'), a.get('currency') or 'USDT')} · "
+                f"открытых позиций {int(a.get('open_positions') or 0)}"
+                for a in accounts
+            )
+            text = (
+                f"🎯 <b>Торговый день уже идёт</b>\n"
+                f"ID: <code>{str(day.get('id') or '')[:8]}</code>\n"
+                f"Состояние: {_ui.esc(day_state)}\n"
+                f"{account_lines or 'Счетов пока нет'}\n"
+                f"<i>Новая попытка старта не создаёт второй день.</i>"
+            )
             return text, _session_nav_kb()
 
         result = await pt_start_day(
@@ -461,70 +493,14 @@ async def _handle_start_safe(user_id: int, intent: dict) -> tuple[str, InlineKey
                 f"Авто: наблюдает рынок, ждёт сигнал",
                 _session_nav_kb()
             )
-        # If paper_trading failed, fall through to legacy
-        log.info("paper_trading start_day returned %s, falling back to legacy", result.get("error"))
-    except Exception as exc:
-        log.info("paper_trading adapter unavailable, using legacy: %s", exc)
-
-    # ── Legacy session manager (fallback) ──
-    try:
-        from services.session_manager import create_session, generate_initial_plan, get_active_session
-
-        existing = await get_active_session(user_id)
-        if existing:
-            text, _ = await _build_status_response(user_id)
-            return text, _session_nav_kb()
-
-        result = await create_session(
-            user_id=user_id, budget_usdt=budget, duration_hours=8,
-            risk_mode=risk, trade_profile=trade_profile,
+        log.warning(
+            "paper_trading start_day refused: %s — no legacy fallback will run",
+            result.get("error"),
         )
-
-        if "error" in result:
-            return ERR_BACKEND, None
-
-        plan = await generate_initial_plan(result["session_id"])
-        if "error" in plan:
-            profile_str = (
-                f"Направление: {result.get('trade_direction', 'auto')}\n"
-                f"Горизонт: {result.get('trade_horizon', 'fast')}\n"
-            ) if trade_profile else ""
-            return (
-                f"🚀 <b>Сессия запущена</b>\n"
-                f"ID: <code>{result['session_id'][:8]}</code>\n"
-                f"Статус: ARMED\n"
-                f"Режим риска: {risk}\n"
-                f"Бюджет: {budget:.0f} USDT\n"
-                f"{profile_str}"
-                f"Горизонт: 8 часов\n"
-                f"Инструмент: BTCUSDT\n\n"
-                f"⚠️ План генерируется…",
-                _session_nav_kb()
-            )
-
-        profile_lines = ""
-        if trade_profile:
-            tp = trade_profile
-            profile_lines = (
-                f"Направление: {tp.get('trade_direction', 'auto')}\n"
-                f"Горизонт: {tp.get('trade_horizon', 'fast')}\n"
-                f"Target profit: {tp.get('target_net_profit_usdt', 1.5)} USDT\n"
-            )
-        text = (
-            f"🚀 <b>Сессия запущена</b>\n"
-            f"ID: <code>{result['session_id'][:8]}</code>\n"
-            f"Статус: ARMED\n"
-            f"Режим риска: {risk}\n"
-            f"Бюджет: {budget:.0f} USDT\n"
-            f"{profile_lines}"
-            f"Горизонт: 8 часов\n"
-            f"Инструмент: BTCUSDT\n"
-            f"План: v{plan.get('version', 1)} · {plan.get('market_regime', '—')}"
-        )
-        return text, _session_nav_kb()
+        return ERR_DOMAIN_UNAVAILABLE, None
     except Exception as exc:
-        log.error("Pipeline start error: %s", exc)
-        return ERR_BACKEND, None
+        log.error("paper_trading adapter unavailable: %s", exc)
+        return ERR_DOMAIN_UNAVAILABLE, None
 
 
 async def _handle_stop_safe(user_id: int) -> str:
