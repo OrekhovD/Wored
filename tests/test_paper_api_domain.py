@@ -6,7 +6,10 @@ silently falls back to writing the prototype ledger beside the real one.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -14,7 +17,41 @@ from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 
 import webui.paper_api as paper_api
+from paper_trading.contracts import Account, AccountKind, DayState, TradingDay
 from webui.paper_api import router
+
+DAY_ID = uuid4()
+MANUAL_ACCOUNT_ID = uuid4()
+
+SETTINGS_SNAPSHOT = {
+    "max_risk_per_order_usdt": "10",
+    "max_daily_loss_usdt": "50",
+    "max_leverage": "10",
+    "max_open_risk_usdt": "20",
+    "min_net_rr": "1.0",
+}
+
+
+def _ticket_inputs(*, balance: Decimal = Decimal("1000")) -> dict[str, Any]:
+    """То, что отдаёт ``paper_trading.adapter.ticket_inputs`` на живом дне."""
+    return {
+        "ok": True,
+        "day": TradingDay(
+            day_id=DAY_ID,
+            owner_id=uuid4(),
+            state=DayState.running,
+            start_utc=datetime.now(timezone.utc),
+            settings_snapshot=dict(SETTINGS_SNAPSHOT),
+        ),
+        "account": Account(
+            account_id=MANUAL_ACCOUNT_ID, owner_id=uuid4(), kind=AccountKind.manual
+        ),
+        "available_margin": balance,
+        "open_positions": [],
+        "realized_net": Decimal("0"),
+        "day_id": str(DAY_ID),
+        "account_id": str(MANUAL_ACCOUNT_ID),
+    }
 
 
 @pytest.fixture
@@ -147,18 +184,8 @@ async def test_automation_domain_failure_is_fail_closed(
 async def test_order_placement_routes_to_domain(
     domain_app: FastAPI, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def fake_state(owner_id: str) -> dict[str, Any]:
-        return {
-            "ok": True,
-            "day": {"id": "d1", "state": "running",
-                    "start_at": "2026-09-26T03:00:00+00:00",
-                    "end_at": "2026-09-26T14:00:00+00:00"},
-            "accounts": [{
-                "id": "acc-manual", "kind": "manual", "currency": "USDT", "cash": "1000",
-                "open_positions": 0, "positions": [],
-            }],
-            "next_action": "trade",
-        }
+    async def fake_inputs(owner_id: str, account_id: str) -> dict[str, Any]:
+        return _ticket_inputs()
 
     captured: dict[str, Any] = {}
 
@@ -166,7 +193,7 @@ async def test_order_placement_routes_to_domain(
         captured.update(kwargs)
         return {"ok": True, "command_id": "cmd-1"}
 
-    monkeypatch.setattr(paper_api, "_pt_get_state", fake_state)
+    monkeypatch.setattr(paper_api, "_pt_ticket_inputs", fake_inputs)
     monkeypatch.setattr(paper_api, "_pt_submit_order", fake_submit)
     resp = await _post(domain_app, "/api/paper/accounts/acc-manual/orders", {
         "side": "buy", "order_type": "market", "risk": "10",
@@ -176,4 +203,78 @@ async def test_order_placement_routes_to_domain(
     assert resp.json()["status"] == "accepted"
     assert captured["account_id"] == "acc-manual"
     assert captured["side"] == "buy"
-    assert captured["qty"]  # risk was converted to a quantity via the preview math
+    assert captured["qty"]  # риск переведён в объём доменным тикетом
+    # Заявка привязывается к тому дню, под который посчитан тикет.
+    assert captured["expected_day_id"] == str(DAY_ID)
+    # Объём — кратный шагу инструмента (contract_size 0.001), а не единицы BTC:
+    # риск 10 USDT при стопе 63750 от входа 64250 = 20 контрактов.
+    assert Decimal(captured["qty"]) == Decimal("20")
+
+
+async def test_preview_uses_the_domain_ticket(
+    domain_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deal-ticket WebUI показывает доменный тикет, а не свою формулу."""
+    async def fake_inputs(owner_id: str, account_id: str) -> dict[str, Any]:
+        return _ticket_inputs()
+
+    monkeypatch.setattr(paper_api, "_pt_ticket_inputs", fake_inputs)
+    resp = await _post(domain_app, "/api/paper/accounts/acc-manual/orders/preview", {
+        "side": "buy", "order_type": "market", "risk": "10",
+        "stop_price": "63750", "take_profit": "65250", "instrument": "btcusdt",
+    })
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["allowed"] is True
+    assert payload["quantity"] == "20"
+    # Упрощённая UI-формула ликвидации больше не может попасть в ответ.
+    assert payload["liquidation_quality"] in {
+        "isolated_default_maintenance", "isolated_tier_maintenance",
+    }
+    # Демо-снимок не несёт risk_tier: тикет честно помечает, что ставка
+    # поддержки взята из доменного дефолта, а не из данных биржи.
+    assert payload["settings_notes"] == ["risk_tier_absent"]
+    assert "net_rr" in payload and "instrument" in payload
+
+
+async def test_preview_denies_auto_account_with_403(
+    domain_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_inputs(owner_id: str, account_id: str) -> dict[str, Any]:
+        return {"ok": False, "error": "no_manual_account"}
+
+    monkeypatch.setattr(paper_api, "_pt_ticket_inputs", fake_inputs)
+    resp = await _post(domain_app, "/api/paper/accounts/acc-auto/orders/preview", {
+        "side": "buy", "risk": "10", "stop_price": "63750", "instrument": "btcusdt",
+    })
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Ручная заявка доступна только на ручном счёте"
+
+
+async def test_preview_maps_domain_state_failure_to_409(
+    domain_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_inputs(owner_id: str, account_id: str) -> dict[str, Any]:
+        return {"ok": False, "error": "day_not_active"}
+
+    monkeypatch.setattr(paper_api, "_pt_ticket_inputs", fake_inputs)
+    resp = await _post(domain_app, "/api/paper/accounts/acc-manual/orders/preview", {
+        "side": "buy", "risk": "10", "stop_price": "63750", "instrument": "btcusdt",
+    })
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Торговый день не активен"
+
+
+async def test_preview_surfaces_risk_gate_reasons(
+    domain_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Отказ доменного гейта доходит до UI с кодами причин, а не как 500."""
+    async def fake_inputs(owner_id: str, account_id: str) -> dict[str, Any]:
+        return _ticket_inputs(balance=Decimal("1"))
+
+    monkeypatch.setattr(paper_api, "_pt_ticket_inputs", fake_inputs)
+    resp = await _post(domain_app, "/api/paper/accounts/acc-manual/orders/preview", {
+        "side": "buy", "risk": "10", "stop_price": "63750", "instrument": "btcusdt",
+    })
+    assert resp.status_code == 422
+    assert resp.json()["detail"] == "Недостаточно доступной маржи"

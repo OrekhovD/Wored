@@ -45,6 +45,17 @@ try:
         pause_auto as _pt_pause_auto,
         resume_auto as _pt_resume_auto,
         owner_id_from_webui as _pt_owner_id,
+        ticket_inputs as _pt_ticket_inputs,
+    )
+    # P4: единственный тикет ручной сделки живёт в домене. WebUI остаётся
+    # presenter'ом: он отдаёт прежнюю форму ответа, но не считает ни объём,
+    # ни ликвидацию, ни veto.
+    from paper_trading.market import snapshot_from_dict as _domain_snapshot_from_dict
+    from paper_trading.ticket import (
+        TicketDenied,
+        TicketRequest,
+        build_ticket,
+        denial_text,
     )
     _pt_available = True
 except ImportError:
@@ -325,12 +336,21 @@ def _require_active(state: Dict[str, Any]) -> None:
         raise HTTPException(status_code=409, detail="Торговый день не активен")
 
 
-def _preview(
+def _preview_prototype(
     state: Dict[str, Any],
     account_id: str,
     body: Dict[str, Any],
     market: PerpetualSnapshot,
 ) -> Dict[str, Any]:
+    """Тикет прототипа — прежняя упрощённая математика, без доменного гейта.
+
+    Ветка существует только когда Postgres вообще недоступен: прототипный
+    журнал хранит позиции в тех же единицах, что считает эта функция
+    (``quantity = risk / |entry - stop|``, ликвидация ``entry * (1 ∓ 1/lev)``),
+    и перенос её на доменный объём означал бы переписку всего прототипа,
+    что вне P4. Реальные деньги так не считаются: доменный путь —
+    :func:`_preview`, и он же единственный для Telegram.
+    """
     _require_active(state)
     account = _account(state, account_id)
     if account["kind"] != "manual":
@@ -396,6 +416,84 @@ def _preview(
         "leverage": leverage,
         "market": market.public_dict(),
     }
+
+
+#: Коды отказа тикета → HTTP-статус. Порядок и коды прежние, чтобы
+#: контракт WebUI (и его JS) не изменились.
+_TICKET_HTTP_STATUS = {
+    "day_not_active": 409,
+    "no_active_day": 409,
+    "not_manual_account": 403,
+    "no_manual_account": 403,
+    "account_not_found": 404,
+    "account_not_owned": 404,
+    "service_unavailable": 502,
+    "domain_state_unavailable": 502,
+}
+
+
+def _ticket_http_error(code: str, message: str | None = None) -> HTTPException:
+    """Отказ тикета в HTTP-форму прежнего ``_preview``.
+
+    Текст берётся из доменной таблицы :data:`paper_trading.ticket.DENIAL_TEXTS`
+    (она же у Telegram), поэтому один код не может означать разные вещи в двух
+    консолях; здесь остаётся только отображение кода в статус.
+    """
+    status = _TICKET_HTTP_STATUS.get(str(code), 422)
+    detail = message or denial_text(code)
+    return HTTPException(status_code=status, detail=detail)
+
+
+def _domain_market_snapshot(market: PerpetualSnapshot):
+    """WebUI-снимок → доменный :class:`paper_trading.market.PerpetualSnapshot`.
+
+    Классы с одинаковым именем в ``webui.paper_market`` и в домене — две
+    разные типы; гейт принимает только доменный, иначе проверка свежести
+    молча не работает. Поля совпадают, поэтому мост идёт через публичный
+    словарь снимка.
+    """
+    try:
+        return _domain_snapshot_from_dict(market.public_dict())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409, detail=f"Снимок рынка непригоден для расчёта: {exc}"
+        ) from exc
+
+
+async def _domain_ticket(
+    request: Request, account_id: str, body: Dict[str, Any], market: PerpetualSnapshot
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Построить доменный тикет: (ответ UI, входы дня).
+
+    Входы берутся из домена (``ticket_inputs``), а не из payload клиента:
+    лимиты — settings_snapshot дня, маржа — журнал проводок, позиции и
+    реализованный результат — БД.
+    """
+    owner_id = _owner_from_request(request)
+    inputs = await _pt_ticket_inputs(owner_id=owner_id, account_id=account_id)
+    if not inputs.get("ok"):
+        raise _ticket_http_error(inputs.get("error"))
+    try:
+        ticket = build_ticket(
+            day=inputs["day"],
+            account=inputs["account"],
+            request=TicketRequest.from_body(body),
+            snapshot=_domain_market_snapshot(market),
+            available_margin=inputs["available_margin"],
+            open_positions=inputs["open_positions"],
+            realized_net=inputs["realized_net"],
+        )
+    except TicketDenied as exc:
+        raise _ticket_http_error(exc.code, exc.message) from exc
+    return ticket.as_ui_dict(), inputs
+
+
+async def _preview(
+    request: Request, account_id: str, body: Dict[str, Any], market: PerpetualSnapshot
+) -> Dict[str, Any]:
+    """Presenter ручной сделки: форма ответа прежняя, математика — доменная."""
+    payload, _inputs = await _domain_ticket(request, account_id, body, market)
+    return payload
 
 
 @router.get("/trading-day/current")
@@ -629,28 +727,9 @@ async def preview_order(request: Request, account_id: str,
     instrument = str(body.get("instrument", "btcusdt"))
     market = await resolve_market_snapshot(request, instrument)
     if _use_pt_domain(request):
-        state = await _domain_ui_state_or_block(request)
-    else:
-        state = await _current_payload(request)
-    return JSONResponse(_preview(state, account_id, body, market))
-
-
-async def _domain_ui_state_or_block(request: Request) -> Dict[str, Any]:
-    """Authoritative domain state rendered in the UI schema, fail-closed.
-
-    Used by the deal-ticket paths so preview and placement evaluate the real
-    balances/positions rather than the prototype ledger.
-    """
-    owner_id = _owner_from_request(request)
-    state = await _pt_get_state(owner_id)
-    if not state.get("ok"):
-        raise HTTPException(
-            status_code=502,
-            detail=f"Источник данных дня недоступен: {state.get('error') or 'domain_state_unavailable'}",
-        )
-    if not state.get("day"):
-        raise HTTPException(status_code=409, detail="Торговый день не активен")
-    return await _ui_payload_from_domain(request, state)
+        return JSONResponse(await _preview(request, account_id, body, market))
+    state = await _current_payload(request)
+    return JSONResponse(_preview_prototype(state, account_id, body, market))
 
 
 @router.post("/paper/accounts/{account_id}/orders")
@@ -663,9 +742,8 @@ async def place_order(request: Request, account_id: str,
     if _use_pt_domain(request):
         instrument = str(body.get("instrument", "btcusdt"))
         try:
-            state = await _domain_ui_state_or_block(request)
             market = await resolve_market_snapshot(request, instrument)
-            preview = _preview(state, account_id, body, market)
+            preview, inputs = await _domain_ticket(request, account_id, body, market)
         except HTTPException as exc:
             return JSONResponse({"ok": False, "detail": exc.detail}, status_code=exc.status_code)
         try:
@@ -679,6 +757,9 @@ async def place_order(request: Request, account_id: str,
                 stop_loss=body.get("stop_price"),
                 take_profit=body.get("take_profit"),
                 idempotency_key=str(body.get("idempotency_key") or uuid4()),
+                # День, под который посчитан тикет: если между превью и
+                # отправкой он сменился, заявка не должна уйти за прежний день.
+                expected_day_id=inputs.get("day_id"),
             )
             if not result.get("ok"):
                 raise RuntimeError(str(result.get("error") or "domain_order_failed"))
@@ -705,7 +786,7 @@ async def place_order(request: Request, account_id: str,
     state = row.state or _empty_payload(_settings(row))
     instrument = str(body.get("instrument", "btcusdt"))
     market = await resolve_market_snapshot(request, instrument)
-    preview = _preview(state, account_id, body, market)
+    preview = _preview_prototype(state, account_id, body, market)
     if preview["order_type"] == "limit":
         limit_price = _decimal(preview["entry_price"], "Цена Limit")
         marketable = (
@@ -958,7 +1039,9 @@ async def get_command(request: Request, command_id: str) -> JSONResponse:
     # "completed" for an unknown/failed command — that would fake settlement.
     if _pt_available and getattr(request.app.state, "pg_pool", None) is not None:
         try:
-            result = await _pt_cmd_status(command_id)
+            # Читаем только команды своего владельца: чужой command_id отвечает
+            # то же «не найдено», что и несуществующий.
+            result = await _pt_cmd_status(command_id, owner_id=_owner_from_request(request))
         except Exception as exc:
             log.warning("paper/commands/%s: domain status lookup failed: %s", command_id, exc)
             return JSONResponse(

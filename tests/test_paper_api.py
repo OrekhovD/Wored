@@ -103,7 +103,10 @@ async def test_manual_fill_close_and_report_use_actual_demo_state(client: httpx.
     assert finished.status_code == 202
     report = (await client.get("/api/trading-day/current")).json()
     assert report["day"]["state"] == "reconciled"
-    assert report["report"]["manual"]["realized_net"] == "-1.542"
+    # Demo price is unchanged between open and close, so gross is 0 and the whole
+    # realized_net is fee: qty = risk/(entry-stop) = 10/500 = 0.02 -> notional
+    # 1285 per side, 2570 total -> -(0.0005 * 2570) at trading_math TAKER_FEE_RATE.
+    assert report["report"]["manual"]["realized_net"] == "-1.285"
     assert report["report"]["manual"]["trades_count"] == 1
     assert report["report"]["auto"]["realized_net"] == "0"
     assert report["report"]["closed_trades"][0]["exit_reason"] == "manual_close"

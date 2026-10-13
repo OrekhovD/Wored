@@ -284,6 +284,27 @@ class PaperRepository:
             )
         return Decimal(row["balance"]) if row else Decimal(0)
 
+    async def get_day_realized_net(self, account_id: UUID, day_id: UUID) -> Decimal:
+        """Signed realized net result of the closed positions of one account-day.
+
+        This is the value the daily-drawdown gate expects: a *signed* PnL
+        (losses negative), net of fees.  ``positions.realized_net_pnl`` is
+        written that way by ``execution.close_position`` (gross minus exit fee
+        minus allocated entry fee) and is the same figure the day report
+        shows, so the ticket gate and the report cannot disagree.
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT COALESCE(SUM(realized_net_pnl), 0) AS realized_net
+                FROM paper_v2_positions
+                WHERE account_id = $1 AND day_id = $2 AND status = 'closed'
+                """,
+                str(account_id),
+                str(day_id),
+            )
+        return Decimal(row["realized_net"]) if row else Decimal(0)
+
     # ------------------------------------------------------------------
     # Trading day
     # ------------------------------------------------------------------
@@ -565,6 +586,27 @@ class PaperRepository:
             row = await conn.fetchrow(
                 "SELECT * FROM paper_v2_commands WHERE command_id = $1",
                 str(command_id),
+            )
+        return _row_to_command(row) if row else None
+
+    async def find_command_by_idempotency_key(
+        self, owner_id: UUID, idempotency_key: str
+    ) -> Command | None:
+        """Return the command already stored under this idempotency key.
+
+        ``submit_command`` signals a key reuse with a different payload by
+        raising ``IdempotencyConflict``, which carries no identifier; the
+        caller still has to tell the operator *which* command owns the key
+        (MC-15: a conflicting retry is reported, never silently re-issued).
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT * FROM paper_v2_commands
+                WHERE owner_id = $1 AND idempotency_key = $2
+                """,
+                str(owner_id),
+                idempotency_key,
             )
         return _row_to_command(row) if row else None
 

@@ -109,6 +109,19 @@ async def start_day(
     return await service.start_day(req)
 
 
+async def ticket_inputs(owner_id: str, account_id: str) -> dict[str, Any]:
+    """Load the authoritative inputs a manual deal ticket is built from.
+
+    Returns the domain ``day``/``account`` objects plus ledger margin, open
+    positions and the signed realized result of the day. The caller supplies
+    the market snapshot and hands everything to ``paper_trading.ticket``.
+    """
+    service = await get_service()
+    if service is None:
+        return {"ok": False, "error": "service_unavailable"}
+    return await service.load_ticket_inputs(owner_id=owner_id, account_id=account_id)
+
+
 async def submit_manual_order(
     owner_id: str,
     account_id: str,
@@ -118,6 +131,7 @@ async def submit_manual_order(
     stop_loss: str | None = None,
     take_profit: str | None = None,
     idempotency_key: str | None = None,
+    expected_day_id: str | None = None,
 ) -> dict[str, Any]:
     """Submit a manual order."""
     from decimal import Decimal
@@ -134,6 +148,7 @@ async def submit_manual_order(
         stop_loss=Decimal(stop_loss) if stop_loss else None,
         take_profit=Decimal(take_profit) if take_profit else None,
         idempotency_key=idempotency_key,
+        expected_day_id=expected_day_id,
     )
 
 
@@ -181,12 +196,16 @@ async def finish_day(owner_id: str) -> dict[str, Any]:
     return await service.finish_day(owner_id)
 
 
-async def get_command_status(command_id: str) -> dict[str, Any]:
-    """Get command status."""
+async def get_command_status(command_id: str, owner_id: str | None = None) -> dict[str, Any]:
+    """Get command status.
+
+    ``owner_id`` scopes the read to the caller's own commands; consoles that
+    show a status to a human must pass it (see the service docstring).
+    """
     service = await get_service()
     if service is None:
         return {"ok": False, "error": "service_unavailable"}
-    return await service.get_command_status(command_id)
+    return await service.get_command_status(command_id, owner_id=owner_id)
 
 
 async def list_day_reports(owner_id: str, limit: int = 30) -> list[dict[str, Any]]:

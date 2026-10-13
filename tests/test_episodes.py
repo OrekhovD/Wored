@@ -46,15 +46,16 @@ def sim_row(**over):
 
 def test_net_pnl_recomputed_from_primitives_not_stored():
     ep = episode_from_paper_row(paper_row(), strategy_version="B1")
-    # gross 10 - entry_fee 0.06 - exit_fee 0.066 - funding 0
-    assert ep.net_pnl == Decimal("9.8740")
+    # gross 10 - entry_fee(100)=0.05 - exit_fee(110)=0.055 - funding 0
+    # (trading_math.TAKER_FEE_RATE = 0.0005, HTX USDT-M Prime 0)
+    assert ep.net_pnl == Decimal("9.8950")
     assert ep.stored_net_pnl == Decimal("999")  # stored value kept only for reconciliation
 
 
 def test_same_trade_both_loops_identical_net_pnl():
     paper = episode_from_paper_row(paper_row(), strategy_version="B1")
     sim = episode_from_sim_row(sim_row(), strategy_version="B1")
-    assert paper.net_pnl == sim.net_pnl == Decimal("9.8740")
+    assert paper.net_pnl == sim.net_pnl == Decimal("9.8950")
     assert paper.gross_pnl == sim.gross_pnl
 
 
@@ -63,8 +64,8 @@ def test_short_side_net_pnl():
         paper_row(side="short", avg_entry_price=Decimal(110), close_price=Decimal(100)),
         strategy_version="B1",
     )
-    # gross 10 - entry_fee(110)=0.066 - exit_fee(100)=0.06
-    assert ep.net_pnl == Decimal("9.874")
+    # gross 10 - entry_fee(110)=0.055 - exit_fee(100)=0.05
+    assert ep.net_pnl == Decimal("9.8950")
     assert ep.side == "short"
 
 
@@ -114,4 +115,5 @@ def test_liquidation_flag_from_sim():
 
 def test_r_multiple_uses_isolated_margin():
     ep = episode_from_paper_row(paper_row(isolated_margin=Decimal(10)), strategy_version="B1")
-    assert round(ep.r_multiple, 6) == round(9.874 / 10, 6)
+    # net 9.895 over isolated margin 10 (fees at TAKER_FEE_RATE = 0.0005).
+    assert round(ep.r_multiple, 6) == round(9.895 / 10, 6)
