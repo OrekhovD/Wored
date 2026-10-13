@@ -18,14 +18,25 @@ Each key has: type, default, required/optional, service consumers, and secrecy l
 |-----|------|---------|----------|-----------|--------|
 | `WEBUI_AUTH_ENABLED` | bool | `true` | required (release) | webui | no |
 | `WEBUI_ADMIN_USERNAME` | string | `admin` | optional | webui | no |
-| `WEBUI_ADMIN_PASSWORD` | string | auto-generated | required (if auth enabled) | webui | **yes** |
-| `WEBUI_SESSION_SECRET` | string | auto (≥32 chars) | required (if auth enabled) | webui | **yes** |
+| `WEBUI_ADMIN_PASSWORD` | string | пусто (при `WEBUI_AUTH_ENABLED=true` старт невозможен) | required (if auth enabled) | webui; chatbot — как материал для производного секрета | **yes** |
+| `WEBUI_SESSION_SECRET` | string | webui: случайный на старт; chatbot: sha256 от username::password::TELEGRAM_ADMIN_ID | required (if auth enabled) | webui, chatbot | **yes** |
 | `WEBUI_INTERNAL_TOKEN` | string | auto (32 chars) | required | webui, both bots | **yes** |
 | `WEBUI_TELEGRAM_BOT_TOKENS` | JSON array | — | required (if auth enabled) | webui | **yes** |
 | `TELEGRAM_ADMIN_IDS` | string (comma-separated) | empty | optional | webui, bots | no |
 | `WEBUI_PUBLIC_BASE_URL` | string (URL origin) | — | required (production) | webui, bots | no |
 | `WEBUI_COOKIE_SECURE` | bool | `true` (HTTPS) | required | webui | no |
 | `WEBUI_PORT` | int | `8080` | optional | compose | no |
+
+Значение `WEBUI_ADMIN_PASSWORD` продублировано в `.env` (строка 88, её читает `webui`) и в
+`.env.wored` (строка 93, её читает `chatbot`) — проверено 2026-10-14 построчно, значения не
+печатались. Ловушка ротации: `chatbot/integrations/webui_client.py::get_session_secret`
+использует пароль как **материал ключа**, когда в контейнере бота не задан
+`WEBUI_SESSION_SECRET`; в этом случае ротация пароля молча меняет и производный секрет,
+и запись из чата в WebUI отваливается без явной ошибки (тот же класс сбоя, что S12).
+Сейчас ловушка дремлет: явный `WEBUI_SESSION_SECRET` задан в обоих живых контейнерах
+(проверено 2026-10-14 на присутствие, значения не печатались), явная ветка приоритетна,
+и ротация пароля секрет не затрагивает. Требование процедуры: не удалять
+`WEBUI_SESSION_SECRET` ни из одного профиля; чек-лист — `docs/OPERATIONAL-PROCESS.md` §7.
 
 ## LLM Provider Gateway — ARCHIVED (frozen free-model routing)
 
@@ -94,6 +105,29 @@ interface, which publishes an unauthenticated endpoint to the local network.
 | `TELEGRAM_TOKEN` | string | — | required | chatbot (legacy) | **yes** |
 | `TELEGRAM_BOT_TOKEN` | string | — | required | chatbot | **yes** |
 | `TELEGRAM_WORED_TOKEN` | string | — | required | chatbot_wored | **yes** |
+
+## Telegram Proposal Agent (`BOT_PROPOSAL_*` — new in P3d)
+
+Read by `chatbot/services/simulation_proposals.py` and `chatbot/ai/proposal_source.py`.
+None of these keys is in `.env` today; the shipped default is the free path, and
+no `.env` change was needed (or made) to land P3d.
+
+| Key | Type | Default | Required | Consumers | Secret |
+|-----|------|---------|----------|-----------|--------|
+| `BOT_PROPOSAL_SOURCE` | enum (`rules`, `llm`) | anything except `llm` ⇒ deterministic rule engine | optional (paid agent opt-in) | chatbot | no |
+| `BOT_PROPOSAL_TIER` | string (model key, e.g. `analyst_ollama`) | `analyst` tier | optional | chatbot (only when `BOT_PROPOSAL_SOURCE=llm`) | no |
+| `BOT_PROPOSAL_TIMEOUT` | float seconds, `> 0` | `PROPOSAL_TIMEOUT_SECONDS` = `20.0` | optional | chatbot | no |
+
+`BOT_PROPOSAL_SOURCE` is the only door to a billable call: the `ai.proposal_source`
+import sits inside that branch, so a default installation never constructs a
+provider client, and a quota check runs before the first attempt. The dashboard
+has no equivalent flag — its source stays injectable only through
+`app.state.simulation_proposal_source` (`webui/simulation_proposal.py:119`).
+
+Sibling `BOT_*` console keys already in code and unchanged by P3d:
+`BOT_OWNER_IDS`, `BOT_DEFAULT_TIMEZONE`, `BOT_DEFAULT_INSTRUMENT`,
+`BOT_ALLOW_GROUPS`, `BOT_WIZARD_TTL_HOURS`, `BOT_MARKET_REFRESH_MIN_SECONDS`,
+`BOT_SIM_MONITOR_ENABLED`.
 
 ## Execution / Simulation
 
@@ -175,3 +209,43 @@ More restrictive user limits always take precedence.
 Invalid configuration causes explicit readiness failure for the trading subsystem.
 `PAPER_ENGINE_ENABLED=false` keeps the new runner off until cutover; existing
 legacy sessions continue to work unchanged.
+
+**Live state after P4:** the collector container runs `PAPER_ENGINE_ENABLED=true`
+(set in `.env.wored`, line 99) — the row default above describes the pre-cutover
+value, not the deployed one. The P4 gate was proven without flipping it, and the
+engine stays `true`.
+
+## Telegram Manual Deal (P4 — no new keys)
+
+P4 added the `/deal` slice (chat preview → confirm → status → positions) and the
+single domain ticket gate. It introduces **zero** configuration keys:
+
+* `chatbot/services/paper_orders.py` and `chatbot/handlers/paper_deal.py` call no
+  `os.getenv` at all — verified by grep over the whole of `chatbot/`, neither file
+  appears in the result;
+* the ticket lifetime is the domain constant `TICKET_TTL_SECONDS = 30.0`
+  (`paper_trading/ticket.py:62`), deliberately not a knob: WebUI and chat must
+  publish the same `expires_at`, and a per-client override would reintroduce the
+  two-implementation bug this phase removed (RFC Q-21);
+* risk limits are not env either — they come from `paper_v2_days.settings_snapshot`
+  of the active day, and a key missing from (or unparsable in) that snapshot is
+  named in the ticket's `settings_notes` as the bare snapshot key (`min_net_rr`,
+  `max_leverage`, …) plus the marker `risk_tier_absent`, never substituted
+  silently. Note the shape: the plan asked for a `settings_defaulted:<key>` entry
+  in `reasons`; the implementation carries the bare key in `settings_notes`
+  instead — same guarantee, different field (deviation recorded in the P4 report).
+
+Keys the slice reads that already existed in this registry, unchanged in type,
+default and consumers: `PAPER_MARKET_MODE`, `PAPER_MARKET_MAX_AGE_SECONDS`,
+`PAPER_CONTRACTS`, `BOT_DEFAULT_INSTRUMENT` (all via
+`chatbot/integrations/wored_api.py`), plus the principal lists resolved by
+`chatbot/security/principal.py` in precedence order
+`BOT_OWNER_IDS` → `TELEGRAM_ADMIN_IDS` → `TELEGRAM_ADMIN_ID`. `PAPER_ENGINE_ENABLED`
+and `PAPER_ENGINE_INTERVAL_SECONDS` belong to the runner and were not touched.
+
+One development-only name appears in P4 files and is **not** configuration:
+`P4_PROBE_TELEGRAM_ID`, read solely by `output/p4_ticket_parity.py` to identify
+which owner the read-only live parity probe should use. No service reads it, it is
+not present in any `.env`, and the probe accepts the same value on stdin instead.
+Deploying P4 is therefore a restart of `chatbot` and `webui` with the existing env
+files — nothing for the operator to add.
