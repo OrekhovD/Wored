@@ -1,9 +1,11 @@
 import re
 import logging
+from typing import Optional
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.exceptions import TelegramBadRequest
 from ai.router import route_request
+from handlers import telegram_surface as surface
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -92,8 +94,50 @@ async def _dispatch_product_intent(text: str, message: Message):
         await send_alerts(message)
         return
 
+def _bare_payload_refusal(text: str) -> Optional[str]:
+    """Подсказка для ``key=value``-строки, набранной без команды; None — не она.
+
+    Форма принадлежит поверхности (:func:`telegram_surface.looks_like_key_values`),
+    распознавание ключей — сервису-владельцу: анкету считает
+    :func:`services.simulation_proposals.recognised_answer_keys`, аргументы
+    тикета — :func:`services.paper_orders.recognises_ticket_args`.  Второй парсер
+    или второй список ключей отсюда запрещены (ТЗ TB-03).
+    """
+    from application import presenters as ui
+    from handlers import telegram_surface as surface
+    from services import paper_orders as deals
+    from services import simulation_proposals as proposals
+
+    if not surface.looks_like_key_values(text):
+        return None
+
+    keys = ", ".join(sorted(proposals.ANSWER_KEYS))
+    answered = proposals.recognised_answer_keys(text)
+    if answered:
+        return (
+            "🗳️ <b>Это ответ анкеты, но без команды — анкета так не принимается.</b>\n"
+            f"нужно: <code>{ui.esc(proposals.answer_template())}</code>\n"
+            f"распознано полей: {answered} · разрешённые ключи: {keys}\n"
+            "<i>Свободный текст без команды ушёл бы в модель, а модель отвечает "
+            "торговыми числами без контракта. Ни одно предложение не создано, в "
+            "модуль этот текст не отправлен.</i>"
+        )
+
+    if deals.recognises_ticket_args(text):
+        return (
+            "🎯 <b>Это аргументы заявки, но без команды — тикет так не собирается.</b>\n"
+            f"нужно: <code>{ui.esc(deals.usage_preview(instrument=deals.tradable_instrument()))}</code>\n"
+            f"разрешённые ключи: {', '.join(sorted(deals.ARG_KEYS))}\n"
+            "<i>Числа ручной сделки считает доменный тикет-гейт, и только у команды "
+            "есть предпросмотр с подтверждением. В модель этот текст не отправлен, "
+            "заявка не записана.</i>"
+        )
+
+    return None
+
+
 @router.message(F.text)
-async def cmd_chat(message: Message):
+async def cmd_chat(message: Message, principal=None):
     """ТЗ §7.5 — один intent → один режим → один тип ответа.
 
     ТЗ §10.2 — regex-first: перехватываем продуктовые intents до AI chat.
@@ -106,8 +150,38 @@ async def cmd_chat(message: Message):
     # U9 — помощь → главное меню
     msg_lower = (message.text or "").lower().strip()
     if msg_lower in ("помощь", "help", "меню", "menu", "начать", "старт", "/start"):
-        from handlers.start import cmd_start
-        await cmd_start(message)
+        # TB-03: главное меню живёт в консоли, а не в отдельной старой версии
+        # /start. Principal приходит из guard-middleware; если вызов прямой
+        # (тест, внутренний код), резолвим тем же серверным правилом.
+        from handlers import now as console
+        from security.principal import resolve
+
+        await console.cmd_start(message, principal or resolve(message.from_user.id))
+        return
+
+    # Q-15 (live P3c finding): a slash-shaped input that survived every Command
+    # filter is a mistyped or unknown command, and the deterministic paths above
+    # have already declined it.  It must not reach the model: the LLM answers
+    # "plans" with a generated trade plan — entry, stop, target, confidence —
+    # which looks exactly like the plan surface while having no plan_hash, no
+    # violation list and no contract behind it ("no invented numbers").
+    if surface.looks_like_command(message.text or ""):
+        log.info("unrecognised command declined without AI: %r", (message.text or "")[:40])
+        await message.answer(surface.SLASH_HINT, parse_mode="HTML")
+        return
+
+    # Q-20 (RFC, фаза P4): payload keys typed without their command.  The
+    # questionnaire answer and the deal-ticket arguments are the two inputs this
+    # bot accepts as a row of ``key=value`` tokens.  Left alone they are prose to
+    # every Command filter, land here, and get a model answer — a text about
+    # entries and stops with no contract behind it, the same defect Q-15 found on
+    # the mistyped command.  The payload is named back as the exact command and
+    # the model is not called; ownership of the keys belongs to the services that
+    # parse them, not to this router.
+    refusal = _bare_payload_refusal(message.text or "")
+    if refusal:
+        log.info("bare command payload declined without AI: %d tokens", len((message.text or "").split()))
+        await message.answer(refusal, parse_mode="HTML")
         return
 
     # Fallback: AI chat for non-product queries (ТЗ §10.3 — worker-tier only)

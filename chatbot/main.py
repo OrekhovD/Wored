@@ -6,6 +6,9 @@ from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 
 # Setup Handlers
+from handlers.now import router as console_router
+from handlers.simulation_v3 import router as simulation_v3_router
+from handlers.deprecated import router as deprecated_router
 from handlers.start import router as start_router
 from handlers.menu import router as menu_router
 from handlers.callbacks import router as callbacks_router
@@ -21,9 +24,44 @@ from handlers.admin import router as admin_router
 from handlers.pipeline import router as pipeline_router
 from handlers.news import router as news_router
 from handlers.plans import router as plans_router
+from handlers.paper_deal import router as paper_deal_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 log = logging.getLogger("chatbot")
+
+#: update fields inspected for the trace line — never message text or payloads
+_UPDATE_CONTENT_FIELDS = (
+    "message", "edited_message", "channel_post", "edited_channel_post",
+    "callback_query", "inline_query", "chosen_inline_result", "my_chat_member",
+    "chat_member", "join_request", "poll_answer", "pre_checkout_query",
+)
+
+
+def _update_kind(update) -> str:
+    for name in _UPDATE_CONTENT_FIELDS:
+        if getattr(update, name, None) is not None:
+            return name
+    return "other"
+
+
+def _update_event(update):
+    for name in _UPDATE_CONTENT_FIELDS:
+        event = getattr(update, name, None)
+        if event is not None:
+            return event
+    return None
+
+
+def _update_chat_id(update):
+    event = _update_event(update)
+    chat = getattr(event, "chat", None) or getattr(getattr(event, "message", None), "chat", None)
+    return getattr(chat, "id", None)
+
+
+def _update_actor_id(update):
+    event = _update_event(update)
+    user = getattr(event, "from_user", None)
+    return getattr(user, "id", None)
 
 async def alert_listener(bot: Bot):
     """Subscribes to Redis pub/sub to push alerts to Admin."""
@@ -90,13 +128,29 @@ async def _poll_watchdog(bot: Bot):
 
 
 async def _sim_ai_monitor(bot: Bot):
-    """Periodic check of AI-managed sim positions. Runs every 3 minutes."""
+    """Periodic check of AI-managed sim positions. Runs every 3 minutes.
+
+    FROZEN BY DEFAULT (ТЗ Telegram Bot V1 §0 + curator decision Q-02, 2026-10-08):
+    this loop used to close legacy ``sim_positions`` rows on a bot-side ROI formula
+    (<= -50% / >= +100%) before any user notification, i.e. a second, undocumented
+    trading domain next to ``paper_trading``. The data stays readable
+    (``sim_positions`` / ``sim_evaluations`` are legacy read-only); automatic
+    closing requires an explicit ``BOT_SIM_MONITOR_ENABLED=true`` plus a domain
+    idempotent command path, which lands in P4.
+    """
+    if os.getenv("BOT_SIM_MONITOR_ENABLED", "false").strip().lower() not in {"1", "true", "yes"}:
+        log.info(
+            "Sim AI monitor disabled (BOT_SIM_MONITOR_ENABLED=false): "
+            "legacy sim positions are read-only, no automatic closing"
+        )
+        return
+
     import json
     from services.sim_engine import get_open_positions, close_position, calculate_unrealized_pnl
     from storage.redis_client import get_redis
 
     await asyncio.sleep(10)  # wait for bot to start
-    log.info('Sim AI monitor started (3min interval)')
+    log.warning('Sim AI monitor ENABLED (3min interval) — legacy auto-close is active')
 
     while True:
         try:
@@ -155,6 +209,34 @@ async def main():
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
 
+    # Authorization guard before any router: deny-by-default, private chat only.
+    # No handler — including /start and every callback — is reachable without a
+    # server-derived Principal (ТЗ Telegram Bot V1 §3).
+    from security import guards
+    guards.install(dp)
+
+    # Command surface rule (RFC Q-15, live P3c finding): aiogram reads the command
+    # token up to the first space, so ``/plans,`` is the command ``plans,`` — it
+    # matches no ``Command`` filter and used to fall through to the AI chat
+    # fallback, which answered a mistyped command with a generated trade plan.
+    # Normalising the token once, before every router, keeps the rule out of the
+    # individual screens (``handlers/telegram_surface.py``).
+    from handlers.telegram_surface import command_surface_middleware
+    dp.message.outer_middleware(command_surface_middleware)
+    log.info("SURFACE: command token rule installed before all routers")
+
+    # New read console first: /start, /now, /market, /forecast, /session,
+    # /positions, /report, /help, /cancel own these commands from here on.
+    dp.include_router(console_router)
+    # V3 simulation plans: /plans is the canonical command from here on, and the
+    # draft/edit/approve use cases run through the shared trading_math pipeline.
+    # Included before deprecated_router so the historical /plan redirect cannot
+    # shadow it.
+    dp.include_router(simulation_v3_router)
+    # Historical command names: one explicit redirect to the same use case,
+    # never a second implementation (ТЗ §2, TB-03).
+    dp.include_router(deprecated_router)
+
     dp.include_router(start_router)
     dp.include_router(menu_router)
     dp.include_router(callbacks_router)
@@ -169,14 +251,25 @@ async def main():
     dp.include_router(pipeline_router)
     dp.include_router(news_router)
     dp.include_router(plans_router)
+    # P4 manual deal (/deal): the ticket numbers come from paper_trading.ticket,
+    # so this screen must be reached before the AI chat fallback can answer it.
+    dp.include_router(paper_deal_router)
     if os.getenv("HERMES_CHATBOT_GATEWAY_ENABLED", "false").lower() in {"1", "true", "yes"}:
         from handlers.hermes_admin import router as hermes_admin_router
         dp.include_router(hermes_admin_router)
-    # DEBUG: log all incoming updates
+    # Observability: identifiers and update type only. The previous form logged
+    # ``update.model_dump_json()`` — private message text, callback payloads and
+    # anything a user typed (ТЗ §3 forbids it; RFC D-09).
     from aiogram.types import Update
     @dp.update()
-    async def debug_all_updates(update: Update):
-        log.info('DEBUG UPDATE: %s', update.model_dump_json()[:200])
+    async def trace_updates(update: Update):
+        log.info(
+            "UPDATE id=%s type=%s chat=%s actor=%s",
+            update.update_id,
+            _update_kind(update),
+            _update_chat_id(update),
+            _update_actor_id(update),
+        )
 
     dp.include_router(chat_router) # should be last since it catches messages
 
