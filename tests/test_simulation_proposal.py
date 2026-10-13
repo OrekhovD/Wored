@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
+from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 from fastapi import FastAPI, Request
@@ -19,13 +20,23 @@ from starlette.middleware.sessions import SessionMiddleware
 import httpx
 
 from simulation_api import PLAN_FIELDS, normalize_plan
-from simulation_proposal import (
+from simulation_proposal import (  # the webui adapter must keep re-exporting the domain
+    AdoptRefused,
+    DEFAULT_INSTRUMENT_KEY,
+    InvalidAgentEnvelope,
     MemoryProposalStore,
+    ProposalRecord,
+    adopt_plan_body,
+    build_proposal_ctx,
     normalize_questionnaire,
+    proposal_to_dict,
     router,
     rules_source,
+    run_proposal,
+    validate_draft,
 )
 from test_simulation_api import FakeRedis, CSRF, INSTR  # shared QA harness bits
+from trading_math.plan_contract import plan_hash
 
 
 def _q(**overrides) -> dict:
@@ -222,7 +233,10 @@ class TestProposalEndpoints:
             assert set(body["draft"].keys()) == set(PLAN_FIELDS)
             assert body["rationale"] and body["assumptions"]
             # MC-12: proposal is only a draft — nothing was persisted as a plan
-            assert store.items[pid].owner_id == "password:qa-eng"
+            # P3b: the plan domain keys owners with the canonical uuid5 namespace
+            # (same value paper_api / positions_workspace / the bot derive), so a
+            # proposal written in Telegram is the same owner in the dashboard.
+            assert store.items[pid].owner_id == str(uuid5(NAMESPACE_URL, "wored:owner:qa-eng"))
             assert app.state.simulation_store.plans == {}
 
     async def test_bad_draft_vetoed_not_silently_fixed(self):
@@ -337,3 +351,141 @@ class TestProposalFailures:
             body = await _await_settled(c, pid)
             assert body["status"] == "completed"
             assert body["model_version"] == "wored-rules-v1"
+
+
+# ── P3d: the domain surface both UIs share ─────────────────────────────────
+
+
+def _record(status="completed", *, draft=None, validator=None,
+            reason_code=None, reason_message=None) -> ProposalRecord:
+    now = datetime.now(timezone.utc)
+    return ProposalRecord(
+        "22222222-2222-2222-2222-222222222222", "owner-1", status, _q(), now, now,
+        draft=draft, validator=validator or {},
+        reason_code=reason_code, reason_message=reason_message,
+    )
+
+
+@pytest.mark.asyncio
+async def test_http_proposal_hash_is_the_contract_hash_of_the_same_draft():
+    """The dashboard's endpoint answers with the digest the contract yields.
+
+    This is the web half of the P3 exit gate: the chat card and this response are
+    equal because both come out of the one runner in
+    :mod:`trading_math.simulation_proposal`.
+    """
+    store = MemoryProposalStore()
+    async for c in _client(_app(store=store, redis=FakeRedis())):
+        await c.get("/test-login")
+        r = await c.post("/api/v3/simulation/plan-proposals",
+                         json={"questionnaire": _q()}, headers=HDRS)
+        body = await _await_settled(c, r.json()["proposal"]["proposal_id"])
+        assert body["plan_hash"] == plan_hash(normalize_plan(body["draft"])[0])
+        assert body["validator"]["adoptable"] is True
+
+
+@pytest.mark.asyncio
+class TestAdoptGate:
+    async def test_completed_and_validated_draft_is_adoptable(self):
+        env = await rules_source(_q(), {"instrument_key": INSTR})
+        rec = _record(draft=env["plan"])
+        rec.validator = validate_draft(rec.draft)
+        assert adopt_plan_body(rec)["instrument_key"] == INSTR
+
+    async def test_pending_and_failed_never_become_a_plan(self):
+        with pytest.raises(AdoptRefused) as raised:
+            adopt_plan_body(_record("pending"))
+        assert raised.value.reason_code == "proposal_pending"
+
+        failed = _record("failed", reason_code="llm_timeout", reason_message="slow")
+        with pytest.raises(AdoptRefused) as raised:
+            adopt_plan_body(failed)
+        assert raised.value.reason_code == "llm_timeout"
+        assert "slow" in raised.value.message
+
+    async def test_a_vetoed_proposal_is_refused_with_its_violations(self):
+        env = await rules_source(_q(), {})
+        draft = dict(env["plan"])
+        draft["max_session_loss"] = "0.01"  # below max_daily_loss
+        with pytest.raises(AdoptRefused) as raised:
+            adopt_plan_body(_record(draft=draft))
+        assert raised.value.reason_code == "proposal_vetoed"
+        assert "loss_hierarchy" in [v["code"] for v in raised.value.violations]
+
+    async def test_completed_without_a_draft_is_refused(self):
+        with pytest.raises(AdoptRefused) as raised:
+            adopt_plan_body(_record(draft=None))
+        assert raised.value.reason_code == "proposal_without_draft"
+
+    async def test_binding_survives_the_store_and_shows_up_in_the_payload(self):
+        store = MemoryProposalStore()
+        env = await rules_source(_q(), {})
+        rec = _record(draft=env["plan"])
+        rec.validator = validate_draft(rec.draft)
+        await store.create(rec)
+
+        assert await store.mark_adopted(rec.proposal_id, "plan-9", "someone-else") is False
+        assert await store.mark_adopted(rec.proposal_id, "plan-9", "owner-1") is True
+        loaded = await store.get(rec.proposal_id, "owner-1")
+        assert loaded.adopted_plan_id == "plan-9"
+        assert [r.proposal_id for r in await store.list_recent("owner-1", 5)] == [rec.proposal_id]
+        assert proposal_to_dict(loaded)["adopted_plan_id"] == "plan-9"
+
+
+@pytest.mark.asyncio
+class TestProposalContext:
+    async def test_missing_market_reader_still_produces_a_context(self):
+        ctx = await build_proposal_ctx(None, INSTR)
+        assert ctx["instrument_key"] == INSTR
+        assert "market" not in ctx
+
+    async def test_a_failing_reader_is_not_an_error_for_a_proposal(self):
+        async def broken(key):
+            raise RuntimeError("redis is down")
+
+        ctx = await build_proposal_ctx(broken, INSTR)
+        assert ctx["instrument_key"] == INSTR and "market" not in ctx
+
+    async def test_a_live_snapshot_is_carried_into_the_context(self):
+        async def alive(key):
+            return {
+                "snapshot_id": "snap-1", "as_of": "2026-10-13T00:00:00+00:00",
+                "quality": {"worst": "live"}, "quote": {"mark": "82656.6"},
+            }
+
+        ctx = await build_proposal_ctx(alive, INSTR)
+        assert ctx["snapshot_id"] == "snap-1"
+        assert ctx["market"]["quality_worst"] == "live"
+
+    async def test_rules_engine_takes_the_instrument_from_the_context(self):
+        """No silent default when the host names an instrument, and an explicit
+        default when it does not — the card and the draft must agree."""
+        env = await rules_source(_q(), {"instrument_key": INSTR})
+        assert env["plan"]["instrument_key"] == INSTR
+        assert (await rules_source(_q(), {}))["plan"]["instrument_key"] == DEFAULT_INSTRUMENT_KEY
+
+
+@pytest.mark.asyncio
+async def test_typed_agent_refusal_keeps_its_own_reason_code():
+    """``InvalidAgentEnvelope`` is a shape problem, not an outage.
+
+    Without the typed branch the generic handler would report ``llm_unavailable``
+    and send the owner looking for a network fault that does not exist (ТЗ §6).
+    """
+    async def malformed(q, ctx):
+        raise InvalidAgentEnvelope("agent response is not a SimulationPlanV1 draft")
+
+    store = MemoryProposalStore()
+    rec = _record("pending")
+    await store.create(rec)
+    await run_proposal(store, rec, malformed, {}, 5.0)
+    assert rec.status == "failed"
+    assert rec.reason_code == "llm_invalid_response"
+    assert "SimulationPlanV1" in rec.reason_message
+
+    async def silent(q, ctx):
+        raise InvalidAgentEnvelope("")
+
+    rec2 = _record("pending")
+    await run_proposal(store, rec2, silent, {}, 5.0)
+    assert rec2.reason_message.startswith("agent response is not")
