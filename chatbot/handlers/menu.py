@@ -1,18 +1,25 @@
+"""Text-button shortcuts of the persistent reply keyboard.
+
+TB-03 (ТЗ Telegram Bot V1 §2): a button and the command that covers the same
+action must resolve to one use case, so the read buttons below call the console
+screens directly instead of the legacy ticker/sim digest.  Buttons that open a
+*creation* flow (Аналитика, Прогнозы-меню, Алерты) keep their own handlers.
+"""
 from aiogram import F, Router
 from aiogram.types import Message
 
+from handlers import now as console
 from handlers.alerts import send_alerts
 from handlers.analytics import show_analytics_menu
-from handlers.market import send_market_data
-from handlers.portfolio import cmd_portfolio
 from handlers.predictions import send_prediction_menu
+from security.principal import Principal
 
 router = Router()
 
 
 @router.message(F.text == "📊 Рынок")
-async def menu_market(message: Message):
-    await send_market_data(message)
+async def menu_market(message: Message, principal: Principal):
+    await console.render_screen(console.show_market_detail, message, principal)
 
 
 @router.message(F.text == "🧠 Аналитика")
@@ -26,8 +33,8 @@ async def menu_predictions(message: Message):
 
 
 @router.message(F.text == "📦 Портфель")
-async def menu_portfolio(message: Message):
-    await cmd_portfolio(message)
+async def menu_portfolio(message: Message, principal: Principal):
+    await console.render_screen(console.show_positions, message, principal)
 
 
 @router.message(F.text == "🔔 Алерты")
@@ -36,8 +43,6 @@ async def menu_alerts(message: Message):
 
 
 @router.message(F.text == "🎯 Сессия")
-async def menu_session_status(message: Message):
-    """ТЗ §5.1 — кнопка Сессия = inline-меню управления сессией."""
-    from handlers.pipeline import _build_status_response, _session_control_kb
-    text, _ = await _build_status_response(message.from_user.id)
-    await message.answer(text, reply_markup=_session_control_kb(), parse_mode="HTML")
+async def menu_session_status(message: Message, principal: Principal):
+    """ТЗ §5.1 — кнопка Сессия вызывает тот же use case, что /session."""
+    await console.render_screen(console.show_session, message, principal)

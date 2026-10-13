@@ -7,7 +7,6 @@ from typing import Any
 
 import httpx
 from aiogram import F, Router
-from aiogram.filters import Command
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -230,17 +229,18 @@ async def answer_callback_early(call: CallbackQuery, text: str = "⏳ Прогн
 
 
 async def send_prediction_menu(message: Message) -> None:
+    """Legacy forecast-picker menu.
+
+    ``/predictions`` and ``/forecast`` are no longer bound here (TB-03): the
+    console owns the read card and the deprecated router redirects the old name to
+    exactly the same function.  This menu stays for the ``prediction_menu``
+    callback and the «🔮 Прогнозы» button, i.e. for *creating* a forecast.
+    """
     items = await get_recent_prediction_requests(limit=4)
     await message.answer(
         format_prediction_menu_text(items),
         reply_markup=build_prediction_menu_keyboard(),
     )
-
-
-@router.message(Command("predictions"))
-@router.message(Command("forecast"))
-async def cmd_predictions(message: Message):
-    await send_prediction_menu(message)
 
 
 @router.callback_query(F.data == "prediction_menu")

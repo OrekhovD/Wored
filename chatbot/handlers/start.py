@@ -1,21 +1,24 @@
-from aiogram import Router
-from aiogram.filters import CommandStart
-from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, WebAppInfo
-import os
+"""Reply-keyboard surface for the bot (legacy section shortcuts).
+
+The ``/start`` command itself is owned by :mod:`handlers.now` (TB-03: one command,
+one implementation).  What stays here is only the persistent reply keyboard, i.e.
+the shortcut row Telegram shows under every chat; its buttons are routed to the
+console screens in :mod:`handlers.menu`, so a button and the matching command
+cannot render two different data sets.
+
+``TG_MINIAPP_URL`` / ``WEBUI_URL`` fall back to ``localhost`` — on a phone that is
+not the WORED machine, therefore the console offers the Mini App deep link only
+when a public ``https`` origin is configured (ТЗ §3).
+"""
+
 import logging
+import os
+
+from aiogram import Router
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 
 log = logging.getLogger(__name__)
 router = Router()
-
-
-async def _has_active_session(user_id: int) -> bool:
-    """Check if user has an active trading session."""
-    try:
-        from services.session_manager import get_active_session
-        session = await get_active_session(user_id)
-        return session is not None
-    except Exception:
-        return False
 
 
 def get_main_keyboard(has_session: bool = True) -> ReplyKeyboardMarkup:
@@ -36,21 +39,3 @@ def get_main_keyboard(has_session: bool = True) -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         is_persistent=True,
     )
-
-
-@router.message(CommandStart())
-async def cmd_start(message: Message):
-    has_session = await _has_active_session(message.from_user.id)
-
-    if has_session:
-        cta_text = "📱 <b>Сессия</b> — Mini App: live runtime, revision-команды, метрики"
-    else:
-        cta_text = "🚀 <b>Старт сессии</b> — запустить новую дневную торговую сессию"
-
-    text = (
-        f"🏴‍☠️ <b>WORED Trading Bot</b>\n\n"
-        f"Daily Pipeline · BTCUSDT · HTX · 8h\n\n"
-        f"{cta_text}\n\n"
-        "Или пиши: «статус», «цена btc», «анализ eth»…"
-    )
-    await message.answer(text, reply_markup=get_main_keyboard(has_session))

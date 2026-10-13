@@ -1,16 +1,20 @@
 """
-Portfolio handler — delegates to pipeline._build_positions_response.
-Shows real session positions (PnL, margin, side) instead of plain tickers.
+Portfolio handler — legacy name, one screen with the console (TB-03).
+
+``/portfolio`` is redirected by ``handlers/deprecated.py`` and the «Портфель»
+button calls the same function, so the old sim_engine-based digest can never show
+a second balance for one owner.  Positions are read from the ``paper_trading``
+domain through :mod:`integrations.wored_api`.
 """
 from aiogram import Router
-from aiogram.filters import Command
 from aiogram.types import Message
+
+from handlers import now as console
+from security.principal import Principal
 
 router = Router()
 
 
-@router.message(Command("portfolio"))
-async def cmd_portfolio(message: Message):
-    from handlers.pipeline import _build_positions_response
-    text, kb = await _build_positions_response(message.from_user.id)
-    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+async def cmd_portfolio(message: Message, principal: Principal) -> None:
+    """Delegate to the console positions screen — no own implementation."""
+    await console.show_positions(message, principal)

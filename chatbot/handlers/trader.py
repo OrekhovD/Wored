@@ -10,7 +10,6 @@ import os
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.filters import Command
 
 log = logging.getLogger(__name__)
 router = Router(name="trader")
@@ -61,7 +60,9 @@ def _back_kb() -> InlineKeyboardMarkup:
     ])
 
 
-@router.message(Command("trader"))
+# TB-03: ``/trader`` is not bound here anymore — the console owns the session
+# screen and handlers/deprecated.py redirects the old command name to it.  The
+# inline ``trader_*`` callbacks below stay as the legacy section menu.
 async def cmd_trader(message: Message):
     await message.reply(
         "🏴‍☠️ <b>Командный мостик</b>\n\nВыбери действие:",

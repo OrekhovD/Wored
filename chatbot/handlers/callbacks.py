@@ -25,12 +25,17 @@ async def answer_callback_early(call: CallbackQuery, text: str = "⏳ Запро
 
 
 @router.callback_query(F.data == "menu_back")
-async def cb_menu_back(call: CallbackQuery):
-    """U5 — возврат в главное меню."""
+async def cb_menu_back(call: CallbackQuery, principal):
+    """U5 — возврат в главное меню.
+
+    «Главное меню» — карточка «Сейчас» с inline-навигацией консоли (TB-03): тот
+    же use case, что /start и кнопка «Сейчас», а не отдельная старая реализация.
+    """
     await call.answer()
     await call.message.delete()
-    from handlers.start import cmd_start
-    await cmd_start(call.message)
+    from handlers import now as console
+
+    await console.render_screen(console.show_now, call.message, principal)
 
 
 @router.callback_query(F.data == "refresh_market")

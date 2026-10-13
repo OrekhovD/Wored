@@ -3,7 +3,6 @@ import os
 import logging
 
 from aiogram import Router
-from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from storage.redis_client import get_redis
@@ -91,10 +90,11 @@ async def build_market_text() -> str:
 
 
 async def send_market_data(message: Message):
+    """Legacy ticker+journal digest.
+
+    ``/market`` is NOT bound here anymore (TB-03): the console router owns the
+    command and renders the shared perpetual snapshot, so one command cannot show
+    two different prices.  This builder stays for the legacy text-button flows.
+    """
     text = await build_market_text()
     await message.answer(text, reply_markup=get_market_keyboard())
-
-
-@router.message(Command("market"))
-async def cmd_market(message: Message):
-    await send_market_data(message)
