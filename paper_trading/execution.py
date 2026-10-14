@@ -86,6 +86,10 @@ class FillResult:
     reserved_margin: Decimal
     position: Position | None = None
     reason: str = ""
+    # The rate that produced ``entry_fee``. Carried on the result so a persisted
+    # fill records its own rate instead of a dataclass default: an audit column
+    # that disagrees with the amount it describes is worse than an empty one.
+    fee_rate: Decimal = FEE_RATE
 
 
 @dataclass
@@ -112,6 +116,7 @@ class CloseResult:
     realized_net: Decimal  # net_pnl including already-paid entry fee
     exit_reason: str = ""
     remaining_position: Position | None = None
+    fee_rate: Decimal = FEE_RATE
 
 
 @dataclass
@@ -341,7 +346,9 @@ def execute_close(
         net_pnl   = gross_pnl - close_fee - allocated_entry_fee
         realized_net = net_pnl - already_paid_entry_fee_at_open
 
-    For the golden test cases:
+    For the golden test cases — these belong to the fixtures, which pass the
+    fees to ``paper_trading.ledger`` as parameters; this function itself charges
+    the module ``FEE_RATE``, so the rate below is not the rate it applies:
         Long: entry=10000, exit=10100, qty=1, fee=0.0006
           gross = 1*(10100-10000) = 100
           entry_fee = 1*10000*0.0006 = 6

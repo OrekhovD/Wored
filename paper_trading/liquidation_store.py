@@ -230,6 +230,7 @@ async def persist_liquidation(
         price=money(close.close_price),
         qty=money(close.closed_quantity),
         fee=money(close.close_fee),
+        fee_rate=close.fee_rate,
         is_close=True,
         source_timestamp=decision.state.evaluated_at,
         receive_timestamp=decision.state.evaluated_at,

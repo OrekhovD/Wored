@@ -349,7 +349,12 @@ class Fill:
     price: Decimal = field(default_factory=lambda: ZERO)
     qty: Decimal = field(default_factory=lambda: ZERO)
     fee: Decimal = field(default_factory=lambda: ZERO)
-    fee_rate: Decimal = field(default_factory=lambda: money("0.0006"))
+    # The rate that produced ``fee``, supplied by the caller that charged it
+    # (see FillResult/CloseResult in paper_trading.execution). The default is
+    # zero, not a plausible number: a stale literal here used to record 0.0006
+    # on every fill while the engine charged 0.0005, and a wrong audit column is
+    # harder to spot than an obviously empty one.
+    fee_rate: Decimal = field(default_factory=lambda: ZERO)
     slippage_bps: Decimal = field(default_factory=lambda: ZERO)
     is_close: bool = False  # True if this fill reduces/closes a position
     source_timestamp: datetime | None = None
