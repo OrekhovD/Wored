@@ -49,6 +49,7 @@ from paper_trading.contracts import (
     money,
 )
 from paper_trading.ledger import post_entry
+from paper_trading.risk import canonical_limit
 
 log = logging.getLogger(__name__)
 ZERO = Decimal(0)
@@ -405,6 +406,51 @@ class PaperRepository:
             )
             return True
 
+    async def merge_day_limits(
+        self,
+        day_id: UUID,
+        limits: dict[str, Any],
+        expected: dict[str, Any] | None = None,
+    ) -> bool:
+        """Merge risk limits into ``settings_snapshot`` with a compare-and-swap.
+
+        Single source of day limits: ``paper_v2_days.settings_snapshot`` is what
+        :func:`paper_trading.ticket.risk_settings_from_day` reads for the manual
+        ticket, so a merged value changes the manual gate and the auto engine at
+        once — there is no second copy to keep in sync.
+
+        ``expected`` carries the values the operator was shown when the change
+        was confirmed.  The comparison happens inside the same ``FOR UPDATE``
+        transaction, so a concurrent write cannot slip between read and check;
+        a mismatch returns ``False`` and leaves the day untouched.  Only the
+        submitted keys are merged — timezone / end_time_local / opening_capital
+        survive, because a limits change must not silently rewrite the day's
+        rollover policy.
+        """
+        if not limits:
+            return False
+        async with self._pool.acquire() as conn, conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT settings_snapshot FROM paper_v2_days WHERE day_id = $1 FOR UPDATE",
+                str(day_id),
+            )
+            if row is None:
+                return False
+            current = row["settings_snapshot"]
+            if isinstance(current, str):
+                current = json.loads(current) if current else {}
+            current = dict(current or {})
+            for key, wanted in (expected or {}).items():
+                if canonical_limit(current.get(key)) != canonical_limit(wanted):
+                    return False
+            merged = {**current, **{k: str(v) for k, v in limits.items()}}
+            await conn.execute(
+                "UPDATE paper_v2_days SET settings_snapshot = $1 WHERE day_id = $2",
+                json.dumps(merged),
+                str(day_id),
+            )
+        return True
+
     async def get_days_needing_closure(self) -> list[TradingDay]:
         """Days whose close-out is due or was deferred.
 
@@ -611,13 +657,37 @@ class PaperRepository:
         return _row_to_command(row) if row else None
 
     async def complete_command(self, command_id: UUID, result: dict | None = None) -> bool:
-        """Mark a command as completed so poll() stops returning it."""
+        """Settle a claimed command to ``completed``.
+
+        Only a command still held as ``processing`` is rewritten.  Without that
+        guard a handler which already recorded a terminal outcome (``failed``
+        with a reason the operator can read) would be overwritten by this
+        generic settle pass, and its stored ``result`` nulled.  A result given
+        here is written only when the handler left none: ``COALESCE`` keeps the
+        handler's own output, which is the more specific fact.
+
+        Returns ``True`` when the command is terminal afterwards, so a caller
+        can tell "settled it" from "someone else already finished it".
+        """
         async with self._pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE paper_v2_commands SET status='completed', result=$1, updated_at=$2 WHERE command_id=$3",
+            row = await conn.fetchrow(
+                """
+                UPDATE paper_v2_commands
+                   SET status = 'completed',
+                       result = COALESCE($1, result),
+                       updated_at = $2
+                 WHERE command_id = $3 AND status = 'processing'
+                 RETURNING command_id
+                """,
                 json.dumps(result) if result else None, _now_utc(), str(command_id),
             )
-        return True
+            if row is not None:
+                return True
+            current = await conn.fetchval(
+                "SELECT status FROM paper_v2_commands WHERE command_id = $1",
+                str(command_id),
+            )
+        return current in ("completed", "failed", "conflict")
 
     async def update_command_result(
         self,
@@ -626,7 +696,13 @@ class PaperRepository:
         result: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> bool:
-        """Update command status/result after processing."""
+        """Record a command's terminal outcome from inside the handler.
+
+        This is the write a handler uses when "completed" would be a lie (for
+        example a mid-day limits change whose compare-and-swap lost).  Because
+        :meth:`complete_command` only touches a ``processing`` row, the status
+        and result recorded here survive the generic settle pass.
+        """
         now = _now_utc()
         result_json = json.dumps(result) if result else None
         async with self._pool.acquire() as conn, conn.transaction():

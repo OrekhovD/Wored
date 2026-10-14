@@ -11,7 +11,9 @@
 Правила источников (ничего не выдумывается):
   * лимиты берутся из ``paper_v2_days.settings_snapshot``; если ключа нет —
     используется дефолт :class:`RiskSettings`, и это явно возвращается в
-    ``settings_notes``, а не подставляется молча;
+    ``settings_notes``, а не подставляется молча; с P4b этот снапшот меняется
+    во время дня командой ``set_automation``, и ручная проверка, и автомат
+    считают новые лимиты из одного места (``current_limits``);
   * объём считает :func:`calculate_position_size` с округлением вниз до шага
     инструмента, а не ``risk / |entry - stop|``;
   * ликвидация считает :func:`calculate_liquidation_price` (изолированная
@@ -23,7 +25,7 @@ Python 3.9 compatible.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Mapping
@@ -38,20 +40,25 @@ from paper_trading.risk import (
     RiskSettings,
     calculate_liquidation_price,
     calculate_position_size,
+    canonical_limit,
     check_order_risk,
 )
 
 __all__ = [
     "DENIAL_TEXTS",
+    "LIMIT_FIELDS",
     "TICKET_TTL_SECONDS",
     "TRADABLE_DAY_STATES",
     "TicketDenied",
     "TicketRequest",
     "TicketResult",
+    "apply_day_limits",
     "build_ticket",
+    "current_limits",
     "day_state_value",
     "denial_text",
     "money_str",
+    "parse_limits",
     "risk_settings_from_day",
 ]
 
@@ -94,6 +101,10 @@ DENIAL_TEXTS: dict[str, str] = {
     "not_manual_account": "Ручная заявка доступна только на ручном счёте",
     "position_not_found": "Позиция не найдена",
     "idempotency_conflict": "Команда с таким ключом уже существует и отличается по составу",
+    "limits_changed": "Лимиты дня уже изменились — подтверди новую карточку",
+    "limits_unchanged": "Новые лимиты совпадают с действующими",
+    "invalid_limits": "Не указан ни один лимит",
+    "unknown_limit": "Неизвестный ключ лимита",
     "service_unavailable": "Источник данных дня недоступен",
     "domain_state_unavailable": "Источник данных дня недоступен",
 }
@@ -266,11 +277,14 @@ class TicketResult:
         }
 
 
-def risk_settings_from_day(day: TradingDay) -> tuple[RiskSettings, list[str]]:
-    """RiskSettings из снапшота настроек дня + список подставленных дефолтов.
+def _day_limit_values(day: TradingDay) -> tuple[dict[str, Any], list[str]]:
+    """Извлечь лимиты дня: значения полей RiskSettings и список defaulted-ключей.
 
-    Дефолт не прячется: каждый ключ, которого в снапшоте нет или который не
-    разбирается в число, попадает в ``notes`` как имя ключа снапшота.
+    Одна реализация для обоих потребителей: ручной тикет строит из неё
+    :class:`RiskSettings` с дефолтами, автомат подмешивает её же значения в
+    свои правила (:func:`apply_day_limits`).  Ключ, которого в снапшоте нет или
+    который не разбирается в число, попадает в ``notes`` — подмена дефолтом
+    никогда не остаётся незамеченной, и никогда не перезаписывает базу молча.
     """
     snapshot = dict(day.settings_snapshot or {})
     notes: list[str] = []
@@ -290,8 +304,74 @@ def risk_settings_from_day(day: TradingDay) -> tuple[RiskSettings, list[str]]:
             values[field_name] = _dec(raw, snap_key)
         except TicketDenied:
             notes.append(snap_key)
+    return values, notes
+
+
+def risk_settings_from_day(day: TradingDay) -> tuple[RiskSettings, list[str]]:
+    """RiskSettings из снапшота настроек дня + список подставленных дефолтов.
+
+    Дефолт не прячется: каждый ключ, которого в снапшоте нет или который не
+    разбирается в число, попадает в ``notes`` как имя ключа снапшота.
+    """
+    values, notes = _day_limit_values(day)
     settings = RiskSettings(**values) if values else RiskSettings()
     return settings, notes
+
+
+def apply_day_limits(base: RiskSettings, day: TradingDay) -> RiskSettings:
+    """Лимиты дня поверх исполнительных правил процесса.
+
+    До среза P4b автомат считал по ``RiskSettings`` процесса, а ручная сделка —
+    по снапшоту дня; «ужесточить лимиты посреди дня» тогда означало две разные
+    правды. Теперь источник лимитов один, но замена остаётся частичной:
+    :class:`~dataclasses.dataclass` подменяет только разобранные лимиты, а
+    ``require_risk_tier``, ``cooldown_seconds``, ``order_ttl_seconds`` и
+    ``taker_fee_rate`` берутся из базы. Иначе число, записанное в снапшот,
+    могло бы выключить fail-closed правило риска, чего данные дня решать
+    не вправе.
+    """
+    values, _notes = _day_limit_values(day)
+    return replace(base, **values) if values else base
+
+
+#: Публичное отображение ключа ``settings_snapshot`` в поле :class:`RiskSettings`.
+#: Клиенты строят ввод лимитов по этому словарю, чтобы нигде не появился свой
+#: список допустимых ключей (TB-03).
+LIMIT_FIELDS: dict[str, str] = dict(_SETTINGS_KEYS)
+
+
+def current_limits(day: TradingDay) -> tuple[dict[str, str | None], list[str]]:
+    """Действующие лимиты дня в канонической форме + список defaulted-ключей.
+
+    Значения отдаются строками, а не Decimal, потому что у них два потребителя:
+    карточка, где их надо показать, и compare-and-swap при исполнении команды,
+    где надо сверить ровно то, что показали. Один источник формы исключает
+    рассинхрон «на карточке 10, а сверяется 10.0».
+    """
+    snapshot = dict(day.settings_snapshot or {})
+    limits = {key: canonical_limit(snapshot.get(key)) for key in LIMIT_FIELDS}
+    _settings, notes = risk_settings_from_day(day)
+    return limits, notes
+
+
+def parse_limits(body: Mapping[str, Any]) -> dict[str, Decimal]:
+    """Разобрать ввод лимитов: только известные ключи, ничего не выбрасывается молча.
+
+    Неизвестный ключ — отказ, а не игнорирование: молча выброшенное поле
+    означает, что оператор подтвердил одно, а записано другое. Числа
+    возвращаются как :class:`~decimal.Decimal` в тех же ключах снапшота, в
+    которых их читает :func:`risk_settings_from_day`.
+    """
+    out: dict[str, Decimal] = {}
+    for key, raw in body.items():
+        if key not in LIMIT_FIELDS:
+            raise TicketDenied("unknown_limit", f"{DENIAL_TEXTS['unknown_limit']}: {key}")
+        if raw in (None, ""):
+            continue
+        out[key] = _dec(raw, key)
+    if not out:
+        raise TicketDenied("invalid_limits", DENIAL_TEXTS["invalid_limits"])
+    return out
 
 
 def _position_infos(positions: Iterable[Position]) -> list[PositionInfo]:

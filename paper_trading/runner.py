@@ -44,6 +44,7 @@ from paper_trading.contracts import (
     Account,
     AccountKind,
     Command,
+    CommandStatus,
     CommandType,
     DayState,
     Decision,
@@ -78,6 +79,7 @@ from paper_trading.risk import (
 )
 from paper_trading.strategy import Bar, BaselineV1Strategy
 from paper_trading.strategy import Signal as StrategySignal
+from paper_trading.ticket import apply_day_limits
 
 if TYPE_CHECKING:
     from paper_trading.repository import PaperRepository
@@ -1136,6 +1138,32 @@ class PaperTradingRunner:
             # requeue_stale_processing pass retries it.
             log.warning("complete_command failed for %s: %s", cmd.command_id, exc)
 
+    async def _finish_command(
+        self,
+        cmd: Command,
+        status: CommandStatus,
+        *,
+        result: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Record a command's terminal outcome from inside the handler.
+
+        The generic settle pass writes ``completed`` and used to be the only
+        finale, so a refusal would have sounded like a success.  Here the
+        handler names the status and the reason code itself;
+        :meth:`PaperRepository.complete_command` no longer rewrites such a row
+        because it is not ``processing``.  If this write fails the command
+        stays ``processing`` and is released by ``requeue_stale_processing``
+        — the outcome is lost, but never silently replaced by a wrong one.
+        """
+        repo = self.repository
+        if repo is None:
+            return
+        try:
+            await repo.update_command_result(cmd.command_id, status, result=result, error=error)
+        except Exception as exc:
+            log.warning("update_command_result failed for %s: %s", cmd.command_id, exc)
+
     async def _requeue_command(self, cmd: Command) -> None:
         repo = self.repository
         if repo is None:
@@ -1193,6 +1221,14 @@ class PaperTradingRunner:
 
         if ct == CommandType.close_all:
             # Close all positions for an account
+            payload = cmd.result if isinstance(cmd.result, dict) else {}
+            # "stop the automaton" is one command with two intents: block new
+            # entries before anything is closed, so a close deferred by a
+            # missing snapshot can never be followed by a fresh entry while the
+            # old positions are still open.
+            if payload.get("block_entries"):
+                self._entries_blocked = True
+                log.info("close_all: new entries blocked")
             acct = cmd.account_id
             if acct:
                 to_close = [
@@ -1235,6 +1271,9 @@ class PaperTradingRunner:
 
         if ct == CommandType.finish_day:
             return await self._handle_finish_day(cmd)
+
+        if ct == CommandType.set_automation:
+            return await self._handle_set_automation(cmd)
 
         if ct == CommandType.pause_auto:
             self._entries_blocked = True
@@ -1461,6 +1500,67 @@ class PaperTradingRunner:
             reason_detail="Day closed and reconciled",
             day_id=cmd.day_id,
             decided_at=datetime.now(timezone.utc),
+        )
+        return True
+
+    async def _handle_set_automation(self, cmd: Command) -> bool:
+        """Change the trading day's risk limits while the day is running.
+
+        ``tighten``/``reduce`` used to be chat words that only wrote audit rows
+        into the legacy ``trading_sessions`` table, leaving the running day
+        untouched.  The domain answer is this command: its payload carries both
+        the values to write and the values the operator was shown, and
+        :meth:`PaperRepository.merge_day_limits` compares the expected side
+        inside the same ``FOR UPDATE`` transaction, so nothing can slip between
+        read and write.
+
+        A lost compare-and-swap is terminal and never re-queued: retrying would
+        overwrite the change that beat us, which is exactly the "confirmed one
+        thing, stored another" failure the confirmation ticket exists to
+        prevent.  ``limits_changed`` reaches the operator as a command error
+        code through ``get_command_status``.
+
+        The new numbers take effect without any cache invalidation: the
+        signal→order chain re-reads the active day every cycle and derives its
+        limits from the snapshot (see :func:`_execute_signal`).
+        """
+        payload = cmd.result if isinstance(cmd.result, dict) else {}
+        raw_limits = payload.get("limits")
+        raw_expected = payload.get("expected")
+        limits = raw_limits if isinstance(raw_limits, dict) else {}
+        expected = raw_expected if isinstance(raw_expected, dict) else {}
+
+        if cmd.day_id is None:
+            await self._finish_command(cmd, CommandStatus.failed, error="no_active_day")
+            return True
+        if not limits:
+            await self._finish_command(cmd, CommandStatus.failed, error="invalid_limits")
+            return True
+
+        try:
+            applied = await self.repository.merge_day_limits(cmd.day_id, limits, expected)
+        except Exception as exc:
+            self._last_error = str(exc)
+            log.warning("set_automation: merge failed for day %s: %s", cmd.day_id, exc)
+            await self._finish_command(cmd, CommandStatus.failed, error="limits_write_failed")
+            return True
+
+        if not applied:
+            log.info(
+                "set_automation: compare-and-swap lost for day %s — limits changed meanwhile",
+                cmd.day_id,
+            )
+            await self._finish_command(cmd, CommandStatus.failed, error="limits_changed")
+            return True
+
+        log.info(
+            "set_automation: day %s limits updated (%s)",
+            cmd.day_id, ", ".join(f"{k}={v}" for k, v in sorted(limits.items())),
+        )
+        await self._finish_command(
+            cmd,
+            CommandStatus.completed,
+            result={"limits": limits, "day_id": str(cmd.day_id)},
         )
         return True
 
@@ -1891,6 +1991,14 @@ class PaperTradingRunner:
             log.warning("signal→order chain: no active trading day")
             return
 
+        # Derive this cycle's limits from the day's stored snapshot instead of
+        # reusing the process-wide defaults, so ``/day limits`` and the WebUI
+        # settings take effect on the next signal without a restart.  Only the
+        # five numeric limit fields are replaced; fail-closed process rules
+        # (``require_risk_tier``, cooldown, order TTL, taker fee) always come
+        # from ``self.risk_settings`` — see :func:`apply_day_limits`.
+        risk_settings = apply_day_limits(self.risk_settings, day)
+
         # A missing balance must never be interpreted as unlimited margin.
         try:
             available_margin = await self.repository.get_account_balance(account_id)
@@ -1931,7 +2039,7 @@ class PaperTradingRunner:
             instrument=INSTRUMENT,
             direction=direction,
             order_type="market",
-            risk_amount=self.risk_settings.max_risk_per_order,
+            risk_amount=risk_settings.max_risk_per_order,
             stop_price=stop_price,
             take_profit=take_profit,
             leverage=LEVERAGE,
@@ -1943,7 +2051,7 @@ class PaperTradingRunner:
         risk_result: RiskCheckResult = check_order_risk(
             order_request,
             snapshot,
-            self.risk_settings,
+            risk_settings,
             open_positions=open_positions,
             available_margin=available_margin,
             is_day_active=(day.state == DayState.running),
@@ -2041,7 +2149,7 @@ class PaperTradingRunner:
         fill_risk = check_fill_risk(
             order_request,
             fill_snapshot,
-            self.risk_settings,
+            risk_settings,
             reserved_quantity=qty,
             reserved_entry_price=risk_result.entry_price,
             available_margin=available_margin,

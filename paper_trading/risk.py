@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from paper_trading.market import (
     DEFAULT_MAX_AGE_SECONDS,
@@ -30,6 +30,7 @@ __all__ = [
     "RiskSettings",
     "calculate_liquidation_price",
     "calculate_position_size",
+    "canonical_limit",
     "check_fill_risk",
     "check_order_risk",
     "check_reduce_only",
@@ -43,6 +44,27 @@ DEFAULT_MAX_RISK_PER_ORDER = Decimal(10)
 DEFAULT_MAX_DAILY_LOSS = Decimal(50)
 DEFAULT_MAX_LEVERAGE = 10
 DEFAULT_MAX_OPEN_RISK = Decimal(20)
+
+
+def canonical_limit(value: object) -> str | None:
+    """Канонический вид значения лимита — одна форма для показа и для сверки.
+
+    Возвращает ``None`` только для отсутствующего значения: «ключа нет в
+    снапшоте» и «ноль» — разные состояния, и их слияние скрыло бы defaulted
+    лимит, который тикет обязан назвать в ``settings_notes``. Неразбираемое
+    значение возвращается как текст, а не отбрасывается: карточка должна
+    показать то, что лежит в базе, а не молча его починить.
+
+    Форма — фиксированная точка, а не ``str(Decimal.normalize())``: нормализация
+    сводит «10.0» и «10» в одно значение сверки, но отдаёт ``1E+1``, и такой
+    текст карточка показала бы оператору вместо его же лимита.
+    """
+    if value is None:
+        return None
+    try:
+        return format(Decimal(str(value)).normalize(), "f")
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value).strip()
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,14 @@ from paper_trading.contracts import (
     Position,
 )
 from paper_trading.repository import IdempotencyConflict, PaperRepository
-from paper_trading.ticket import TRADABLE_DAY_STATES, day_state_value
+from paper_trading.ticket import (
+    LIMIT_FIELDS,
+    TRADABLE_DAY_STATES,
+    TicketDenied,
+    current_limits,
+    day_state_value,
+    parse_limits,
+)
 
 log = logging.getLogger(__name__)
 
@@ -401,62 +408,214 @@ class PaperTradingService:
             }
         return {"ok": True, "command_id": str(cmd.command_id)}
 
-    async def pause_auto(self, owner_id: str) -> dict[str, Any]:
-        """Pause automatic trading (new entries blocked, positions protected)."""
-        day = await self.repo.get_active_day(_as_uuid(owner_id))
-        if not day:
-            return {"ok": False, "error": "no_active_day"}
+    async def pause_auto(self, owner_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+        """Pause automatic trading (new entries blocked, positions protected).
 
-        auto = await self.repo.get_account_by_kind(_as_uuid(owner_id), AccountKind("auto"))
-        if not auto:
-            return {"ok": False, "error": "no_auto_account"}
-
-        cmd = await self.repo.submit_command(
-            command_id=uuid4(),
-            owner_id=UUID(owner_id) if isinstance(owner_id, str) else owner_id,
-            idempotency_key=f"pause-{day.day_id}",
-            command_type=CommandType("pause_auto"),
-            payload={},
-            account_id=UUID(str(auto.account_id)),
-            day_id=UUID(str(day.day_id)),
+        Ключ принадлежит попытке, а не дню: прежний ``pause-<day_id>`` делал
+        законное «пауза → продолжить → пауза» внутри одного дня повторной
+        выдачей уже исполненной команды, и оператор слышал «ок» там, где
+        ничего не происходило — runner берёт в работу только ``accepted``.
+        Явный ключ (из чат-тикета) по-прежнему детерминирован, поэтому
+        двойное нажатие на одну карточку не создаёт вторую команду.
+        """
+        return await self._auto_control_command(
+            owner_id,
+            CommandType.pause_auto,
+            key_prefix="pause",
+            idempotency_key=idempotency_key,
         )
-        return {"ok": True, "command_id": str(cmd.command_id)}
 
-    async def resume_auto(self, owner_id: str) -> dict[str, Any]:
+    async def resume_auto(self, owner_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
         """Resume automatic trading."""
-        day = await self.repo.get_active_day(_as_uuid(owner_id))
+        return await self._auto_control_command(
+            owner_id,
+            CommandType.resume_auto,
+            key_prefix="resume",
+            idempotency_key=idempotency_key,
+        )
+
+    async def close_all_positions(
+        self,
+        owner_id: str,
+        idempotency_key: str | None = None,
+        block_entries: bool = True,
+    ) -> dict[str, Any]:
+        """Закрыть открытые позиции автомата.
+
+        ``account_id`` обязателен: в домене ``close_all`` без счёта означает
+        «все позиции этого исполнителя», а не «все позиции владельца», поэтому
+        одна чужая команда могла бы закрыть ещё и ручной счёт. Счёт всегда
+        авто-: ручную позицию закрывает ``close_position`` по идентификатору.
+
+        ``block_entries`` по умолчанию ``True``: закрыть позиции и оставить
+        автомат смотреть на тот же рынок значило бы получить новую позицию
+        через такт цикла, поэтому «стоп авто» честен только как два действия
+        в одной команде — закрытие и блокировка новых входов.
+        """
+        return await self._auto_control_command(
+            owner_id,
+            CommandType.close_all,
+            key_prefix="closeall",
+            idempotency_key=idempotency_key,
+            payload={"scope": "auto", "block_entries": bool(block_entries)},
+        )
+
+    async def _auto_control_command(
+        self,
+        owner_id: str,
+        command_type: CommandType,
+        *,
+        key_prefix: str,
+        idempotency_key: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Поставить в очередь команду управления автоматом.
+
+        Один код для pause/resume/close_all: и день, и авто-счёт читаются
+        здесь, а не приходят от клиента (Q-22/Q-23: исполнение не может
+        полагаться на то, что назвал UI). ``IdempotencyConflict`` не
+        проглатывается: отдаётся id команды, которая уже заняла ключ.
+        """
+        owner_uuid = _as_uuid(owner_id)
+        day = await self.repo.get_active_day(owner_uuid)
         if not day:
             return {"ok": False, "error": "no_active_day"}
 
-        auto = await self.repo.get_account_by_kind(_as_uuid(owner_id), AccountKind("auto"))
+        auto = await self.repo.get_account_by_kind(owner_uuid, AccountKind("auto"))
         if not auto:
             return {"ok": False, "error": "no_auto_account"}
 
-        cmd = await self.repo.submit_command(
-            command_id=uuid4(),
-            owner_id=UUID(owner_id) if isinstance(owner_id, str) else owner_id,
-            idempotency_key=f"resume-{day.day_id}",
-            command_type=CommandType("resume_auto"),
-            payload={},
-            account_id=UUID(str(auto.account_id)),
-            day_id=UUID(str(day.day_id)),
-        )
+        key = idempotency_key or f"{key_prefix}-{day.day_id}-{uuid4()}"
+        try:
+            cmd = await self.repo.submit_command(
+                command_id=uuid4(),
+                owner_id=owner_uuid,
+                idempotency_key=key,
+                command_type=command_type,
+                payload=payload or {},
+                account_id=_as_uuid(auto.account_id),
+                day_id=_as_uuid(day.day_id),
+            )
+        except IdempotencyConflict:
+            existing = await self.repo.find_command_by_idempotency_key(owner_uuid, key)
+            return {
+                "ok": False,
+                "error": "idempotency_conflict",
+                "command_id": str(existing.command_id) if existing else None,
+            }
         return {"ok": True, "command_id": str(cmd.command_id)}
 
     async def finish_day(self, owner_id: str) -> dict[str, Any]:
-        """Finish the trading day — closeout both accounts."""
-        day = await self.repo.get_active_day(_as_uuid(owner_id))
+        """Finish the trading day — closeout both accounts.
+
+        Ключ остаётся днём, а не попыткой, и это не та же ошибка, что у
+        pause/resume: этот вызов повторяет планировщик runner'а каждые 2
+        секунды, пока день не дошёл до ``closed`` (``_auto_finish_expired_days``),
+        и уникальный на попытку ключ засыпал бы очередь дублями. Отложенное
+        закрытие возвращается в ``accepted`` через requeue, поэтому повторная
+        выдача по тому же ключу — это тот же retry, а не потерянная команда.
+        """
+        owner_uuid = _as_uuid(owner_id)
+        day = await self.repo.get_active_day(owner_uuid)
         if not day:
             return {"ok": False, "error": "no_active_day"}
 
-        cmd = await self.repo.submit_command(
-            command_id=uuid4(),
-            owner_id=UUID(owner_id) if isinstance(owner_id, str) else owner_id,
-            idempotency_key=f"finish-{day.day_id}",
-            command_type=CommandType("finish_day"),
-            payload={},
-            day_id=UUID(str(day.day_id)),
-        )
+        key = f"finish-{day.day_id}"
+        try:
+            cmd = await self.repo.submit_command(
+                command_id=uuid4(),
+                owner_id=owner_uuid,
+                idempotency_key=key,
+                command_type=CommandType.finish_day,
+                payload={},
+                day_id=_as_uuid(day.day_id),
+            )
+        except IdempotencyConflict:
+            existing = await self.repo.find_command_by_idempotency_key(owner_uuid, key)
+            return {
+                "ok": False,
+                "error": "idempotency_conflict",
+                "command_id": str(existing.command_id) if existing else None,
+            }
+        return {"ok": True, "command_id": str(cmd.command_id)}
+
+    async def load_day_limits(self, owner_id: str) -> dict[str, Any]:
+        """Действующие лимиты дня — то, что карточка показывает оператору.
+
+        Форма одна на показ и на сверку (:func:`~paper_trading.ticket
+        .current_limits`): те же строки уходят в ``expected`` команды, поэтому
+        CAS не может сверять не то, что человек видел.
+        """
+        day = await self.repo.get_active_day(_as_uuid(owner_id))
+        if not day:
+            return {"ok": False, "error": "no_active_day"}
+        limits, notes = current_limits(day)
+        return {
+            "ok": True,
+            "day_id": str(day.day_id),
+            "day_state": day_state_value(day),
+            "limits": limits,
+            "settings_notes": notes,
+        }
+
+    async def set_day_limits(
+        self,
+        owner_id: str,
+        limits: dict[str, Any],
+        expected: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Изменить лимиты дня посреди дня (tighten/reduce как доменное действие).
+
+        Значения не выдумываются: оператор называет ключи и числа, ввод
+        разбирает :func:`paper_trading.ticket.parse_limits` — тот же словарь
+        ``LIMIT_FIELDS``, что и у карточки, поэтому неизвестный ключ
+        отсекается, а не игнорируется молча. ``expected`` — лимиты, показанные
+        при подтверждении; сверяет их CAS в репозитории внутри одной
+        транзакции, и расхождение становится терминальным ``failed``, а не
+        перезаписью чужого изменения.
+        """
+        owner_uuid = _as_uuid(owner_id)
+        try:
+            parsed = parse_limits(limits)
+            checked = {
+                key: value for key, value in (expected or {}).items() if key in LIMIT_FIELDS
+            }
+        except TicketDenied as exc:
+            return {"ok": False, "error": exc.code, "detail": exc.message}
+
+        day = await self.repo.get_active_day(owner_uuid)
+        if not day:
+            return {"ok": False, "error": "no_active_day"}
+        day_state = day_state_value(day)
+        if day_state not in TRADABLE_DAY_STATES:
+            return {"ok": False, "error": "day_not_active", "day_state": day_state}
+
+        key = idempotency_key or f"limits-{day.day_id}-{uuid4()}"
+        try:
+            cmd = await self.repo.submit_command(
+                command_id=uuid4(),
+                owner_id=owner_uuid,
+                idempotency_key=key,
+                command_type=CommandType.set_automation,
+                payload={
+                    "limits": {k: str(v) for k, v in parsed.items()},
+                    # ``None`` остаётся ``None``: «ключа нет в снапшоте» и текст
+                    # «None» — разные состояния, и CAS сверяет именно отсутствие
+                    # (canonical_limit(None) is None), а не строку-заглушку.
+                    "expected": {
+                        k: (None if v is None else str(v)) for k, v in checked.items()
+                    },
+                },
+                day_id=_as_uuid(day.day_id),
+            )
+        except IdempotencyConflict:
+            existing = await self.repo.find_command_by_idempotency_key(owner_uuid, key)
+            return {
+                "ok": False,
+                "error": "idempotency_conflict",
+                "command_id": str(existing.command_id) if existing else None,
+            }
         return {"ok": True, "command_id": str(cmd.command_id)}
 
     async def get_command_status(self, command_id: str, owner_id: str | None = None) -> dict[str, Any]:

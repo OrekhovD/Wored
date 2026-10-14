@@ -172,20 +172,46 @@ async def close_position(
     )
 
 
-async def pause_auto(owner_id: str) -> dict[str, Any]:
-    """Pause automatic trading."""
+async def pause_auto(owner_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
+    """Pause automatic trading.
+
+    ``idempotency_key`` comes from the caller's confirmation ticket: the same
+    ticket tapped twice must enqueue one command, while a second pause in the
+    same day is a different intent and needs a different key.
+    """
     service = await get_service()
     if service is None:
         return {"ok": False, "error": "service_unavailable"}
-    return await service.pause_auto(owner_id)
+    return await service.pause_auto(owner_id, idempotency_key=idempotency_key)
 
 
-async def resume_auto(owner_id: str) -> dict[str, Any]:
+async def resume_auto(owner_id: str, idempotency_key: str | None = None) -> dict[str, Any]:
     """Resume automatic trading."""
     service = await get_service()
     if service is None:
         return {"ok": False, "error": "service_unavailable"}
-    return await service.resume_auto(owner_id)
+    return await service.resume_auto(owner_id, idempotency_key=idempotency_key)
+
+
+async def close_all_positions(
+    owner_id: str,
+    idempotency_key: str | None = None,
+    block_entries: bool = True,
+) -> dict[str, Any]:
+    """Close the automaton's open positions and stop new entries.
+
+    This is what the WebUI "стоп авто" button always promised: liquidation,
+    not just a pause.  Only the auto account is touched — a manual position
+    is closed by id through :func:`close_position`.
+    """
+    service = await get_service()
+    if service is None:
+        return {"ok": False, "error": "service_unavailable"}
+    return await service.close_all_positions(
+        owner_id,
+        idempotency_key=idempotency_key,
+        block_entries=block_entries,
+    )
 
 
 async def finish_day(owner_id: str) -> dict[str, Any]:
@@ -194,6 +220,36 @@ async def finish_day(owner_id: str) -> dict[str, Any]:
     if service is None:
         return {"ok": False, "error": "service_unavailable"}
     return await service.finish_day(owner_id)
+
+
+async def load_day_limits(owner_id: str) -> dict[str, Any]:
+    """Return the limits currently stored for the active day."""
+    service = await get_service()
+    if service is None:
+        return {"ok": False, "error": "service_unavailable"}
+    return await service.load_day_limits(owner_id)
+
+
+async def set_day_limits(
+    owner_id: str,
+    limits: dict[str, Any],
+    expected: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """Change the active day's risk limits (tighten/reduce as a domain action).
+
+    ``expected`` must be the exact values shown to the operator; a lost
+    compare-and-swap is refused by the runner rather than silently replayed.
+    """
+    service = await get_service()
+    if service is None:
+        return {"ok": False, "error": "service_unavailable"}
+    return await service.set_day_limits(
+        owner_id,
+        limits,
+        expected=expected,
+        idempotency_key=idempotency_key,
+    )
 
 
 async def get_command_status(command_id: str, owner_id: str | None = None) -> dict[str, Any]:
