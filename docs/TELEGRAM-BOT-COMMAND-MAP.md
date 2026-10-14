@@ -1,13 +1,15 @@
-# WORED Telegram Bot — карта команд (P2…P3c.2)
+# WORED Telegram Bot — карта команд (P2…P4b)
 
 Цель документа: зафиксировать, какая Telegram-команда к какому use case идёт,
 где живут устаревшие имена и что ещё не перенесено в новую консоль.
 ТЗ §2 / §10 требует этот файл; TB-03 проверяется по нему.
 
-Обновлён: 2026-10-13 (P3c.2 — правила поверхности ввода: опечатка в команде и
-холостой перерисов карточки).
+Обновлён: 2026-10-14 (P4b — `/day`: управление торговым днём на доменных
+командах, Q-24; легаси-мутирующие кнопки `handlers/pipeline.py` удалены).
 Источник истины: `chatbot/handlers/now.py`, `chatbot/handlers/simulation_v3.py`,
-`chatbot/handlers/telegram_surface.py`, `chatbot/services/simulation_plans.py`,
+`chatbot/handlers/paper_deal.py`, `chatbot/handlers/day_control.py`,
+`chatbot/services/day_control.py`, `chatbot/handlers/telegram_surface.py`,
+`chatbot/services/simulation_plans.py`,
 `chatbot/handlers/deprecated.py`, `chatbot/handlers/menu.py`,
 `chatbot/handlers/start.py`.
 Проверка соответствия: `python -m pytest tests/telegram/test_command_map.py -q`
@@ -73,6 +75,7 @@ keyword-интенты (`покажи рынок`) работают как ра�
 | `/cancel` | служебный ответ `cmd_cancel` | — (wizard живёт с P3c, черновик — в хранилище планов) | P2/P3c |
 | `/plans` | `handlers.simulation_v3.cmd_plans` | `trading_math.simulation_store` + `trading_math.plan_validation` + `trading_math.simulation_proposal` | P3c/P3d |
 | `/deal` | `handlers.paper_deal.cmd_deal` | `paper_trading.ticket.build_ticket` (тот же, что у WebUI) + `paper_trading.adapter` | P4 |
+| `/day` | `handlers.day_control.cmd_day` | `paper_trading.adapter` (`pause_auto`/`resume_auto`/`close_all_positions`/`finish_day`/`set_day_limits`/`load_day_limits`) | P4b |
 
 ### 2.1 `/plans` — экраны SimulationPlanV1 (P3c)
 
@@ -173,9 +176,10 @@ callback нет ни цены, ни объёма — только id; макси
   `ticket_changed` до любой записи;
 * **статус, который не прочитан, — «не подтверждено»**, а не «ошибка»: карточка
   `RESULT_UNKNOWN` обязана назвать `command_id`;
-* **закрытия позиции из чата нет** (объём P4; долг — RFC Q-24): экран не
-  импортирует и не вызывает `close_position`, тест
-  `test_the_screen_never_offers_to_close_a_position`;
+* **закрытия отдельной позиции из чата нет** (объём P4; долг вынесен в P4c,
+  RFC Q-24): экран не импортирует и не вызывает `close_position`, тест
+  `test_the_screen_never_offers_to_close_a_position`; позиции автомата закрывает
+  `/day closeauto` (P4b), ручная позиция из чата не закрывается;
 * **права**: мутации — только owner (`MUTATING_ROLES`); кнопка подтверждения не
   рисуется тому, кто не может писать; авторизация — числовой `from_user.id`,
   `owner_id` из тела/аргументов входом не является;
@@ -184,6 +188,63 @@ callback нет ни цены, ни объёма — только id; макси
   «домен недоступен» и «дня нет» — разные тексты (ТЗ §6);
 * **голые аргументы анкеты не уходят в LLM** (Q-20): `handlers/chat.py` даёт
   честный отказ с полным шаблоном команды, модель не вызывается вовсе.
+
+### 2.4 `/day` — управление торговым днём (P4b, долг RFC Q-24)
+
+Единственная мутирующая поверхность дня. Старые кнопки `handlers/pipeline.py`
+(⏸ Pause / 🛡 Tighten / 📉 Reduce / 🛑 Close all) удалены, а не переписаны:
+они писали в legacy `trading_sessions`, которой у живого дня нет.
+
+| Подкоманда | Экран | Право | Примечание |
+|---|---|---|---|
+| `/day` | `show_form` | owner/admin/viewer | форма команды + разрешённые ключи лимитов (доменный `LIMIT_FIELDS`) |
+| `/day help`, `/day ?` | `show_form` | любой | тот же текст, отдельной реализации нет (TB-03) |
+| `/day pause` (`пауза`) | `show_ticket` | owner | `pause_auto`: новые входы блокируются, открытые позиции и стоп-защита остаются в силе |
+| `/day resume` (`continue`, `продолжить`) | `show_ticket` | owner | `resume_auto`: снимает паузу, входы возобновятся на следующем цикле исполнителя |
+| `/day closeauto` (`closeall`, `stopauto`, `стоп`) | `show_ticket` | owner | `close_all_positions(scope=auto, block_entries=True)`: закрывает позиции автомата и блокирует новые входы; ручной счёт не трогается |
+| `/day finish` (`endday`, `завершить`) | `show_ticket` | owner | `finish_day`: отменяет неотстреленные заявки, закрывает позиции обоих счетов, день → `closed` |
+| `/day limits <ключ>=<число> …` (`tighten`, `reduce`) | `show_ticket` | owner | доменная команда `set_automation`; разбор — `paper_trading.ticket.parse_limits` |
+| `/day confirm <id>` | `confirm` | только owner | текстовый путь подтверждения того же тикета (клиенты без inline-кнопок) |
+| `/day status` | `show_status` | любой | лимиты дня и состояние читаются из `load_day_limits`, ничего не пишется |
+| `/day status <id>` | `show_command_status` | любой | свой `command_id` или однозначный префикс; чужой неотличим от несуществующего |
+
+Inline-callbacks: `daycmd:confirm:<8hex>`, `daycmd:status`,
+`daycmd:status:<command_id>`, `daycmd:positions` (тот же экран, что
+`/positions`, копия не введена) плюс навигационные `nav:*`. В `callback_data`
+нет ни чисел, ни названий действия — только идентификатор карточки.
+
+Алиасы `pause/resume/finish/closeauto/limits` живут в одном словаре
+`services/day_control.ALIASES`; слово `close` в него намеренно не внесено — оно
+одинаково читается как «завершить день» и как «закрыть позиции», а угадывать
+направление экран не вправе (тест
+`test_ambiguous_or_unknown_subcommand_is_named_not_guessed`).
+
+Инварианты среза (каждый закреплён `tests/telegram/test_day_control.py`):
+
+* **одно действие — один адресат.** Экран зовёт тот же `paper_trading.adapter`,
+  что и WebUI-кнопка (TB-03); `tests/telegram/test_session_domain_only.py`
+  статически запрещает `/day`-поверхности любые имена legacy-сессии;
+* **ключ идемпотентности принадлежит попытке**: `tg-<owner>-<ticket>`, поэтому
+  законное «пауза → продолжить → пауза» внутри одного дня даёт три команды, а
+  двойное нажатие на одну карточку — одну (проверка на реальном PostgreSQL:
+  `tests/paper_trading/test_day_limits_command.py`). Исключение — `finish_day`
+  (`finish-<day>`): его же ставит в очередь планировщик runner'а каждые 2 с,
+  уникальный ключ породил бы дубли;
+* **лимиты не выдумываются.** Оператор называет `ключ=число`, их разбирает
+  доменный `parse_limits` (неизвестный ключ → `unknown_limit`, пусто →
+  `invalid_limits`), а показанные канонические строки уходят в `expected` и
+  сверяются CAS-ом в `merge_day_limits`; проигранный CAS — терминальный
+  `failed`/`limits_changed` и не переиздаётся. Ужесточение не может выключить
+  fail-closed правила процесса (`require_risk_tier`, cooldown, order TTL,
+  taker fee) — `apply_day_limits` подменяет только пять лимитных полей;
+* **«стоп авто» честен как два действия в одной команде**: закрытие позиций +
+  блокировка входов. Если домен не отдал число открытых позиций автомата,
+  карточка не показывается вовсе — обещать ликвидацию, не зная её предмета,
+  нельзя;
+* **подтверждение и права** — как у `/deal`: TTL `TICKET_TTL_SECONDS`, owner-only
+  (`MUTATING_ROLES`), кнопка подтверждения не рисуется читателю, состояние
+  перечитывается в момент нажатия, тикет дня недоступен экрану сделки
+  (`KIND_DAY` vs `KIND_DEAL`), плюс per-actor лимитер на подтверждение.
 
 ## 3. Устаревшие имена → целевой use case
 
@@ -226,6 +287,16 @@ callback нет ни цены, ни объёма — только id; макси
   затрагиваются;
 * защита от регресса: `tests/telegram/test_session_domain_only.py` — runtime
   guard (legacy writer бросает исключение) и статическая проверка исходника.
+
+С P4b (Q-24) из этого контура удалены все мутирующие ветки: сервисные писатели
+`_handle_stop_safe`/`_handle_revision_safe`, inline-коллбэки `pipeline_pause`,
+`pipeline_tighten`, `pipeline_reduce`, `pipeline_close_all` и кнопка «🛑 Close all»
+с экрана позиций. Фразы («пауза сессии», «остановить сессию», «ужесточить»,
+«снизить», «закрыть всё») по-прежнему распознаются
+`classify_pipeline_intent` — иначе они молча ушли бы в AI-фолбек, — но отвечают
+редиректом `_day_control_redirect()` на `/day` и не пишут ничего (тесты
+`test_control_phrase_is_still_a_product_intent` и
+`test_control_phrase_never_reaches_the_legacy_writer`).
 
 ## 5. Reply-keyboard кнопки
 
