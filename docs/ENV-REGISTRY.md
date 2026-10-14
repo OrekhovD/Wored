@@ -205,6 +205,50 @@ More restrictive user limits always take precedence.
 | `PAPER_AI_PLAN_TTL_SECONDS` | int | `3600` | optional | collector | no |
 | `PAPER_AI_MAX_REQUESTS_PER_DAY` | int | `48` | optional | collector | no |
 | `PAPER_AI_MAX_TOKENS_PER_DAY` | int | `200000` | optional | collector | no |
+| `PAPER_RISK_TIER_DECLARED` | bool | `false` | optional | collector HTX publisher | no |
+| `PAPER_RISK_TIER_TIER` | int | none — required when enabled | conditional | collector HTX publisher | no |
+| `PAPER_RISK_TIER_MAX_LEVERAGE` | int | none — required when enabled | conditional | collector HTX publisher | no |
+| `PAPER_RISK_TIER_MAINTENANCE_MARGIN_RATE` | decimal | none — required when enabled | conditional | collector HTX publisher | no |
+| `PAPER_STRATEGY_COOLDOWN_SECONDS` | float | `600` | optional | collector runner (BaselineV1) | no |
+| `PAPER_STRATEGY_MIN_NET_RR` | decimal | `1.2` | optional | collector runner (BaselineV1) | no |
+| `PAPER_STRATEGY_SL_ATR_FRACTION` | decimal | `0.25` | optional | collector runner (BaselineV1) | no |
+| `PAPER_STRATEGY_TP_RR` | decimal | `2` | optional | collector runner (BaselineV1) | no |
+
+**Declared risk tier (2026-10-15).** The four `PAPER_RISK_TIER_*` keys are not a
+risk limit — they are a manual substitute for a *market-data* field the venue
+does not publish. Measured on the live endpoint,
+`/linear-swap-api/v1/swap_contract_info` returns neither `max_leverage` nor
+`maintenance_margin_rate`, and the documented alternatives are either an
+insurance-fund view (`swap_risk_info`) or an authenticated per-position limit
+(`swap_lever_position_limit`), so no public source can build a tier. Without one
+the executor's `require_risk_tier` gate refuses every automatic entry
+(`risk_tier_unavailable`) — correct for a real account, fatal for a simulation.
+The declaration is all-or-nothing (`collector/htx/perpetual_market.py:
+declared_risk_tier`): with the switch on, a missing or unparsable value is an
+error that is logged and publishes the snapshot **without** a tier, never with a
+guessed one; the published tier carries `source="operator-declared"` so the deal
+ticket and the audit can tell it apart from venue data. `false` (or removing the
+block) restores the previous behaviour exactly.
+
+`PAPER_STRATEGY_*` are the four entry parameters of `BaselineV1Config`
+(`cooldown_seconds`, `min_net_rr`, `sl_atr_fraction`, `tp_rr`). They decide
+*whether the strategy acts*, not what an order costs, and they are separate from
+the risk layer: the gate's own `min_net_rr` stays a day limit in
+`paper_v2_days.settings_snapshot`. Two of them exist because of a measured
+property of the live feed: one round trip of taker fee costs about `2 × 0.05% ×
+price` ≈ 82 USDT of BTC near 81 900, so with `tp_rr=2` any stop narrower than
+~41 USDT has non-positive net reward:risk — and the 1m ATR was ~20 USDT, i.e.
+the default `sl_atr_fraction=0.25` produced stops around 15-25 USDT. Every
+trigger was cancelled on cost before the risk gate saw it. Widening the stop and
+raising the target is what makes a quiet market tradeable at all.
+
+The deployed value `min_net_rr=0.3` is **below** the `0.5` floor
+`paper_trading/rules.py` sets for self-learn candidates — an operator decision
+for the simulated account, not a production policy, and any future ruleset
+overlay will clamp it back to 0.5. All four keys fail fast at startup on a
+non-numeric, negative (or, for the two shape knobs, zero) value; the effective
+numbers are logged (`strategy config: …`) so the running policy is readable from
+the container log.
 
 Invalid configuration causes explicit readiness failure for the trading subsystem.
 `PAPER_ENGINE_ENABLED=false` keeps the new runner off until cutover; existing
