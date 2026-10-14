@@ -3,7 +3,25 @@ from datetime import datetime, timezone
 
 import pytest
 
-from collector.htx.perpetual_market import PerpetualFeedError, build_snapshot
+from collector.htx.perpetual_market import (
+    PerpetualFeedError,
+    build_snapshot,
+    declared_risk_tier,
+)
+
+#: Every environment key the operator tier declaration reads.  Tests clear all
+#: of them so a variable set in the developer's shell cannot change an answer.
+DECLARED_TIER_ENVS = (
+    "PAPER_RISK_TIER_DECLARED",
+    "PAPER_RISK_TIER_TIER",
+    "PAPER_RISK_TIER_MAX_LEVERAGE",
+    "PAPER_RISK_TIER_MAINTENANCE_MARGIN_RATE",
+)
+
+
+def _clean_declared_tier(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in DECLARED_TIER_ENVS:
+        monkeypatch.delenv(key, raising=False)
 
 
 def payloads() -> dict:
@@ -86,3 +104,48 @@ def test_build_snapshot_rejects_contract_mismatch() -> None:
     values["funding"]["data"]["contract_code"] = "ETH-USDT"
     with pytest.raises(PerpetualFeedError, match="identity mismatch"):
         build_snapshot(**values)
+
+
+def test_declared_tier_stays_off_without_the_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tier value in the environment is not permission to publish a tier."""
+    _clean_declared_tier(monkeypatch)
+    monkeypatch.setenv("PAPER_RISK_TIER_TIER", "1")
+    monkeypatch.setenv("PAPER_RISK_TIER_MAX_LEVERAGE", "50")
+    monkeypatch.setenv("PAPER_RISK_TIER_MAINTENANCE_MARGIN_RATE", "0.005")
+    assert declared_risk_tier(datetime.now(timezone.utc)) == {}
+
+
+def test_declared_tier_requires_every_declared_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Half a declaration is an error, never a silently guessed margin rate."""
+    _clean_declared_tier(monkeypatch)
+    monkeypatch.setenv("PAPER_RISK_TIER_DECLARED", "true")
+    monkeypatch.setenv("PAPER_RISK_TIER_TIER", "1")
+    monkeypatch.setenv("PAPER_RISK_TIER_MAX_LEVERAGE", "50")
+    with pytest.raises(PerpetualFeedError, match="PAPER_RISK_TIER_MAINTENANCE_MARGIN_RATE"):
+        declared_risk_tier(datetime.now(timezone.utc))
+
+
+def test_declared_tier_is_published_and_named_as_declared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The declared tier reaches the snapshot with a source an audit can read."""
+    _clean_declared_tier(monkeypatch)
+    monkeypatch.setenv("PAPER_RISK_TIER_DECLARED", "true")
+    monkeypatch.setenv("PAPER_RISK_TIER_TIER", "1")
+    monkeypatch.setenv("PAPER_RISK_TIER_MAX_LEVERAGE", "50")
+    monkeypatch.setenv("PAPER_RISK_TIER_MAINTENANCE_MARGIN_RATE", "0.005")
+    now = datetime(2026, 10, 15, 3, 0, tzinfo=timezone.utc)
+
+    tier = declared_risk_tier(now)
+
+    assert tier == {
+        "tier": 1,
+        "max_leverage": 50,
+        "maintenance_margin_rate": "0.005",
+        "source_at": now.isoformat(),
+        "source": "operator-declared",
+    }
+    # The contract metadata in these payloads carries no leverage/maintenance
+    # margin — exactly the live case — so the declared tier must win.
+    snapshot = build_snapshot(risk_tier=tier, **payloads())
+    assert snapshot["risk_tier"]["source"] == "operator-declared"

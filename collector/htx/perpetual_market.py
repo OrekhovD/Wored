@@ -80,7 +80,9 @@ def build_risk_tier(
     The public HTX market endpoints used by the current collector do not
     provide a stable risk-tier response for every contract.  The publisher
     therefore only attaches a tier supplied by a verified risk-control
-    adapter; it never invents a maintenance margin from a static default.
+    adapter or by an explicit operator declaration
+    (:func:`declared_risk_tier`); it never invents a maintenance margin from a
+    static default.
     """
     if tier < 1:
         raise PerpetualFeedError("risk_tier.tier: must be >= 1")
@@ -128,6 +130,52 @@ def _risk_tier_from_contract(contract: dict[str, Any], now: datetime) -> dict[st
         )
     except (TypeError, ValueError, PerpetualFeedError) as exc:
         raise PerpetualFeedError("risk_tier: invalid HTX contract metadata") from exc
+
+
+#: Environment keys that carry an operator's risk-tier declaration.  The
+#: declaration is all-or-nothing: ``PAPER_RISK_TIER_DECLARED`` enables it and
+#: every value below has to be present, so an unread variable can never turn a
+#: half-configured assumption into a "safe" maintenance margin.
+DECLARED_TIER_ENABLED_ENV = "PAPER_RISK_TIER_DECLARED"
+DECLARED_TIER_ENV = {
+    "tier": "PAPER_RISK_TIER_TIER",
+    "max_leverage": "PAPER_RISK_TIER_MAX_LEVERAGE",
+    "maintenance_margin_rate": "PAPER_RISK_TIER_MAINTENANCE_MARGIN_RATE",
+}
+
+
+def declared_risk_tier(now: datetime) -> dict[str, Any]:
+    """Build the risk tier an operator declared in the environment.
+
+    HTX's public contract endpoint does not return per-tier leverage or
+    maintenance margin, so a usable tier can only come from an operator who
+    read it on the venue.  The result is marked ``source="operator-declared"``
+    and travels inside the snapshot, which keeps the distinction visible in the
+    deal ticket and the audit instead of pretending the number is exchange
+    data.  When the switch is off the function returns ``{}``; when it is on but
+    incomplete or unparsable it raises, because a half-declared tier is exactly
+    the silent default this module promises never to invent.
+    """
+    if os.getenv(DECLARED_TIER_ENABLED_ENV, "false").strip().lower() != "true":
+        return {}
+    raw: dict[str, str] = {}
+    for field, env_key in DECLARED_TIER_ENV.items():
+        value = os.getenv(env_key)
+        if value is None or not value.strip():
+            raise PerpetualFeedError(
+                f"risk_tier: {env_key} is required when {DECLARED_TIER_ENABLED_ENV}=true"
+            )
+        raw[field] = value.strip()
+    try:
+        return build_risk_tier(
+            tier=int(raw["tier"]),
+            max_leverage=int(raw["max_leverage"]),
+            maintenance_margin_rate=raw["maintenance_margin_rate"],
+            source_at=now,
+            source="operator-declared",
+        )
+    except (TypeError, ValueError, PerpetualFeedError) as exc:
+        raise PerpetualFeedError(f"risk_tier: invalid operator declaration: {exc}") from exc
 
 
 def build_snapshot(
@@ -287,6 +335,16 @@ class HtxPerpetualPublisher:
                         "/linear-swap-ex/market/detail/merged",
                         contract_code=self.contract_code,
                     )
+                    try:
+                        declared = declared_risk_tier(datetime.now(timezone.utc))
+                    except PerpetualFeedError as exc:
+                        # A broken declaration must not delete the market feed.
+                        # The snapshot goes out without a tier, and the engine
+                        # keeps failing closed on ``risk_tier_unavailable``.
+                        log.error(
+                            "declared risk tier rejected, publishing without tier: %s", exc
+                        )
+                        declared = {}
                     snapshot = build_snapshot(
                         contract_code=self.contract_code,
                         ticker=ticker,
@@ -294,6 +352,7 @@ class HtxPerpetualPublisher:
                         funding=self.reference.funding or {},
                         contract=self.reference.contract or {},
                         mark=self.reference.mark or {},
+                        risk_tier=declared or None,
                     )
                     key = f"{MARKET_KEY_PREFIX}:{self.contract_code}"
                     await redis.set(key, json.dumps(snapshot, separators=(",", ":")), ex=ttl)
