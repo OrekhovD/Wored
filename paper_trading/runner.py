@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -77,7 +79,7 @@ from paper_trading.risk import (
     check_fill_risk,
     check_order_risk,
 )
-from paper_trading.strategy import Bar, BaselineV1Strategy
+from paper_trading.strategy import Bar, BaselineV1Config, BaselineV1Strategy
 from paper_trading.strategy import Signal as StrategySignal
 from paper_trading.ticket import apply_day_limits
 
@@ -434,6 +436,67 @@ class RedisMarketDataSource(MarketDataSource):
             return None
 
 
+# ─── Deployment configuration (env) ────────────────────────────────────
+
+
+def _env_number(name: str, default: float, *, positive: bool = False) -> float:
+    """Read one numeric deployment knob, failing fast on a bad value.
+
+    Falling back to the default on unparsable input would let a deployment that
+    asked for one policy quietly run another; a startup error names the
+    variable instead.
+    """
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw.strip())
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a number, got {raw.strip()!r}") from exc
+    if not math.isfinite(value):
+        raise RuntimeError(f"{name} must be a finite number")
+    if positive and value <= 0:
+        raise RuntimeError(f"{name} must be positive")
+    if value < 0:
+        raise RuntimeError(f"{name} must be non-negative")
+    return value
+
+
+def _strategy_config_from_env() -> BaselineV1Config:
+    """Entry parameters the deployment may tune without editing code.
+
+    The four knobs decide whether the strategy acts at all: the post-stop-loss
+    cooldown, the reward:risk it accepts, how wide the protective stop is and
+    how far the target sits.  The last two matter more than they look — the
+    round-trip taker fee is a fixed cost in price terms (about 82 USDT of BTC
+    at 81 900), so with ``tp_rr=2`` a stop narrower than roughly 41 USDT cannot
+    reach any positive net reward:risk, and in a quiet market (1m ATR near 20)
+    every trigger is cancelled on cost before the risk gate ever sees it.  What
+    an order costs and how risk is measured stay code-owned, and the effective
+    numbers are logged at startup, because the running policy has to be
+    readable from the container log and not only from a diff.
+    """
+    cfg = BaselineV1Config()
+    cfg.cooldown_seconds = _env_number("PAPER_STRATEGY_COOLDOWN_SECONDS", cfg.cooldown_seconds)
+    cfg.min_net_rr = Decimal(
+        str(_env_number("PAPER_STRATEGY_MIN_NET_RR", float(cfg.min_net_rr)))
+    )
+    cfg.sl_atr_fraction = Decimal(
+        str(_env_number("PAPER_STRATEGY_SL_ATR_FRACTION", float(cfg.sl_atr_fraction), positive=True))
+    )
+    cfg.tp_rr = Decimal(
+        str(_env_number("PAPER_STRATEGY_TP_RR", float(cfg.tp_rr), positive=True))
+    )
+    log.info(
+        "strategy config: cooldown_seconds=%s min_net_rr=%s sl_atr_fraction=%s tp_rr=%s",
+        cfg.cooldown_seconds,
+        cfg.min_net_rr,
+        cfg.sl_atr_fraction,
+        cfg.tp_rr,
+    )
+    return cfg
+
+
 # ─── Runner ────────────────────────────────────────────────────────────
 
 class PaperTradingRunner:
@@ -496,9 +559,7 @@ class PaperTradingRunner:
         Wires real dependencies (market_data, command_source, recovery_store,
         repository) from Redis and PostgreSQL when available.
         """
-        import os
-
-        strategy = BaselineV1Strategy()
+        strategy = BaselineV1Strategy(_strategy_config_from_env())
         poll = float(os.getenv("PAPER_ENGINE_INTERVAL_SECONDS", "2"))
         hb = float(os.getenv("PAPER_HEARTBEAT_INTERVAL_SECONDS", "5"))
 

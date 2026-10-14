@@ -1,0 +1,74 @@
+"""Deployment-level strategy knobs read by ``PaperTradingRunner.from_env``.
+
+The engine's entry frequency was code-only before these keys existed, which
+meant "make the simulation trade sooner" required a code change and a rebuild.
+These tests pin the three behaviours the operator relies on: nothing set keeps
+the historical defaults, a value is honoured, and a broken value fails at
+startup instead of quietly running the other policy.
+"""
+from __future__ import annotations
+
+from decimal import Decimal
+
+import pytest
+
+from paper_trading.runner import _strategy_config_from_env
+
+#: Every environment key :func:`_strategy_config_from_env` reads.
+STRATEGY_ENVS = (
+    "PAPER_STRATEGY_COOLDOWN_SECONDS",
+    "PAPER_STRATEGY_MIN_NET_RR",
+    "PAPER_STRATEGY_SL_ATR_FRACTION",
+    "PAPER_STRATEGY_TP_RR",
+)
+
+
+def _clean(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in STRATEGY_ENVS:
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_defaults_are_unchanged_when_nothing_is_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clean(monkeypatch)
+    cfg = _strategy_config_from_env()
+    assert cfg.cooldown_seconds == 600.0
+    assert cfg.min_net_rr == Decimal("1.2")
+    assert cfg.sl_atr_fraction == Decimal("0.25")
+    assert cfg.tp_rr == Decimal(2)
+
+
+def test_environment_overrides_every_knob(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clean(monkeypatch)
+    monkeypatch.setenv("PAPER_STRATEGY_COOLDOWN_SECONDS", "60")
+    monkeypatch.setenv("PAPER_STRATEGY_MIN_NET_RR", "0.3")
+    monkeypatch.setenv("PAPER_STRATEGY_SL_ATR_FRACTION", "1.5")
+    monkeypatch.setenv("PAPER_STRATEGY_TP_RR", "3")
+    cfg = _strategy_config_from_env()
+    assert cfg.cooldown_seconds == 60.0
+    assert cfg.min_net_rr == Decimal("0.3")
+    assert cfg.sl_atr_fraction == Decimal("1.5")
+    assert cfg.tp_rr == Decimal("3")
+
+
+def test_unparsable_value_fails_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clean(monkeypatch)
+    monkeypatch.setenv("PAPER_STRATEGY_MIN_NET_RR", "aggressive")
+    with pytest.raises(RuntimeError, match="PAPER_STRATEGY_MIN_NET_RR"):
+        _strategy_config_from_env()
+
+
+def test_negative_value_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A negative cooldown would mean "never cool down" — that is a misconfig."""
+    _clean(monkeypatch)
+    monkeypatch.setenv("PAPER_STRATEGY_COOLDOWN_SECONDS", "-1")
+    with pytest.raises(RuntimeError, match="non-negative"):
+        _strategy_config_from_env()
+
+
+def test_zero_stop_fraction_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A zero-width stop buffer would put the stop exactly on the swing low."""
+    _clean(monkeypatch)
+    monkeypatch.setenv("PAPER_STRATEGY_SL_ATR_FRACTION", "0")
+    with pytest.raises(RuntimeError, match="positive"):
+        _strategy_config_from_env()
+
