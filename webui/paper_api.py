@@ -44,6 +44,7 @@ try:
         close_position as _pt_close_position,
         pause_auto as _pt_pause_auto,
         resume_auto as _pt_resume_auto,
+        close_all_positions as _pt_close_all_positions,
         owner_id_from_webui as _pt_owner_id,
         ticket_inputs as _pt_ticket_inputs,
     )
@@ -540,6 +541,29 @@ async def save_settings(request: Request, body: Dict[str, Any] = Body(...)) -> J
         row = await store.load(owner_key)
     if (row.state or {}).get("day", {}).get("state") == "active":
         raise HTTPException(status_code=409, detail="Завершите день перед изменением условий")
+    if _use_pt_domain(request):
+        # Прототипный guard выше срабатывает только на прототипном же дне, а в
+        # доменном режиме ``row.state`` пуст — то есть условия записывались бы
+        # молча посреди живого дня, хотя применяются только к следующему
+        # (``start_day`` читает их при старте). Проверка состояния идёт в
+        # домене; если домен его не отдал, сохранение запрещается вместо догадки.
+        try:
+            owner_id = _owner_from_request(request)
+            domain_state = await _pt_get_state(owner_id)
+        except Exception as exc:
+            log.warning("trading-day/settings: domain day state unavailable: %s", exc)
+            raise HTTPException(
+                status_code=502, detail="Не удалось проверить состояние дня") from exc
+        if not domain_state.get("ok"):
+            log.warning("trading-day/settings: %s", domain_state.get("error"))
+            raise HTTPException(
+                status_code=502, detail="Не удалось проверить состояние дня")
+        if domain_state.get("day"):
+            raise HTTPException(
+                status_code=409,
+                detail=("Завершите день перед изменением условий; "
+                        "лимиты посреди дня меняются командой /day limits в чате"),
+            )
     timezone_name = str(body.get("timezone", "Asia/Bangkok"))
     try:
         ZoneInfo(timezone_name)
@@ -675,10 +699,18 @@ async def automation(request: Request, day_id: str, body: Dict[str, Any] = Body(
             raise HTTPException(status_code=422, detail="Неизвестная команда автомата")
         try:
             owner_id = _owner_from_request(request)
+            # Клиентский ``idempotency_key`` сюда не прокидывается: в домене ключ
+            # принадлежит попытке (``pause-<day>-<uuid>``), а защита от двойного
+            # нажатия живёт в тикете подтверждения, которого у WebUI-кнопки нет.
+            # Повторный POST создаёт вторую такую же команду — обе честные и
+            # обе идемпотентны по эффекту (пауза поверх паузы).
             if action == "resume":
                 result = await _pt_resume_auto(owner_id)
+            elif action == "close_auto":
+                # Кнопка обещает ликвидацию, и домен её выполняет: блокирует
+                # новые входы и закрывает открытые позиции автомата.
+                result = await _pt_close_all_positions(owner_id)
             else:
-                # close_auto also stops new entries; the runner owns liquidation.
                 result = await _pt_pause_auto(owner_id)
             if not result.get("ok"):
                 raise RuntimeError(str(result.get("error") or "domain_auto_command_failed"))
@@ -707,7 +739,7 @@ async def automation(request: Request, day_id: str, body: Dict[str, Any] = Body(
     action = str(body.get("action", ""))
     labels = {"pause": "Новые входы приостановлены; защита позиций продолжает работать",
               "resume": "Наблюдает за рынком; подходящего входа пока нет",
-              "close_auto": "Автомат остановлен; открытых позиций нет"}
+              "close_auto": "Новые входы остановлены; открытые позиции нужно закрыть вручную"}
     if action not in labels:
         raise HTTPException(status_code=422, detail="Неизвестная команда автомата")
     state["auto_state"] = "paused" if action in {"pause", "close_auto"} else "observing"

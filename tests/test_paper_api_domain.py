@@ -278,3 +278,98 @@ async def test_preview_surfaces_risk_gate_reasons(
     })
     assert resp.status_code == 422
     assert resp.json()["detail"] == "Недостаточно доступной маржи"
+
+
+async def test_close_auto_executes_the_domain_liquidation_not_a_pause(
+    domain_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Q-24: кнопка «Стоп авто» обещает ликвидацию — и домен её выполняет.
+
+    До P4b этот же обработчик звал ``pause_auto``: день оставался с открытыми
+    позициями, а JS-подпись кнопки утверждала обратное.
+    """
+    calls: list[str] = []
+
+    async def fake_close_all(owner_id: str) -> dict[str, Any]:
+        calls.append("close_all")
+        return {"ok": True, "command_id": "cmd-close-all"}
+
+    async def fake_pause(owner_id: str) -> dict[str, Any]:
+        calls.append("pause")
+        return {"ok": True, "command_id": "cmd-pause"}
+
+    monkeypatch.setattr(paper_api, "_pt_close_all_positions", fake_close_all)
+    monkeypatch.setattr(paper_api, "_pt_pause_auto", fake_pause)
+    resp = await _post(domain_app, "/api/trading-day/d1/automation", {"action": "close_auto"})
+
+    assert resp.status_code == 202
+    assert resp.json()["command_id"] == "cmd-close-all"
+    assert calls == ["close_all"], "пауза вместо закрытия — то самое враньё Q-24"
+
+
+async def test_close_auto_domain_failure_never_writes_prototype_state(
+    domain_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_close_all(owner_id: str) -> dict[str, Any]:
+        return {"ok": False, "error": "no_auto_account"}
+
+    monkeypatch.setattr(paper_api, "_pt_close_all_positions", fake_close_all)
+    resp = await _post(domain_app, "/api/trading-day/d1/automation", {"action": "close_auto"})
+
+    assert resp.status_code == 502
+
+
+async def test_settings_are_refused_while_the_domain_day_is_running(
+    domain_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Запись условий посреди живого дня отказана и указывает на `/day limits`."""
+    from webui.paper_store import MemoryPaperStore
+
+    async def fake_state(owner_id: str) -> dict[str, Any]:
+        return {"ok": True, "day": {"id": "d1", "state": "running"}, "accounts": []}
+
+    monkeypatch.setattr(paper_api, "_pt_get_state", fake_state)
+    monkeypatch.setattr(paper_api, "get_paper_store", lambda request: MemoryPaperStore())
+    resp = await _post(domain_app, "/api/trading-day/settings", {"timezone": "Asia/Bangkok"})
+
+    assert resp.status_code == 409
+    assert "/day limits" in resp.json()["detail"]
+
+
+async def test_settings_are_refused_when_the_domain_day_state_is_unreadable(
+    domain_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """«не прочитали состояние» — это 502, а не «дня нет, пиши условия»."""
+    from webui.paper_store import MemoryPaperStore
+
+    async def fake_state(owner_id: str) -> dict[str, Any]:
+        return {"ok": False, "error": "service_unavailable"}
+
+    monkeypatch.setattr(paper_api, "_pt_get_state", fake_state)
+    monkeypatch.setattr(paper_api, "get_paper_store", lambda request: MemoryPaperStore())
+    resp = await _post(domain_app, "/api/trading-day/settings", {"timezone": "Asia/Bangkok"})
+
+    assert resp.status_code == 502
+
+
+async def test_settings_are_allowed_when_no_domain_day_is_running(
+    domain_app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Между днями запись жива: отказ должен относиться только к живому дню."""
+    from webui.paper_store import MemoryPaperStore
+
+    async def fake_state(owner_id: str) -> dict[str, Any]:
+        return {"ok": True, "day": None, "accounts": [], "next_action": "start"}
+
+    monkeypatch.setattr(paper_api, "_pt_get_state", fake_state)
+    store = MemoryPaperStore()
+    monkeypatch.setattr(paper_api, "get_paper_store", lambda request: store)
+    resp = await _post(domain_app, "/api/trading-day/settings", {
+        "end_time_local": "22:30", "timezone": "Asia/Bangkok",
+        "opening_capital": "2500", "max_daily_loss_usdt": "100",
+        "max_risk_per_order_usdt": "20", "max_leverage": 5,
+    })
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["settings"]["max_leverage"] == 5
+    assert store._rows, "между днями запись сохраняется, а не отказывается"
