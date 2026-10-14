@@ -182,6 +182,72 @@ docker compose up -d --build chatbot webui      → лог: output/p4b_deploy.lo
 записи в legacy-таблицу, и только после этого стал зелёным. Отчёт фиксирует обе версии, а не
 только финальную.
 
+### 6.5 Живое сообщение оператора: read-путь `/day status` подтверждён (2026-10-15)
+
+Оператор набрал `/day status` в боевом боте и прислал карточку. Это первое живое сообщение,
+прошедшее через поверхность P4b, поэтому она разобрана построчно, а не «на глаз».
+
+```
+📊 День
+день 890d7b7f · состояние running
+лимиты дня (settings_snapshot):
+· max_daily_loss_usdt = 50
+· max_leverage = 10
+· max_open_risk_usdt = 20
+· max_risk_per_order_usdt = 10
+· min_net_rr = N/A
+⚠️ нет в снапшоте дня, действует дефолт RiskSettings: min_net_rr
+посреди дня лимиты меняются этим экраном (/day limits) и только через подтверждение; условия нового дня — WebUI
+```
+
+| Строка карточки | Откуда она в коде | Соответствие |
+|---|---|---|
+| `📊 День` | `day_control.py:198` — заголовок `📊 <b>День</b>` | есть |
+| `день 890d7b7f · состояние running` | строки 180–181: `day_id[:8]` и `day_state` | есть |
+| `лимиты дня (settings_snapshot):` | строка 182 (именно это имя источника, а не «risk_policy») | есть |
+| пять строк `· <ключ> = <значение>`, по алфавиту | строки 184–185: обход `summary["limits"]` через `sorted()`, форма — `ticket.current_limits` + `risk.canonical_limit` | есть; порядок `max_daily_loss → max_leverage → max_open_risk → max_risk_per_order → min_net_rr` — буквальный результат сортировки |
+| `⚠️ нет в снапшоте дня, действует дефолт RiskSettings: min_net_rr` | строки 186–191 | есть |
+| нижний курсивный колophon | строки 192–195 | есть дословно |
+
+`N/A` и предупреждение — не заглушка, а честное состояние данных. Read-only сверка
+(`output/p4b_live_day_status.sql` → `output/p4b-live-day-status.log`):
+
+* незакрытых дней два — `890d7b7f` и `df5549c7`, оба `running`; карточка отдала `890d7b7f`, и это
+  не «первый из списка»: `status()` → `load_day()` → `pt_adapter.load_day_limits(owner_id)`
+  берёт активный день **владельца запроса** (`paper_v2_days` имеет уникальный индекс «один
+  незакрытый день на владельца», поэтому два `running` — это два разных владельца);
+* `min_net_rr_key_present=false`, `raw=ABSENT` — ключа в `settings_snapshot` действительно нет,
+  поэтому значение отдаётся дефолтом `RiskSettings.min_net_rr = Decimal("1.0")` и обязан быть
+  назван в `settings_notes`. Молча подставить `1.0` было бы дефектом Q-25, которого нет;
+* sidecar-ключи снапшота целы: `mode=baseline_auto`, `opening_capital=1000`,
+  `max_positions_per_instrument=1`, `timezone=Asia/Bangkok`, `end_time_local=21:00`,
+  `strategy_version=baseline_v1`. CAS-команда лимитов их не затёрла — ровно то, что закреплено
+  тестом на `repository.merge_day_limits`;
+* `last_cmd` — ничего позже `2026-10-14 21:00:02`: **`/day status` не записал ни одной команды**,
+  как и обязан (read-экран). Там четыре строки `start_day completed`, и на них стоит остановиться:
+  первым чтением они выглядят как двойная постановка одной команды, но
+  `output/p4b_live_startday_detail.sql` → `output/p4b-live-startday-detail.log` показывает, что на
+  каждого владельца их две разные — `key=start-<day>-<account>-manual` и `…-auto`, разные
+  `account_id` и разные `result.account_kind`. Владельца два, счетов по два на каждого:
+  2 × 2 = 4 строки на такт. Дублей нет; ключ `start_day` детерминирован парой (день, счёт), что
+  для него и правильно. Пересчёт по всей базе (`output/p4b_live_startday_ratio.sql`,
+  `output/p4b_live_orphan_day.sql`): `start_day` = 114 строк = 57 `-manual` + 57 `-auto` на 57
+  разных дней, дней всего 58 — ровно один день (`68338058`, закрыт, владелец `bb6a547d`, создан
+  2026-09-15, в снапшоте нет ни `mode`, ни `strategy_version`) существует без команды старта; это
+  историческая запись более раннего контура, а не следствие P4b, и в рамках этого среза она только
+  зафиксирована. Итоговые счётчики: `day|running|2`, `day|closed|56`, команды все `completed`
+  (`start_day 114`, `finish_day 52`, `submit_order 3`, `close_position 1`, `pause_auto 1`) —
+  ни одной `pending`/`processing`.
+
+Чем доказано, что карточку отдал именно новый код, а не старый экран: строка
+«⚠️ нет в снапшоте дня, действует дефолт RiskSettings:» существует только в
+`chatbot/handlers/day_control.py:189`; у presenter'а тикета (`presenters.py:1139`) другая формулировка
+(«этих лимитов нет…»), а легаси-экран такого текста не выдавал никогда. Лог чата за 36 ч — без
+`ERROR` и `Traceback`; входящее сообщение хендлер не логирует, поэтому лог здесь подтверждает
+только отсутствие падения, а не факт обработки — фактом обработки служит сам текст карточки плюс
+пробник развёртывания (§6.3), который проверил регистрацию `/day` в диспетчере внутри живого
+контейнера на python 3.9.
+
 ## 7. Дефект, найденный тестами среза (исправлен в продукте)
 
 `risk.canonical_limit("10")` возвращал `'1E+1'`: `str(Decimal("10").normalize())` —
@@ -244,12 +310,13 @@ assert wrong is False                      # отсутствие ключа и 
 
 * **P4c (долг, назван в RFC Q-24)**: закрыть **одну** позицию из чата — `close_position`
   с тикетом подтверждения. Сейчас `paper_deal` этот метод не импортирует.
-* **Срез развёрнут в живом контуре 2026-10-14** (§6.2–§6.3), но **не проверен живым
-  сообщением в Telegram**: `/day status` и карточку подтверждения никто реально не нажимал,
-  потому что это действие оператора. Эндпоинт WebUI `close_auto` на боевом контуре тоже не
-  вызывался — он поставил бы в очередь реальную ликвидацию позиций автомата; его маппинг
-  подтверждён чтением задеплоенного исходника (§6.3). Единственный мутационный путь, который
-  стоит пройти после деплоя, — `/day status` (чтение) и одна карточка `pause` → `confirm`.
+* **Срез развёрнут в живом контуре 2026-10-14** (§6.2–§6.3), **read-путь подтверждён живым
+  сообщением 2026-10-15** (§6.5): оператор набрал `/day status`, карточка сошлась с кодом
+  построчно и не записала ни одной команды. **Мутационный путь остаётся непроверенным живьём**:
+  ни одна карточка `pause`/`resume`/`closeauto`/`limits` не подтверждалась кнопкой в боевом боте,
+  эндпоинт WebUI `close_auto` не вызывался — он поставил бы в очередь реальную ликвидацию позиций
+  автомата; его маппинг подтверждён чтением задеплоенного исходника (§6.3). Следующая проверка,
+  которая закрывает долг, — одна карточка `/day pause` → `confirm` и `/day status` после неё.
 * `/day limits` меняет лимиты **текущего** дня; исторический дрейф значений (Q-25)
   остаётся: часть тактов отработала по старым лимитам, и это правильно, но в
   дашборде не видно, по каким именно лимитам была конкретная сделка.
@@ -269,7 +336,10 @@ assert wrong is False                      # отсутствие ключа и 
 * Доказательства: `output/p4b_qa_gate.log`, `output/p4b-live-limits.log`,
   `output/p4b_live_limits.{py,sql}`, `output/p4b_deploy.log`,
   `output/p4b-live-deploy.log` + `output/p4b_live_deploy.py`,
-  `output/p4b-live-state.log` + `output/p4b_live_state.sql`.
+  `output/p4b-live-state.log` + `output/p4b_live_state.sql`,
+  `output/p4b-live-day-status.log` + `output/p4b_live_day_status.sql` (сверка живой карточки §6.5),
+  `output/p4b-live-startday{,-detail}.log` + `output/p4b_live_startday{,_detail,_ratio}.sql` и
+  `output/p4b-live-orphan-day.log` + `output/p4b_live_orphan_day.sql` (разбор четырёх `start_day`).
 
 ## 12. Команды повторной проверки
 
@@ -292,6 +362,12 @@ docker compose -f docker-compose.qa.yml -p wored-qa run --rm checks \
 Get-Content output\p4b_live_limits.sql -Raw |
   docker compose exec -T postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At' |
   py output\p4b_live_limits.py
+
+# сверка живой карточки /day status (§6.5, только SELECT)
+foreach ($f in 'p4b_live_day_status','p4b_live_startday','p4b_live_startday_detail',
+               'p4b_live_startday_ratio','p4b_live_orphan_day') {
+  Get-Content "output\$f.sql" -Raw |
+    docker compose exec -T postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At' }
 ```
 
 ### 12.1 Команды развёртывания и проверки боя
