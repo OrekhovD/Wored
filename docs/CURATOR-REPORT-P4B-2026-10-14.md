@@ -10,7 +10,8 @@ GATE среза: Q-24 закрыт на всех поверхностях, ко�
 
 Итог: **гейт пройден, Q-24 закрыт кроме одного пункта** (закрытие одной позиции из
 чата — долг P4c, зафиксирован в RFC). 1642 passed в авторитетном QA-прогоне, из них
-24 теста этого среза, 13 из них — на живой QA-базе.
+24 теста этого среза, 13 из них — на живой QA-базе. Срез **развёрнут в живом контуре**
+2026-10-14 и подтверждён read-only пробником на боевом образе чата: 24 проверки, PASSED (§6.2–§6.3).
 
 ## 1. Решения куратора, которые определяли объём
 
@@ -107,19 +108,12 @@ py output/p4_py39_audit.py chatbot paper_trading webui collector → модул�
 
 Число модулей печатается намеренно: голый «0» неотличим от «сканировали пустоту».
 
-## 6. Живой контур: только чтение, и что это значит
+## 6. Живой контур
 
-```
-docker compose ps → chatbot, collector, postgres, redis, webui — Up
-```
+### 6.1 До развёртывания: read-only пробник лимитов
 
-Сервисы запущены на **образе до P4b**: `/day` в бою ещё нет. Применение требует явной
-команды куратора (`docker compose up -d --build chatbot webui`) — сам срез её не делал,
-`down`/`restart` на живых сервисах не выполнялись.
-
-Живой read-only пробник лимитов (`output/p4b_live_limits.sql` + `output/p4b_live_limits.py`
-через `docker compose exec -T postgres … psql -At` → `output/p4b-live-limits.log`), два
-`running`-дня:
+Пробник `output/p4b_live_limits.sql` + `output/p4b_live_limits.py` через
+`docker compose exec -T postgres … psql -At` → `output/p4b-live-limits.log`; два `running`-дня:
 
 ```
 max_risk_per_order_usdt = '10'   max_daily_loss_usdt = '50'
@@ -131,6 +125,62 @@ min_net_rr = None                settings_notes = ['min_net_rr']
 
 Карточка `/day status` на боевом дне покажет отсутствующий лимит по имени, а не
 подставит ноль или строку «None». Ни одна строка БД не изменена, команды не создавались.
+
+### 6.2 Развёртывание 2026-10-14 (явная команда куратора «разверни»)
+
+```
+docker compose up -d --build chatbot webui      → лог: output/p4b_deploy.log
+```
+
+Пересобрались и пересоздались `chatbot`, `webui` и `collector` — последний затронут как
+зависимость (image пересобран, кода P4b в `collector/` нет: `git diff 4ba9803..HEAD -- collector/`
+пустой). `postgres` и `redis` не останавливались, `down` не выполнялся.
+
+Стартовые логи (не «Up», а именно содержание):
+
+* `chatbot` на **python 3.9.25** — `AUTHZ: deny-by-default guard installed`,
+  `SURFACE: command token rule installed before all routers`, `Chatbot started polling`,
+  `Run polling for bot @W_W_O_O_bot` — crash-loop на импорте (класс ошибки P4) не случился;
+* `webui` — `Application startup complete`, `Postgres pool bootstrap complete (attempt 1)`,
+  `/readyz` 200;
+* `collector` — `PaperTradingRunner.run_cycle` каждые 2 с зелёный, то есть ветка
+  `set_automation` доступна живому исполнителю, а не только тестам.
+
+Роуты дашборда: `/`, `/alerts`, `/predictions`, `/journal`, `/trading-day`, `/system` — все 200.
+Итог `docker compose ps`: chatbot/webui healthy, collector Up, инфраструктура без изменений.
+
+### 6.3 Живой прогон пробника развёртывания (read-only)
+
+`output/p4b_live_deploy.py` внутри контейнера `chatbot` → `output/p4b-live-deploy.log`:
+**24 проверки, P4b LIVE DEPLOY PROBE: PASSED, `{'writes': 'none'}`**.
+
+| Что проверено | Значение |
+|---|---|
+| `handlers.day_control` импортируется на 3.9 и его роутер не пуст | message-хендлеров 1 (`@router.message(Command("day"))`), callback-хендлеров 4 (`daycmd:confirm:*`, `daycmd:status`, `daycmd:status:*`, `daycmd:positions`) — подкоманды разбираются внутри одного хендлера, поэтому 1, а не 9 |
+| удалённые писатели отсутствуют как атрибуты модуля | `_handle_stop_safe`, `_handle_revision_safe`, `cb_pause`, `cb_tighten`, `cb_reduce`, `cb_close_all` — все absent |
+| `/day`-поверхность не имеет legacy-имён и импортов (то же, что pinned тестом, но на дереве) | AST-проверка по `handlers.day_control` и `services.day_control`: `retired ∩ names = ∅`, импортов `session_manager` нет |
+| в задеплоенном `pipeline.py` нет мутирующего SQL по legacy-таблице | `INSERT/UPDATE/DELETE … trading_sessions` — 0 |
+| доменные методы P4b в образе | `close_all_positions`, `set_day_limits`, `load_day_limits`, `runner._handle_set_automation`, `ticket.parse_limits` |
+| исправление формы числа живое | `canonical_limit("10") == "10"`, `"100000" == "100000"`, `None is None` |
+| WebUI-маппинг `close_auto` | grep по `/app/paper_api.py` в контейнере webui: `elif action == "close_auto"` → `result = await _pt_close_all_positions(owner_id)` (строки 709–712) |
+
+Состояние БД после развёртывания (`output/p4b_live_state.sql` → `output/p4b-live-state.log`):
+`day\|running\|2`, `day\|closed\|54`, команды — только `completed` (`start_day 110`,
+`finish_day 50`, `submit_order 3`, `close_position 1`, `pause_auto 1`), ни одной
+`pending`/`processing`. То есть перезапуск не создал ни одной команды и не завершил ни
+одного дня: те же два бегущих дня, что и до деплоя.
+
+### 6.4 Честная поправка: первая версия пробника была неправильной
+
+Первый запуск дал **4 FAIL** — проверки вида «подстроки `trading_sessions` и
+`pipeline_close_all` не должно быть в файле». Это бага пробника, а не продукта: те имена
+разрешено называть в docstring'ах и в тексте редиректа для оператора, а в `pipeline.py`
+остались **только читающие** legacy-обработчики деталей (`_handle_plan`, `_handle_revision`
+делают `SELECT` в `readonly=True` транзакции и отвечают `ERR_NO_SESSION`, поскольку легаси-строк
+нет). Контракт Q-24 — «нет мутирующих писателей», и именно он проверяется тестами
+`test_session_domain_only.py`; пробник переписан на тот же AST-критерий плюс отсутствие
+записи в legacy-таблицу, и только после этого стал зелёным. Отчёт фиксирует обе версии, а не
+только финальную.
 
 ## 7. Дефект, найденный тестами среза (исправлен в продукте)
 
@@ -194,8 +244,12 @@ assert wrong is False                      # отсутствие ключа и 
 
 * **P4c (долг, назван в RFC Q-24)**: закрыть **одну** позицию из чата — `close_position`
   с тикетом подтверждения. Сейчас `paper_deal` этот метод не импортирует.
-* **Срез не развёрнут в живом контуре** (§6): нужен явный `docker compose up -d --build
-  chatbot webui` от куратора.
+* **Срез развёрнут в живом контуре 2026-10-14** (§6.2–§6.3), но **не проверен живым
+  сообщением в Telegram**: `/day status` и карточку подтверждения никто реально не нажимал,
+  потому что это действие оператора. Эндпоинт WebUI `close_auto` на боевом контуре тоже не
+  вызывался — он поставил бы в очередь реальную ликвидацию позиций автомата; его маппинг
+  подтверждён чтением задеплоенного исходника (§6.3). Единственный мутационный путь, который
+  стоит пройти после деплоя, — `/day status` (чтение) и одна карточка `pause` → `confirm`.
 * `/day limits` меняет лимиты **текущего** дня; исторический дрейф значений (Q-25)
   остаётся: часть тактов отработала по старым лимитам, и это правильно, но в
   дашборде не видно, по каким именно лимитам была конкретная сделка.
@@ -213,7 +267,9 @@ assert wrong is False                      # отсутствие ключа и 
   `git show HEAD:chatbot/handlers/pipeline.py` (английские `⏸ Pause / 🛡 Tighten / 📉 Reduce /
   🛑 Close all`); «Стоп авто» — метка WebUI, и в документе они разделены.
 * Доказательства: `output/p4b_qa_gate.log`, `output/p4b-live-limits.log`,
-  `output/p4b_live_limits.{py,sql}`.
+  `output/p4b_live_limits.{py,sql}`, `output/p4b_deploy.log`,
+  `output/p4b-live-deploy.log` + `output/p4b_live_deploy.py`,
+  `output/p4b-live-state.log` + `output/p4b_live_state.sql`.
 
 ## 12. Команды повторной проверки
 
@@ -237,3 +293,25 @@ Get-Content output\p4b_live_limits.sql -Raw |
   docker compose exec -T postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At' |
   py output\p4b_live_limits.py
 ```
+
+### 12.1 Команды развёртывания и проверки боя
+
+```
+docker compose up -d --build chatbot webui                 # лог: output/p4b_deploy.log
+docker compose ps --format "{{.Name}} {{.Status}}"        # chatbot/webui healthy
+docker compose logs chatbot --tail=40                    # 3.9: polling without crash-loop
+docker compose logs collector --tail=10                  # run_cycle каждые 2 с
+
+# пробник развёртывания (read-only, внутри контейнера чата на python 3.9)
+docker cp output/p4b_live_deploy.py htx_trading_bot_chatbot:/tmp/p4b_live_deploy.py
+docker compose exec -T chatbot python /tmp/p4b_live_deploy.py     # 24 checks, PASSED
+Get-Content output\p4b_live_state.sql -Raw |
+  docker compose exec -T postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At'
+
+foreach ($p in '/','/alerts','/predictions','/journal','/trading-day','/system') {
+  (Invoke-WebRequest -UseBasicParsing "http://localhost:8080$p" -TimeoutSec 15).StatusCode }
+```
+
+`/tmp/p4b_live_deploy.py` остался в контейнере `chatbot`: песочница хоста не пропустила
+команду удаления. Файл — копия пробника без секретов; он живёт до следующего пересоздания
+контейнера и не влияет на работу бота.
