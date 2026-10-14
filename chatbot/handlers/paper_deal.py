@@ -55,16 +55,6 @@ router = Router(name="paper_deal")
 #: ключом тикета, лимитер здесь только против случайного двойного нажатия
 _write_limiter = guards.RateLimiter(1.0)
 
-#: как доменные статусы команды звучат для оператора (``CommandStatus``)
-_STATUS_WORD = {
-    "accepted": "принята, ждёт исполнителя",
-    "processing": "исполняется",
-    "completed": "исполнена",
-    "failed": "исполнена с ошибкой",
-    "conflict": "конфликт идемпотентности — команда не исполнена",
-    "unknown": "состояние не определено",
-}
-
 
 # ─── keyboards ──────────────────────────────────────────────────────────────
 
@@ -235,7 +225,7 @@ async def show_status(target: Message | CallbackQuery, principal: Principal, tok
         return
     lines = [
         f"команда <code>{ui.esc(read.command_id)}</code> · статус {ui.esc(read.status)} "
-        f"({_STATUS_WORD.get(read.status, 'состояние не описано')})",
+        f"({ui.command_status_word(read.status)})",
     ]
     if read.error:
         lines.append(f"ошибка домена: <code>{ui.esc(read.error)}</code>")

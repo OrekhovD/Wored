@@ -149,3 +149,54 @@ def test_start_path_contains_no_legacy_session_import():
 def test_error_text_is_exposed_as_a_single_domain_constant():
     assert pipeline.ERR_DOMAIN_UNAVAILABLE.startswith("🔴")
     assert "paper_trading" in pipeline.ERR_DOMAIN_UNAVAILABLE
+
+
+# ─── Q-24 (срез P4b): управление дня говорит только с доменом ────────────
+
+#: единственные доменные вызовы экрана; новый вход сюда добавляется только
+#: вместе с проверкой, что у него есть runner-исполнитель и карточка
+_DAY_ADAPTER_CALLS = {
+    "load_day_limits", "get_current_state", "pause_auto", "resume_auto",
+    "close_all_positions", "finish_day", "set_day_limits",
+}
+
+
+def _day_control_modules():
+    from handlers import day_control as day_handler
+    from services import day_control as day_service
+
+    return day_service, day_handler
+
+
+def test_day_control_surface_has_no_legacy_session_path():
+    """Ни экран, ни сервис не пишут в легаси: имена и импорты, не подстроки.
+
+    Docstring имеет право назвать удалённый путь (и называет), поэтому
+    проверяется дерево исходника, а не текст файла.
+    """
+    retired = {"session_manager", "apply_revision_command", "session_closeout",
+               "get_active_session", "create_session"}
+    for module in _day_control_modules():
+        tree = ast.parse(inspect.getsource(module))
+        names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        names |= {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        imports = {str(a.name) for a in ast.walk(tree) if isinstance(a, ast.alias)}
+
+        assert not retired & names, (module.__name__, retired & names)
+        assert not any("session_manager" in name for name in imports)
+
+
+def test_day_control_reaches_the_domain_only_through_the_adapter():
+    """Все записи экрана идут через ``paper_trading.adapter`` — одним списком."""
+    service, _handler = _day_control_modules()
+    tree = ast.parse(inspect.getsource(service))
+
+    used = {
+        node.attr for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name) and node.value.id == "pt_adapter"
+    }
+
+    assert used <= _DAY_ADAPTER_CALLS, used - _DAY_ADAPTER_CALLS
+    assert {"pause_auto", "resume_auto", "close_all_positions", "finish_day",
+            "set_day_limits"} <= used

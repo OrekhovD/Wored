@@ -25,6 +25,7 @@ from handlers.pipeline import router as pipeline_router
 from handlers.news import router as news_router
 from handlers.plans import router as plans_router
 from handlers.paper_deal import router as paper_deal_router
+from handlers.day_control import router as day_control_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 log = logging.getLogger("chatbot")
@@ -254,6 +255,10 @@ async def main():
     # P4 manual deal (/deal): the ticket numbers come from paper_trading.ticket,
     # so this screen must be reached before the AI chat fallback can answer it.
     dp.include_router(paper_deal_router)
+    # P4b day control (/day): pause / resume / finish / closeauto / limits are
+    # domain commands queued for the runner, never legacy session rows.  Same
+    # reason as /deal — it must be matched before the AI chat fallback.
+    dp.include_router(day_control_router)
     if os.getenv("HERMES_CHATBOT_GATEWAY_ENABLED", "false").lower() in {"1", "true", "yes"}:
         from handlers.hermes_admin import router as hermes_admin_router
         dp.include_router(hermes_admin_router)

@@ -9,6 +9,7 @@ because it literally calls the same function object).
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 
@@ -20,11 +21,13 @@ from handlers import (
     analytics,
     callbacks,
     chat,
+    day_control,
     deprecated,
     market,
     menu,
     news,
     now as console,
+    paper_deal,
     pipeline,
     plans,
     portfolio,
@@ -44,7 +47,8 @@ _ROUTERS = [
     menu.router, callbacks.router,
     market.router, alerts.router, analytics.router, portfolio.router,
     predictions.router, settings.router, trader.router, plans.router,
-    pipeline.router, news.router, chat.router,
+    pipeline.router, news.router, paper_deal.router, day_control.router,
+    chat.router,
 ]
 
 
@@ -129,6 +133,48 @@ def test_session_and_plan_are_not_bound_in_pipeline_anymore():
     # unreachable from the command surface, they are not a second implementation
     assert not plans.router.message.handlers
     assert not plans.router.callback_query.handlers
+
+
+def test_deal_and_day_commands_have_exactly_one_owner():
+    """P4/P4b: ручная сделка и управление дня — по одному экрану на команду."""
+    owners = _owners_by_command()
+    assert owners.get("deal") == ["handlers.paper_deal.cmd_deal"]
+    assert owners.get("day") == ["handlers.day_control.cmd_day"]
+
+
+def test_mutable_day_actions_are_not_encoded_in_button_literals():
+    """Q-24: мутирующее действие не кодируется строкой кнопки (ТЗ §3).
+
+    Инвентарь по всем экранам: строковые литералы фильтров ``F.data`` не должны
+    содержать слова убитого действия. Текстовые regex-фильтры не считаются:
+    «пауза сессии» — распознаваемая фраза, а не полномочие кнопки. Docstring
+    тоже не считается: он имеет право назвать удалённый путь.
+    """
+    handlers_dir = pathlib.Path(day_control.__file__).parent
+    offenders: dict[str, set[str]] = {}
+    for path in sorted(handlers_dir.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                if not any(
+                    isinstance(child, ast.Attribute) and child.attr == "data"
+                    for child in ast.walk(decorator)
+                ):
+                    continue
+                literals = {
+                    c.value for c in ast.walk(decorator)
+                    if isinstance(c, ast.Constant) and isinstance(c.value, str)
+                }
+                hits = {v for v in literals if any(
+                    word in v.lower() for word in
+                    ("pause", "tighten", "reduce", "close_all", "closeall")
+                )}
+                if hits:
+                    offenders.setdefault(path.name, set()).update(hits)
+
+    assert offenders == {}, offenders
 
 
 # ─── Redirect identity ─────────────────────────────────────────────────

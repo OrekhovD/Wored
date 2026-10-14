@@ -100,11 +100,13 @@ def _bare_payload_refusal(text: str) -> Optional[str]:
     Форма принадлежит поверхности (:func:`telegram_surface.looks_like_key_values`),
     распознавание ключей — сервису-владельцу: анкету считает
     :func:`services.simulation_proposals.recognised_answer_keys`, аргументы
-    тикета — :func:`services.paper_orders.recognises_ticket_args`.  Второй парсер
+    тикета — :func:`services.paper_orders.recognises_ticket_args`, лимиты дня —
+    :func:`services.day_control.recognises_limit_args`.  Второй парсер
     или второй список ключей отсюда запрещены (ТЗ TB-03).
     """
     from application import presenters as ui
     from handlers import telegram_surface as surface
+    from services import day_control as control
     from services import paper_orders as deals
     from services import simulation_proposals as proposals
 
@@ -131,6 +133,14 @@ def _bare_payload_refusal(text: str) -> Optional[str]:
             "<i>Числа ручной сделки считает доменный тикет-гейт, и только у команды "
             "есть предпросмотр с подтверждением. В модель этот текст не отправлен, "
             "заявка не записана.</i>"
+        )
+
+    if control.recognises_limit_args(text):
+        return (
+            "🛡 <b>Это лимиты дня, но без команды — посреди дня так не меняются.</b>\n"
+            f"нужно: <code>{ui.esc(control.usage_preview())}</code>\n"
+            "<i>Лимиты живут в снапшоте дня, и их изменение — доменная команда с "
+            "подтверждением. В модель этот текст не отправлен, день не изменён.</i>"
         )
 
     return None

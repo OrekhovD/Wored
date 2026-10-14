@@ -159,9 +159,15 @@ async def show_session(target: Message | CallbackQuery, principal: Principal) ->
             f"открытых позиций {account.open_positions}"
         )
     lines.append(
-        "действия (пауза/продолжить/ужесточить/завершить) появятся в P4; "
-        "бот не выставляет статус по факту своего вызова"
+        "действия дня — только доменные команды: у каждого есть предпросмотр, "
+        "подтверждение и ключ идемпотентности карточки, исполняет их runner, а "
+        "не бот. Бот не выставляет статус по факту своего вызова."
     )
+    # P4b (Q-24): раньше здесь был placeholder «появятся в P4». Формы команды
+    # отдаёт владелец экрана, чтобы здесь не появился второй список действий.
+    from services import day_control as control
+
+    lines.append(f"<code>{ui.esc(control.usage_preview())}</code>")
     await _reply(
         target, "🎯 <b>Сессия</b>\n" + "\n".join(lines),
         nav_keyboard(include_refresh=False, with_plans=True),

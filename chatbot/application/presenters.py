@@ -1082,3 +1082,75 @@ def build_deal_ticket_card(deal: Any, *, tz_name: str) -> Card:
         next_actions=DEAL_ACTIONS,
         request_id=new_request_id(),
     )
+
+
+# ─── day control card (ТЗ §6.1, срез P4b / Q-24) ───────────────────────────
+
+#: чем отвечает экран ``/day``; имена подкоманд совпадают с handlers/day_control
+DAY_CONTROL_ACTIONS = (
+    "day_status", "day_pause", "day_resume", "day_finish", "day_closeauto",
+    "day_limits",
+)
+
+#: как доменные статусы команды звучат для оператора (``CommandStatus``).
+#: Одно слово на оба экрана (``/deal`` и ``/day``): два словаря неизбежно
+#: разошлись бы, а «конфликт» и «исполнена с ошибкой» — разные события.
+COMMAND_STATUS_WORD = {
+    "accepted": "принята, ждёт исполнителя",
+    "processing": "исполняется",
+    "completed": "исполнена",
+    "failed": "исполнена с ошибкой",
+    "conflict": "конфликт идемпотентности — команда не исполнена",
+    "unknown": "состояние не определено",
+}
+
+
+def command_status_word(status: Any) -> str:
+    return COMMAND_STATUS_WORD.get(str(status or ""), "состояние не описано")
+
+
+def build_day_control_card(
+    ticket: Any, *, title: str, effect: str, tz_name: str,
+    changed: tuple = (),
+    open_positions: Any = None,
+) -> Card:
+    """Карточка действия над днём: предмет подтверждения, а не обещание.
+
+    Презентёр ничего не решает: заголовок и формулировку эффекта даёт
+    :mod:`services.day_control` (единственный источник описаний действий),
+    ``changed`` — пары «ключ, было, станет» из доменного снапшота.  Других
+    чисел на карточке нет.  Подтверждённое действие здесь не называется
+    исполненным: его исполняет runner, статус читается по ``command_id``.
+    """
+    clock, zone = format_time(ticket.expires_at.isoformat(), tz_name)
+    lines = [
+        f"<code>{esc(ticket.short_id)}</code> · день "
+        f"<code>{esc(str(ticket.day_id)[:8])}</code> · состояние "
+        f"{esc(ticket.day_state)}",
+        esc(effect),
+    ]
+    for key, before, after in changed:
+        lines.append(f"{esc(key)}: {plain(before)} → {plain(after)}")
+    if open_positions is not None:
+        lines.append(f"открытых позиций автомата: {plain(open_positions)}")
+    notes = [str(item) for item in (getattr(ticket, "settings_notes", ()) or ())]
+    if notes:
+        lines.append(
+            "⚠️ этих лимитов нет в снапшоте дня, действует дефолт RiskSettings: "
+            + esc(", ".join(notes))
+        )
+    lines.append(
+        f"карточка действует до {clock} ({esc(zone)}) · подтверждение — кнопкой, "
+        "до него ни одна команда не записана"
+    )
+    return Card(
+        status="ok",
+        title=title,
+        body="\n".join(lines),
+        as_of=None,
+        source="paper_trading.adapter",
+        quality="live",
+        entity_ids=(str(ticket.ticket_id), str(ticket.day_id)),
+        next_actions=DAY_CONTROL_ACTIONS,
+        request_id=new_request_id(),
+    )

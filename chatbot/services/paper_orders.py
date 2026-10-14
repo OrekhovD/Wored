@@ -35,7 +35,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Union
 from uuid import UUID, uuid4
 
 from integrations import wored_api as api
@@ -51,12 +51,17 @@ from paper_trading.ticket import (
 from security import principal as principal_mod
 from services import simulation_plans as plans
 
+if TYPE_CHECKING:
+    from services.day_control import DayTicket
+
 log = logging.getLogger("chatbot.paper_orders")
 
 __all__ = [
     "ARG_KEYS",
     "CommandStatusRead",
     "DealTicket",
+    "KIND_DAY",
+    "KIND_DEAL",
     "MIN_BARE_ARG_KEYS",
     "NoActiveDay",
     "OrderSubmissionRefused",
@@ -72,13 +77,16 @@ __all__ = [
     "command_status",
     "confirm",
     "owner_id_for",
+    "parse_key_value_args",
     "parse_ticket_args",
     "positions_owner",
     "preview",
     "recall",
     "recognises_ticket_args",
     "resolve_command_id",
+    "resolve_ticket_token",
     "tickets",
+    "ticket_idempotency_key",
     "tradable_instrument",
     "usage_preview",
 ]
@@ -203,25 +211,29 @@ def tradable_instrument() -> str:
 # ─── parser (shape only) ────────────────────────────────────────────────────
 
 
-def parse_ticket_args(raw: str) -> dict[str, Any]:
-    """``side=buy risk=10 stop=63000 …`` → тело заявки для домена.
+def parse_key_value_args(
+    raw: str,
+    allowed: Mapping[str, str],
+) -> tuple[dict[str, str], list[dict[str, str]]]:
+    """Разбор **формы** ``key=value``: ключ известен, не повторяется, не пустой.
 
-    Проверяется только форма: токен есть ``key=value``, ключ известен, ключ не
-    повторяется, значение не пустое, обязательные поля на месте.  Разбором
-    значений и чисел занимается доменный :meth:`TicketRequest.from_body` —
-    та же реализация, что у WebUI (ТЗ TB-03).
+    Один токенер на все экраны консоли (TB-03): его зовёт и заявка (``ARG_KEYS``),
+    и лимиты дня (``LIMIT_FIELDS``).  Значения отсюда уходят строками как есть:
+    числом их делает домен, и второй парсер чисел здесь был бы вторым источником
+    правды.  Нарушения возвращаются списком, а не поднимаются: финальный текст и
+    обязательные поля знает вызывающий экран.
     """
-    body: dict[str, Any] = {}
+    body: dict[str, str] = {}
     violations: list[dict[str, str]] = []
     for token in (raw or "").split():
         key, sep, value = token.partition("=")
-        field = ARG_KEYS.get(key.strip().lower())
+        field = allowed.get(key.strip().lower())
         if not sep or not field:
             violations.append({
                 "field": key or token,
                 "code": "bad_token",
                 "message": "формат ответа: key=value; разрешённые ключи: "
-                           + ", ".join(sorted(ARG_KEYS)),
+                           + ", ".join(sorted(allowed)),
             })
             continue
         if field in body:
@@ -240,6 +252,18 @@ def parse_ticket_args(raw: str) -> dict[str, Any]:
             })
             continue
         body[field] = value.strip()
+    return body, violations
+
+
+def parse_ticket_args(raw: str) -> dict[str, Any]:
+    """``side=buy risk=10 stop=63000 …`` → тело заявки для домена.
+
+    Проверяется только форма: токен есть ``key=value``, ключ известен, ключ не
+    повторяется, значение не пустое, обязательные поля на месте.  Разбором
+    значений и чисел занимается доменный :meth:`TicketRequest.from_body` —
+    та же реализация, что у WebUI (ТЗ TB-03).
+    """
+    body, violations = parse_key_value_args(raw, ARG_KEYS)
 
     missing = [ARG_KEYS[key] for key in REQUIRED_KEYS if ARG_KEYS[key] not in body]
     if missing:
@@ -290,6 +314,28 @@ def recognises_ticket_args(text: str) -> bool:
 
 # ─── ticket store ───────────────────────────────────────────────────────────
 
+#: вид тикета.  Магазин на процесс один (одни TTL, одна привязка к владельцу,
+#: одна обрезка), но карточка ``/deal`` и карточка ``/day`` — разные предметы
+#: подтверждения: префикс идентификатора обязан разрешаться только внутри
+#: своего вида, иначе тап «подтвердить заявку» мог бы подтвердить паузу дня.
+KIND_DEAL = "deal"
+KIND_DAY = "day"
+
+#: запись магазина; ``DayTicket`` живёт в :mod:`services.day_control` и импортирован
+#: только для аннотаций, чтобы два сервиса не замыкались друг на друга
+TicketRecord = Union["DealTicket", "DayTicket"]
+
+
+def ticket_idempotency_key(owner_id: str, ticket_id: str) -> str:
+    """Формула ключа одна на оба экрана: ``tg-<owner>-<ticket>``.
+
+    Ключ принадлежит карточке, а не дню: двойное нажатие на одну карточку —
+    replay одной команды, а вторая попытка того же действия в том же дне —
+    другая карточка и другая команда.  Формула не должна разойтись с доменом,
+    поэтому у неё один владелец.
+    """
+    return f"tg-{owner_id}-{ticket_id}"
+
 
 @dataclass(frozen=True)
 class DealTicket:
@@ -304,6 +350,7 @@ class DealTicket:
     expires_at: datetime
     raw: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    kind: str = KIND_DEAL
 
     @property
     def short_id(self) -> str:
@@ -312,7 +359,7 @@ class DealTicket:
     @property
     def idempotency_key(self) -> str:
         """Детерминированный ключ: та же карточка → та же команда."""
-        return f"tg-{self.owner_id}-{self.ticket_id}"
+        return ticket_idempotency_key(self.owner_id, self.ticket_id)
 
     def is_expired(self, now: datetime) -> bool:
         return now >= self.expires_at
@@ -325,37 +372,47 @@ class TicketStore:
     30 секунд, а не торговый факт; фактом его делает команда в
     ``paper_v2_commands``.  Записи хранятся с привязкой к владельцу, поэтому
     чужой идентификатор не отличим от несуществующего.
+
+    В одном магазине лежат оба вида записей (``deal`` и ``day``); ``kind`` в
+    фильтрах обязателен там, где вызов знает, что он ищет, — молча вернуть
+    чужой по виду тикет означало бы подтвердить не то, что показали.
     """
 
     def __init__(self) -> None:
-        self._tickets: dict[str, DealTicket] = {}
+        self._tickets: dict[str, Any] = {}
         self._commands: dict[str, list[str]] = {}
 
-    def put(self, ticket: DealTicket) -> DealTicket:
+    def put(self, ticket: TicketRecord) -> TicketRecord:
         self.prune(datetime.now(timezone.utc))
         self._tickets[ticket.ticket_id] = ticket
         return ticket
 
-    def get(self, owner_id: str, ticket_id: str) -> DealTicket | None:
+    def get(
+        self, owner_id: str, ticket_id: str, *, kind: Optional[str] = None
+    ) -> Optional[TicketRecord]:
         ticket = self._tickets.get(ticket_id)
         if ticket is None or ticket.owner_id != owner_id:
             return None
+        if kind is not None and ticket.kind != kind:
+            return None
         return ticket
 
-    def peek(self, owner_id: str, ticket_id: str) -> DealTicket | None:
+    def peek(
+        self, owner_id: str, ticket_id: str, *, kind: Optional[str] = None
+    ) -> Optional[TicketRecord]:
         """Тикет без проверки TTL — нужен для «пересобрать по прежним аргументам».
 
         Само подтверждение TTL проверяет обязательно; здесь важно только то,
         что чужой идентификатор по-прежнему не отличим от несуществующего.
         """
-        return self.get(owner_id, ticket_id)
+        return self.get(owner_id, ticket_id, kind=kind)
 
-    def all_ids(self, owner_id: str) -> list[str]:
+    def all_ids(self, owner_id: str, *, kind: Optional[str] = None) -> list[str]:
         """Идентификаторы владельца, включая истёкшие."""
         return [
             ticket_id
             for ticket_id, ticket in self._tickets.items()
-            if ticket.owner_id == owner_id
+            if ticket.owner_id == owner_id and (kind is None or ticket.kind == kind)
         ]
 
     def remember_command(self, owner_id: str, command_id: str) -> None:
@@ -531,29 +588,53 @@ async def preview(owner_id: str, raw: str) -> DealTicket:
     ))
 
 
-async def _resolve_ticket_id(owner_id: str, token: str) -> str:
-    """Полный uuid или единственный префикс собственного тикета.
+async def resolve_ticket_token(
+    owner_id: str,
+    token: str,
+    *,
+    kind: str,
+    entity_label: str = "тикета",
+    entity_dative: str = "тикетам",
+    not_found: str,
+) -> str:
+    """Полный uuid или единственный префикс собственного тикета своего вида.
 
-    Кандидаты — все тикеты владельца, а не только живые: истёкший тикет обязан
-    отвечаться как истёкший (:class:`TicketExpired`), а не как несуществующий,
-    потому что для оператора это два разных события (ТЗ §6). Чужой
-    идентификатор в список кандидатов не попадает вообще.
+    Одно правило на оба экрана (TB-03): кандидаты — все тикеты владельца
+    указанного ``kind``, а не только живые, поэтому истёкший тикет отвечает
+    :class:`TicketExpired`, а не «несуществует» (ТЗ §6). Чужой идентификатор и
+    идентификатор чужого вида в список кандидатов не попадает вообще.
     """
     store = tickets()
 
     async def _own_ids() -> list[str]:
-        return store.all_ids(owner_id)
+        return store.all_ids(owner_id, kind=kind)
 
     try:
         return await plans.resolve_prefixed(
             token, _own_ids,
-            entity_label="тикета", entity_dative="тикетам",
-            not_found="такого тикета нет среди ваших живых — соберите заново: "
-                      + usage_preview(instrument=tradable_instrument()),
+            entity_label=entity_label, entity_dative=entity_dative,
+            not_found=not_found,
             reason_code="ambiguous_ticket_id",
         )
     except plans.PlanServiceError as exc:
         raise TicketUnknown(exc.message) from exc
+
+
+async def _resolve_ticket_id(owner_id: str, token: str) -> str:
+    """Разрешение идентификатора только для карточек ручной сделки."""
+    return await resolve_ticket_token(
+        owner_id, token,
+        kind=KIND_DEAL,
+        not_found="такого тикета нет среди ваших живых — соберите заново: "
+                  + usage_preview(instrument=tradable_instrument()),
+    )
+
+
+def _as_deal(record: Optional[TicketRecord]) -> Optional[DealTicket]:
+    """Магазин общий, поэтому вид проверяется явно, а не по договорённости."""
+    if record is None or record.kind != KIND_DEAL:
+        return None
+    return record
 
 
 async def recall(owner_id: str, token: str) -> DealTicket:
@@ -561,10 +642,10 @@ async def recall(owner_id: str, token: str) -> DealTicket:
 
     Новый тикет строится заново со свежими входами; старый нужен здесь лишь
     как источник аргументов оператора, чтобы не просить их ввести повторно.
-    Правило «что такое разрешимый идентификатор» — общее, :func:`_resolve_ticket_id`.
+    Правило «что такое разрешимый идентификатор» — общее, :func:`resolve_ticket_token`.
     """
     ticket_id = await _resolve_ticket_id(owner_id, token)
-    record = tickets().peek(owner_id, ticket_id)
+    record = _as_deal(tickets().peek(owner_id, ticket_id, kind=KIND_DEAL))
     if record is None:
         raise TicketUnknown("такого тикета нет среди ваших")
     return record
@@ -573,7 +654,7 @@ async def recall(owner_id: str, token: str) -> DealTicket:
 async def confirm(owner_id: str, token: str) -> dict[str, Any]:
     """Подтвердить показанный тикет. Ничего не отправляется без пересборки."""
     ticket_id = await _resolve_ticket_id(owner_id, token)
-    record = tickets().get(owner_id, ticket_id)
+    record = _as_deal(tickets().get(owner_id, ticket_id, kind=KIND_DEAL))
     if record is None:
         raise TicketUnknown(
             "Тикет не найден — возможно, он уже истёк; соберите заново: "

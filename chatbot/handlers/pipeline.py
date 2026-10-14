@@ -30,7 +30,7 @@ DEFAULT_USER_ID = 5249526259
 def _miniapp_url() -> str:
     return os.getenv("TG_MINIAPP_URL") or os.getenv("WEBUI_URL") or "http://localhost:8080/daily-session"
 
-def _session_nav_kb(*, show_review: bool = False, show_close_all: bool = False) -> InlineKeyboardMarkup:
+def _session_nav_kb(*, show_review: bool = False, show_day_control: bool = False) -> InlineKeyboardMarkup:
     """Unified navigation keyboard for session views.
     Mini App + context-sensitive action buttons + back to control menu.
     """
@@ -46,8 +46,12 @@ def _session_nav_kb(*, show_review: bool = False, show_close_all: bool = False) 
             InlineKeyboardButton(text="📋 План", callback_data="pipeline_plan"),
         ],
     ]
-    if show_close_all:
-        rows.append([InlineKeyboardButton(text="🛑 Close all", callback_data="pipeline_close_all")])
+    if show_day_control:
+        # Q-24: here was «🛑 Close all» — a raw mutation keyed by a callback
+        # string with no author, version or confirmation context (ТЗ §3). The
+        # button now only points at the /day screen, which never mutates by
+        # itself; the change itself needs a confirm ticket.
+        rows.append([InlineKeyboardButton(text="🎛 Управление дня", callback_data="pipeline_day_control")])
     if show_review:
         rows.append([
             InlineKeyboardButton(text="🧠 Review", callback_data="pipeline_review"),
@@ -72,11 +76,6 @@ ERR_NO_SESSION = (
 
 ERR_SESSION_UNAVAILABLE = "⚠️ Сессия временно недоступна. Попробуй через несколько секунд."
 
-ERR_REVISION_NOT_ALLOWED = (
-    "⚠️ Команда сейчас недоступна для текущего состояния сессии.\n"
-    "Проверь статус сессии и повтори действие."
-)
-
 ERR_MARKET_STALE = "⚠️ Данные рынка временно недоступны. Попробуй обновить через несколько секунд."
 
 ERR_BACKEND = "⚠️ Временная ошибка сервиса. Попробуй позже."
@@ -94,8 +93,35 @@ ERR_DOMAIN_UNAVAILABLE = (
 
 # ── Router handlers (ТЗ §10.2 — regex-first) ──
 
+def _day_control_redirect(action: Optional[str] = None) -> str:
+    """Q-24 — действие дня выполняет команда ``/day``, а не legacy-сессия.
+
+    Живой промер 2026-10-14: активных записей в ``trading_sessions`` — 0, а
+    бегущих доменных дней — 2, поэтому прежние pause/tighten/reduce/close_all
+    отвечали «сессии нет» ровно там, где день есть. Мутирующий код отсюда удалён
+    целиком, а не переведён в чтение: у доменного действия есть предпросмотр,
+    подтверждение и ключ идемпотентности карточки, и исполняет его runner.
+    Формы команды отдаёт владелец экрана
+    (:func:`services.day_control.usage_preview`) — второй список здесь запрещён
+    (ТЗ TB-03).
+    """
+    from application import presenters as ui
+    from services import day_control as control
+
+    if action:
+        subject = f"🎛 <b>Действие «{ui.esc(action)}» выполняет команда /day</b>"
+    else:
+        subject = "🎛 <b>Управление дня — команда /day</b>"
+    return (
+        f"{subject}\n"
+        "<i>Старые кнопки писали в trading_sessions, а торговый день живёт в "
+        "домене paper_v2. Бот не меняет состояние дня по фразе и не закрывает "
+        "позиции без подтверждения.</i>\n"
+        f"<code>{ui.esc(control.usage_preview())}</code>"
+    )
+
 def _session_control_kb() -> InlineKeyboardMarkup:
-    """Inline-меню управления сессией — 10 кнопок."""
+    """Inline-меню сессии — чтение плюс один вход в управление дня."""
     url = _miniapp_url()
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📱 Mini App", url=url)],
@@ -108,12 +134,11 @@ def _session_control_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📋 План", callback_data="pipeline_plan"),
         ],
         [
-            InlineKeyboardButton(text="⏸ Pause", callback_data="pipeline_pause"),
-            InlineKeyboardButton(text="🛡 Tighten", callback_data="pipeline_tighten"),
-        ],
-        [
-            InlineKeyboardButton(text="📉 Reduce", callback_data="pipeline_reduce"),
-            InlineKeyboardButton(text="🛑 Close all", callback_data="pipeline_close_all"),
+            # Q-24 — четыре мутирующие кнопки (Pause / Tighten / Reduce /
+            # Close all) отсюда удалены: они писали legacy trading_sessions и
+            # на живом дне отвечали «сессии нет». Управление дня — одна команда
+            # /day с предпросмотром и подтверждением.
+            InlineKeyboardButton(text="🎛 Управление дня", callback_data="pipeline_day_control"),
         ],
         [InlineKeyboardButton(text="🏁 Результат", callback_data="pipeline_result")],
         [InlineKeyboardButton(text="← Назад", callback_data="menu_back")],
@@ -150,8 +175,8 @@ async def msg_start_session(message: Message):
 
 @router.message(F.text.regexp(r"(?i)(остановить сессию|стоп сессия|stop session|закрыть сессию)"))
 async def msg_stop_session(message: Message):
-    text = await _handle_stop_safe(message.from_user.id)
-    await message.answer(text, parse_mode="HTML")
+    """Q-24 — остановка дня не пишется в legacy-сессию, а указывает на /day."""
+    await message.answer(_day_control_redirect("finish"), parse_mode="HTML")
 
 
 @router.message(F.text.regexp(r"(?i)(статус сессии|сессия статус|session status|состояние сессии)"))
@@ -170,16 +195,14 @@ async def msg_session_result(message: Message):
 
 @router.message(F.text.regexp(r"(?i)(пауза сессии|pause session|поставь паузу)"))
 async def msg_pause_session(message: Message):
-    """ТЗ §6.1 — пауза через текст."""
-    text = await _handle_revision_safe(message.from_user.id, "pause")
-    await message.answer(text, parse_mode="HTML")
+    """ТЗ §6.1 — пауза через текст; Q-24 — только как переход к /day."""
+    await message.answer(_day_control_redirect("pause"), parse_mode="HTML")
 
 
 @router.message(F.text.regexp(r"(?i)(продолжить сессию|resume session|continue session)"))
 async def msg_continue_session(message: Message):
-    """ТЗ §6.1 — продолжить через текст."""
-    text = await _handle_revision_safe(message.from_user.id, "continue")
-    await message.answer(text, parse_mode="HTML")
+    """ТЗ §6.1 — продолжить через текст; Q-24 — только как переход к /day."""
+    await message.answer(_day_control_redirect("resume"), parse_mode="HTML")
 
 
 @router.message(F.text.regexp(r"(?i)(сколько позиций|мои позиции|портфель|баланс|pnl|покажи pnl)"))
@@ -256,32 +279,17 @@ async def cb_result(callback):
     await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
 
 
-@router.callback_query(F.data == "pipeline_reduce")
-async def cb_reduce(callback):
+@router.callback_query(F.data == "pipeline_day_control")
+async def cb_day_control(callback):
+    """Q-24 — единственный оставшийся control-callback: он ничего не меняет.
+
+    Прежние ``pipeline_pause`` / ``pipeline_tighten`` / ``pipeline_reduce`` /
+    ``pipeline_close_all`` вызывали ``apply_revision_command`` по строке
+    callback_data — без автора, версии ресурса и подтверждённого контекста
+    (ТЗ §3). Кнопка остаётся только указанием на экран ``/day``.
+    """
     await callback.answer()
-    text = await _handle_revision_safe(callback.from_user.id, "reduce")
-    await callback.message.answer(text, parse_mode="HTML")
-
-
-@router.callback_query(F.data == "pipeline_pause")
-async def cb_pause(callback):
-    await callback.answer()
-    text = await _handle_revision_safe(callback.from_user.id, "pause")
-    await callback.message.answer(text, parse_mode="HTML")
-
-
-@router.callback_query(F.data == "pipeline_tighten")
-async def cb_tighten(callback):
-    await callback.answer()
-    text = await _handle_revision_safe(callback.from_user.id, "tighten")
-    await callback.message.answer(text, parse_mode="HTML")
-
-
-@router.callback_query(F.data == "pipeline_close_all")
-async def cb_close_all(callback):
-    await callback.answer()
-    text = await _handle_revision_safe(callback.from_user.id, "close_all")
-    await callback.message.answer(text, parse_mode="HTML")
+    await callback.message.answer(_day_control_redirect(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "pipeline_review")
@@ -371,6 +379,12 @@ def classify_pipeline_intent(message: str) -> dict | None:
     # Start session (ТЗ §10.2 — regex-first, §5 — trade profile parsing)
     if any(p in msg for p in ["старт сессии", "начать сессию", "daily session", "старт торговли", "запусти сессию", "запусти дневную"]):
         return parse_session_start_text(message)
+
+    # Остановить/пауза/продолжить остаются распознанными intents и после Q-24:
+    # снимается не распознавание, а мутирующий исполнитель. Если убрать ветки
+    # целиком, «пауза сессии» уйдёт в AI-фолбэк, а модель отвечает на такие
+    # фразы торговыми числами без контракта (ТЗ §7.5). Диспетчер отвечает
+    # переходом на /day — см. handle_pipeline_intent.
 
     # Stop session
     if any(p in msg for p in ["остановить сессию", "стоп сессия", "stop session", "закрыть сессию"]):
@@ -503,54 +517,6 @@ async def _handle_start_safe(user_id: int, intent: dict) -> tuple[str, InlineKey
         return ERR_DOMAIN_UNAVAILABLE, None
 
 
-async def _handle_stop_safe(user_id: int) -> str:
-    """ТЗ §6.1 — остановка сессии, безопасный ответ."""
-    try:
-        from services.session_manager import get_active_session
-        from services.stats_audit import session_closeout
-
-        session = await get_active_session(user_id)
-        if not session:
-            return ERR_NO_SESSION
-
-        result = await session_closeout(str(session["id"]))
-        return (
-            f"🛑 <b>Сессия остановлена</b>\n"
-            f"ID: <code>{str(session['id'])[:8]}</code>\n"
-            f"Сделок: {result.get('trade_count', 0)}\n"
-            f"PnL: {result.get('total_pnl_usdt', 0):+.4f} USDT\n"
-            f"Max DD: {result.get('max_drawdown_pct', 0):.2f}%\n"
-            f"Profit factor: {result.get('profit_factor', 'N/A')}"
-        )
-    except Exception as exc:
-        log.error("Pipeline stop error: %s", exc)
-        return ERR_BACKEND
-
-
-async def _handle_revision_safe(user_id: int, command: str) -> str:
-    """ТЗ §6.1/§10.2 — revision команда через regex-first."""
-    try:
-        from services.session_manager import get_active_session, apply_revision_command
-
-        session = await get_active_session(user_id)
-        if not session:
-            return ERR_NO_SESSION
-
-        if session["status"] in ("STOPPED", "COMPLETED"):
-            return ERR_REVISION_NOT_ALLOWED
-
-        result = await apply_revision_command(str(session["id"]), command, source="telegram", actor_user_id=user_id)
-
-        if not result.get("ok"):
-            return ERR_REVISION_NOT_ALLOWED
-
-        cmd_emoji = {"continue": "✅", "tighten": "🛡", "reduce": "📉", "pause": "⏸", "close_all": "🛑"}.get(command, "🔧")
-        return f"{cmd_emoji} <b>{command}</b> → {result.get('new_status', session['status'])}"
-    except Exception as exc:
-        log.error("Pipeline revision error: %s", exc)
-        return ERR_REVISION_NOT_ALLOWED
-
-
 async def _build_status_response(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     """ТЗ §8.1 — компактный статус сессии."""
     try:
@@ -669,7 +635,7 @@ async def _build_positions_response(user_id: int) -> tuple[str, InlineKeyboardMa
             )
 
         if not trades:
-            return "📦 <b>Открытых позиций нет.</b>\nСессия активна, входы ожидаются.", _session_nav_kb(show_close_all=True)
+            return "📦 <b>Открытых позиций нет.</b>\nСессия активна, входы ожидаются.", _session_nav_kb(show_day_control=True)
 
         open_trades = [t for t in trades if t["status"] == "open"]
         total_margin = sum(float(t["margin_used_usdt"] or 0) for t in open_trades)
@@ -756,7 +722,7 @@ async def _build_positions_response(user_id: int) -> tuple[str, InlineKeyboardMa
                 f"entry={float(t['entry_price']):.1f} [{t['status']}]"
             )
 
-        return "\n".join(lines), _session_nav_kb(show_close_all=True)
+        return "\n".join(lines), _session_nav_kb(show_day_control=True)
     except Exception as exc:
         log.error("Pipeline positions error: %s", exc)
         return ERR_BACKEND, None
@@ -893,7 +859,9 @@ async def handle_pipeline_intent(intent: dict, user_id: int = DEFAULT_USER_ID) -
             text, _ = await _handle_start_safe(user_id, intent)
             return text
         elif intent_type == "pipeline_stop":
-            return await _handle_stop_safe(user_id)
+            # Q-24: legacy-закрытие сессии отсюда удалено; завершение дня —
+            # доменная команда /day finish с подтверждением карточки.
+            return _day_control_redirect("finish")
         elif intent_type == "pipeline_status":
             text, _ = await _build_status_response(user_id)
             return text
@@ -901,7 +869,9 @@ async def handle_pipeline_intent(intent: dict, user_id: int = DEFAULT_USER_ID) -
             text, _ = await _build_result_response(user_id)
             return text
         elif intent_type == "pipeline_revision_cmd":
-            return await _handle_revision_safe(user_id, intent.get("command", ""))
+            # Q-24: pause/continue/tighten/reduce/close_all больше не пишут в
+            # trading_sessions; доменная форма команды — /day <действие>.
+            return _day_control_redirect(intent.get("command", ""))
         elif intent_type == "pipeline_positions":
             text, _ = await _build_positions_response(user_id)
             return text

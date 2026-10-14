@@ -155,13 +155,25 @@ async def test_forecast_screen_shows_base_target_and_missing_range(wired_sources
     assert "deepseek-v4-pro" in text
 
 
-async def test_session_screen_is_read_only_in_p2(wired_sources):
+async def test_session_screen_lists_real_day_controls(wired_sources):
+    """P4b (Q-24): экран остаётся читающим, но называет существующие команды.
+
+    Прежняя строка «появятся в P4» была честной, пока действий не было; теперь
+    они есть, и экран обязан отдавать формы владельца (/day), а не выдуманный
+    список. Экран по-прежнему ничего не исполняет: в тексте нет ни статуса
+    выполненного действия, ни обещания закрыть позиции по нажатию.
+    """
     wired_sources["set_session"](session_state_payload(running=True))
     text = await _render(console.show_session, wired_sources, text="/session")
 
     assert "RUNNING" in text
-    assert "появятся в P4" in text                 # controls are declared, not faked
-    assert "пауза" in text
+    assert "появятся в P4" not in text
+    assert "/day pause" in text
+    assert "/day closeauto" in text
+    assert "/day limits" in text
+    # numbers of the limits are owned by the domain, not repeated here
+    assert "max_risk_per_order_usdt" in text
+    assert "исполняет их runner" in text
 
 
 async def test_help_screen_explains_numbers_and_limits(wired_sources):
