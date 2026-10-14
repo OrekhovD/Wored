@@ -137,7 +137,9 @@ class RecoveryStore:
     async def load_open_positions(self) -> list[Position]:
         return []
 
-    async def load_active_auto_accounts(self) -> list[Account]:
+    async def load_active_auto_accounts(
+        self, owner_id: UUID | str | None = None
+    ) -> list[Account]:
         return []
 
     async def reconcile_ledger(self, positions: list[Position]) -> dict[str, Any]:
@@ -235,7 +237,9 @@ class PgRecoveryStore(RecoveryStore):
             log.warning("load_open_positions failed: %s", exc)
             return []
 
-    async def load_active_auto_accounts(self) -> list[Account]:
+    async def load_active_auto_accounts(
+        self, owner_id: UUID | str | None = None
+    ) -> list[Account]:
         """Load auto accounts whose owner has an in-flight day.
 
         Includes ``running`` as well as the deferred close states
@@ -244,19 +248,29 @@ class PgRecoveryStore(RecoveryStore):
         blocked) instead of being silently dropped — the old query matched only
         ``state = 'running'``, which orphaned a ``settlement_pending`` owner and
         let the P0 stall persist across restarts.
+
+        ``owner_id`` scopes the search to one operator.  Without it the query
+        answers for every owner in the database, so a second owner with a live
+        day (a leftover from testing, another user) makes the runner's single
+        personal account ambiguous and blocks entries after every restart.  The
+        runner must not guess between owners: binding someone else's auto
+        account would trade their book.
         """
+        sql = """
+            SELECT DISTINCT a.*
+            FROM paper_v2_accounts AS a
+            JOIN paper_v2_days AS d ON d.owner_id = a.owner_id
+            WHERE a.kind = 'auto'
+              AND d.state IN ('running', 'settlement_pending', 'closing')
+        """
+        args: tuple[Any, ...] = ()
+        if owner_id is not None:
+            sql += " AND a.owner_id = $1"
+            args = (str(owner_id),)
+        sql += " ORDER BY a.created_at"
         try:
             async with self._repo.pool.acquire() as conn:
-                rows = await conn.fetch(
-                    """
-                    SELECT DISTINCT a.*
-                    FROM paper_v2_accounts AS a
-                    JOIN paper_v2_days AS d ON d.owner_id = a.owner_id
-                    WHERE a.kind = 'auto'
-                      AND d.state IN ('running', 'settlement_pending', 'closing')
-                    ORDER BY a.created_at
-                    """
-                )
+                rows = await conn.fetch(sql, *args)
             from paper_trading.repository import _row_to_account
             return [_row_to_account(row) for row in rows]
         except Exception as exc:
@@ -495,6 +509,36 @@ def _strategy_config_from_env() -> BaselineV1Config:
         cfg.tp_rr,
     )
     return cfg
+
+
+OWNER_TELEGRAM_ID_ENV = "PAPER_TRADING_OWNER_TELEGRAM_ID"
+
+
+def _owner_scope() -> str | None:
+    """The owner this runner trades for, or ``None`` when it is not declared.
+
+    Recovery must bind exactly one auto account.  Asking the database "which
+    auto accounts have a live day" answers for every owner at once, so a second
+    owner with a running day (a leftover from testing, another user) makes the
+    bind ambiguous and new entries stay blocked after every restart until
+    somebody runs ``start_day`` by hand — the state measured in the live
+    contour: two running days under two owners, one runner,
+    ``entries_blocked_reason='ambiguous_active_auto_accounts'``.  Naming the
+    operator here makes the search single-owner, through the same canonical
+    uuid5 derivation the Telegram console and the WebUI already use, so the
+    runner cannot trade someone else's book by guessing.  Unset preserves the
+    previous behaviour: discovery over all owners, and ambiguity blocks entries.
+    """
+    raw = os.getenv(OWNER_TELEGRAM_ID_ENV)
+    if raw is None or not raw.strip():
+        return None
+    value = raw.strip()
+    if not value.isdigit():
+        raise RuntimeError(
+            f"{OWNER_TELEGRAM_ID_ENV} must be a Telegram user id, got {value!r}"
+        )
+    from paper_trading.adapter import owner_id_from_telegram
+    return owner_id_from_telegram(int(value))
 
 
 # ─── Runner ────────────────────────────────────────────────────────────
@@ -747,8 +791,12 @@ class PaperTradingRunner:
 
             # Restore the auto-account scope.  This runner intentionally owns
             # one personal auto account; zero or multiple candidates are
-            # ambiguous and must keep new entries blocked.
-            auto_accounts = await self.recovery_store.load_active_auto_accounts()
+            # ambiguous and must keep new entries blocked.  When the operator
+            # names the owner it serves, the candidates are limited to that
+            # owner, so another owner's live day cannot hijack the bind.
+            owner_scope = _owner_scope()
+            report["auto_owner_scope"] = owner_scope or "unscoped"
+            auto_accounts = await self.recovery_store.load_active_auto_accounts(owner_scope)
             report["active_auto_accounts"] = len(auto_accounts)
             if len(auto_accounts) == 1:
                 self._auto_account_id = auto_accounts[0].account_id

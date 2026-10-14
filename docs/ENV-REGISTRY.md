@@ -205,6 +205,7 @@ More restrictive user limits always take precedence.
 | `PAPER_AI_PLAN_TTL_SECONDS` | int | `3600` | optional | collector | no |
 | `PAPER_AI_MAX_REQUESTS_PER_DAY` | int | `48` | optional | collector | no |
 | `PAPER_AI_MAX_TOKENS_PER_DAY` | int | `200000` | optional | collector | no |
+| `PAPER_TRADING_OWNER_TELEGRAM_ID` | digits (Telegram user id) | none — unset means unscoped | optional | collector runner recovery | no |
 | `PAPER_RISK_TIER_DECLARED` | bool | `false` | optional | collector HTX publisher | no |
 | `PAPER_RISK_TIER_TIER` | int | none — required when enabled | conditional | collector HTX publisher | no |
 | `PAPER_RISK_TIER_MAX_LEVERAGE` | int | none — required when enabled | conditional | collector HTX publisher | no |
@@ -249,6 +250,29 @@ overlay will clamp it back to 0.5. All four keys fail fast at startup on a
 non-numeric, negative (or, for the two shape knobs, zero) value; the effective
 numbers are logged (`strategy config: …`) so the running policy is readable from
 the container log.
+
+**Runner owner scope (2026-10-15).** Recovery binds exactly one auto account, and
+the candidate query asked the database for *every* owner holding a live day. With
+two owners present — the operator's day plus a leftover test owner — the result
+was two accounts, which the runner reads as ambiguous: `entries_blocked_reason =
+ambiguous_active_auto_accounts`, entries dead after every restart until a manual
+`start_day`. `PAPER_TRADING_OWNER_TELEGRAM_ID` names the operator the runner
+serves; the id goes through the canonical `owner_id_from_telegram` uuid5
+derivation, the same one the Telegram console and the WebUI write, so a mismatch
+between the runner and the consoles is impossible. Unreadable values fail fast at
+startup; **unset keeps the old all-owners behaviour exactly** — the scope is an
+opt-in, not a hidden default, because guessing between owners would mean trading
+someone else's book. The recovery report now carries `auto_owner_scope` (the
+resolved owner uuid, or `unscoped`).
+
+One related correction is *not* configuration: `paper_v2_fills.fee_rate` recorded
+`0.0006` on every row while the engine charged `paper_trading/execution.py:FEE_RATE`
+= `0.0005` (measured live: fee 2.04678428 on a 4093.5686 notional). The fill now
+stores the rate carried by its own `FillResult`/`CloseResult`, and the `Fill`
+dataclass default is zero — visibly unset instead of plausibly wrong. Note that
+`PAPER_SIM_FEE_RATE` in the table above has **no code consumer** (no reference
+found in any `*.py`); the fee a fill actually charges is code-owned, and the
+audit rate comes from the same object as the amount.
 
 Invalid configuration causes explicit readiness failure for the trading subsystem.
 `PAPER_ENGINE_ENABLED=false` keeps the new runner off until cutover; existing

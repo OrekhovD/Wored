@@ -309,10 +309,16 @@ class FakeRecoveryStore(RecoveryStore):
     async def load_open_positions(self):
         return [p for p in self._store.positions.values() if p.status == PositionStatus.open]
 
-    async def load_active_auto_accounts(self):
+    async def load_active_auto_accounts(self, owner_id=None):
         states = {DayState.running, DayState.settlement_pending, DayState.closing}
         owners = {d.owner_id for d in self._store.days.values() if d.state in states}
-        return [a for a in self._store.accounts if a.kind == AccountKind.auto and a.owner_id in owners]
+        accounts = [
+            a for a in self._store.accounts
+            if a.kind == AccountKind.auto and a.owner_id in owners
+        ]
+        if owner_id is not None:
+            accounts = [a for a in accounts if str(a.owner_id) == str(owner_id)]
+        return accounts
 
     async def reconcile_ledger(self, positions):
         return {"reconciled": True, "discrepancies": []}
