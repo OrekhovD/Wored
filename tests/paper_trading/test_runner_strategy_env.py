@@ -20,6 +20,7 @@ STRATEGY_ENVS = (
     "PAPER_STRATEGY_MIN_NET_RR",
     "PAPER_STRATEGY_SL_ATR_FRACTION",
     "PAPER_STRATEGY_TP_RR",
+    "PAPER_STRATEGY_TRIGGER_MODE",
 )
 
 
@@ -35,6 +36,7 @@ def test_defaults_are_unchanged_when_nothing_is_set(monkeypatch: pytest.MonkeyPa
     assert cfg.min_net_rr == Decimal("1.2")
     assert cfg.sl_atr_fraction == Decimal("0.25")
     assert cfg.tp_rr == Decimal(2)
+    assert cfg.trigger_mode == "breakout"
 
 
 def test_environment_overrides_every_knob(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,11 +45,33 @@ def test_environment_overrides_every_knob(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("PAPER_STRATEGY_MIN_NET_RR", "0.3")
     monkeypatch.setenv("PAPER_STRATEGY_SL_ATR_FRACTION", "1.5")
     monkeypatch.setenv("PAPER_STRATEGY_TP_RR", "3")
+    monkeypatch.setenv("PAPER_STRATEGY_TRIGGER_MODE", "ema_cross")
     cfg = _strategy_config_from_env()
     assert cfg.cooldown_seconds == 60.0
     assert cfg.min_net_rr == Decimal("0.3")
     assert cfg.sl_atr_fraction == Decimal("1.5")
     assert cfg.tp_rr == Decimal("3")
+    assert cfg.trigger_mode == "ema_cross"
+
+
+def test_trigger_mode_is_case_and_space_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clean(monkeypatch)
+    monkeypatch.setenv("PAPER_STRATEGY_TRIGGER_MODE", "  EMA_Cross  ")
+    assert _strategy_config_from_env().trigger_mode == "ema_cross"
+
+
+def test_trend_side_is_an_accepted_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clean(monkeypatch)
+    monkeypatch.setenv("PAPER_STRATEGY_TRIGGER_MODE", "trend_side")
+    assert _strategy_config_from_env().trigger_mode == "trend_side"
+
+
+def test_unknown_trigger_mode_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A typo here decides whether the bot trades at all — it must not default."""
+    _clean(monkeypatch)
+    monkeypatch.setenv("PAPER_STRATEGY_TRIGGER_MODE", "degen")
+    with pytest.raises(RuntimeError, match="PAPER_STRATEGY_TRIGGER_MODE"):
+        _strategy_config_from_env()
 
 
 def test_unparsable_value_fails_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:

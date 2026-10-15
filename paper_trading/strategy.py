@@ -240,6 +240,19 @@ class BaselineV1Config:
     # Self-learn block E: enable the mirrored short side (bearish regime).
     enable_long: bool = True
     enable_short: bool = True
+    # Entry trigger strictness.  ``breakout`` (default) keeps the original
+    # BaselineV1 gate: an EMA20 cross *and* a swing beyond the previous bar's
+    # extreme (``close > prev.high`` long / ``close < prev.low`` short).  The
+    # deployment may loosen to ``ema_cross`` (drop the swing-bar clause, fire on
+    # the EMA20 cross alone) or further to ``trend_side`` (drop the cross event
+    # too, fire whenever the 1m close sits on the trend side of the EMA20).  All
+    # three keep the 1h regime and the 15m confirm, so no loosened mode trades
+    # against the higher timeframe.  These exist because a genuine breakout
+    # strategy prints nothing in a flat market, and a cross detector prints
+    # nothing in a sustained trend already past the EMA, while an operator testing
+    # the pipeline needs entries without waiting for a real impulse; both looser
+    # modes are opt-in so the default contour is unchanged byte for byte.
+    trigger_mode: str = "breakout"
 
 
 # ─── Strategy ──────────────────────────────────────────────────────────
@@ -413,12 +426,38 @@ class BaselineV1Strategy:
         if prev_ema20 is None:
             return None
 
+        # Entry trigger.  The default ``breakout`` mode requires an EMA20 cross
+        # *and* that the trigger bar push beyond the previous bar's extreme;
+        # ``ema_cross`` keeps the cross but drops the swing clause; ``trend_side``
+        # drops the cross event too and fires whenever the 1m close sits on the
+        # trend side of the EMA20 (bearish + below → short, bullish + above →
+        # long).  The 1h regime and the 15m confirm still gate every mode, so a
+        # loosened trigger cannot fight the higher timeframe.  The three branches
+        # share the regime/confirm/emit gates below; only ``long_trigger``/
+        # ``short_trigger`` differ, so the default contour is evaluated exactly as
+        # before.
+        if self.cfg.trigger_mode == "trend_side":
+            long_trigger = last_bar.close > ema20_1m
+            short_trigger = last_bar.close < ema20_1m
+        elif self.cfg.trigger_mode == "ema_cross":
+            long_trigger = prev_bar.close <= prev_ema20 and last_bar.close > ema20_1m
+            short_trigger = prev_bar.close >= prev_ema20 and last_bar.close < ema20_1m
+        else:  # breakout (default)
+            long_trigger = (
+                prev_bar.low <= prev_ema20
+                and last_bar.close > ema20_1m
+                and last_bar.close > prev_bar.high
+            )
+            short_trigger = (
+                prev_bar.high >= prev_ema20
+                and last_bar.close < ema20_1m
+                and last_bar.close < prev_bar.low
+            )
+
         # ── LONG: 1h bullish regime + 15m up-confirm + 1m breakout trigger ──
         if (self.cfg.enable_long and self.regime_bullish()
                 and (close_15m is None or self.confirm_15m(close_15m))
-                and prev_bar.low <= prev_ema20
-                and last_bar.close > ema20_1m
-                and last_bar.close > prev_bar.high):
+                and long_trigger):
             return self._maybe_emit(
                 "long", last_bar, ema20_1m, atr_1m, bars_1m,
                 now_epoch, account_id, dedup_context,
@@ -428,9 +467,7 @@ class BaselineV1Strategy:
         #    breakdown trigger — the exact mirror of the long conditions ──
         if (self.cfg.enable_short and self.regime_bearish()
                 and (close_15m is None or self.confirm_15m_short(close_15m))
-                and prev_bar.high >= prev_ema20
-                and last_bar.close < ema20_1m
-                and last_bar.close < prev_bar.low):
+                and short_trigger):
             return self._maybe_emit(
                 "short", last_bar, ema20_1m, atr_1m, bars_1m,
                 now_epoch, account_id, dedup_context,

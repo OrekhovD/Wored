@@ -214,6 +214,23 @@ More restrictive user limits always take precedence.
 | `PAPER_STRATEGY_MIN_NET_RR` | decimal | `1.2` | optional | collector runner (BaselineV1) | no |
 | `PAPER_STRATEGY_SL_ATR_FRACTION` | decimal | `0.25` | optional | collector runner (BaselineV1) | no |
 | `PAPER_STRATEGY_TP_RR` | decimal | `2` | optional | collector runner (BaselineV1) | no |
+| `PAPER_STRATEGY_TRIGGER_MODE` | `breakout` \| `ema_cross` \| `trend_side` | `breakout` | optional | collector runner (BaselineV1) | no |
+
+**Trigger mode (2026-10-15).** `breakout` is the original BaselineV1 gate: a 1m
+close crossing the EMA20 *and* pushing beyond the previous bar's extreme (a real
+swing). In a flat market that second clause never aligns and the pipeline prints
+no entries, which is correct for the strategy but useless when an operator is
+verifying the signal→order→fill→ledger chain. `ema_cross` drops only the swing
+clause and keeps the cross, so a choppy tape still trades — but a cross detector
+stays silent in a *sustained* trend that has already moved past the EMA (every
+bar closes on the same side, so no fresh cross prints). `trend_side` drops the
+cross event too and fires whenever the 1m close sits on the trend side of the
+EMA20 (bearish + below → short, bullish + above → long). All three modes keep the
+1h regime and the 15m confirm, so a loosened trigger cannot fight the higher
+timeframe, and cooldown, one-position-per-instrument and the daily loss caps stay
+untouched, so the loosened modes cannot spam. Unset means `breakout` — the running
+contour is unchanged byte for byte unless an operator opts in; an unknown value
+raises at startup by name.
 
 **Declared risk tier (2026-10-15).** The four `PAPER_RISK_TIER_*` keys are not a
 risk limit — they are a manual substitute for a *market-data* field the venue

@@ -501,12 +501,28 @@ def _strategy_config_from_env() -> BaselineV1Config:
     cfg.tp_rr = Decimal(
         str(_env_number("PAPER_STRATEGY_TP_RR", float(cfg.tp_rr), positive=True))
     )
+    # Trigger strictness.  ``breakout`` (default/unset) is the original gate;
+    # ``ema_cross`` drops the swing-bar clause and ``trend_side`` drops the cross
+    # event too, firing whenever the 1m close is on the trend side of the EMA20.
+    # The 1h regime and 15m confirm stay in all modes.  Anything else is rejected
+    # at startup by name, matching how the other knobs fail fast, because silently
+    # falling back to a default would hide a typo in the one knob that decides
+    # whether the bot trades at all.
+    trigger_mode = (os.getenv("PAPER_STRATEGY_TRIGGER_MODE") or "breakout").strip().lower()
+    if trigger_mode not in ("breakout", "ema_cross", "trend_side"):
+        raise RuntimeError(
+            "PAPER_STRATEGY_TRIGGER_MODE must be 'breakout', 'ema_cross' or "
+            f"'trend_side', got {trigger_mode!r}"
+        )
+    cfg.trigger_mode = trigger_mode
     log.info(
-        "strategy config: cooldown_seconds=%s min_net_rr=%s sl_atr_fraction=%s tp_rr=%s",
+        "strategy config: cooldown_seconds=%s min_net_rr=%s sl_atr_fraction=%s "
+        "tp_rr=%s trigger_mode=%s",
         cfg.cooldown_seconds,
         cfg.min_net_rr,
         cfg.sl_atr_fraction,
         cfg.tp_rr,
+        cfg.trigger_mode,
     )
     return cfg
 
