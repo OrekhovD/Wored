@@ -82,6 +82,36 @@ def test_close_fill_reports_the_rate_it_charged() -> None:
     assert Decimal("0.01") * Decimal("10100") * closed.fee_rate == closed.close_fee
 
 
+def test_configured_fee_rate_drives_both_the_amount_and_the_audit_rate() -> None:
+    """A non-default ``fee_rate`` (what PAPER_SIM_FEE_RATE now feeds) must move
+    BOTH the booked fee amount and the recorded audit rate, open and close."""
+    rate = Decimal("0.0006")
+    opened = execute_market_order(
+        _snapshot(bid="9999", ask="10000"),
+        direction="long",
+        requested_quantity=Decimal("10"),
+        leverage=10,
+        stop_price=Decimal("9900"),
+        slippage_bps=0,
+        available_fraction=Decimal("1"),
+        fee_rate=rate,
+    )
+    assert opened.filled
+    assert opened.fee_rate == rate
+    assert opened.notional * rate == opened.entry_fee
+    assert opened.entry_fee != opened.notional * FEE_RATE  # actually charged 0.0006
+
+    assert opened.position is not None
+    closed = execute_close(
+        opened.position,
+        _snapshot(bid="10100", ask="10101"),
+        slippage_bps=0,
+        fee_rate=rate,
+    )
+    assert closed.fee_rate == rate
+    assert Decimal("0.01") * Decimal("10100") * rate == closed.close_fee
+
+
 def test_fill_without_a_rate_records_zero_not_a_plausible_number() -> None:
     fill = Fill(
         fill_id=uuid4(),

@@ -21,6 +21,7 @@ STRATEGY_ENVS = (
     "PAPER_STRATEGY_SL_ATR_FRACTION",
     "PAPER_STRATEGY_TP_RR",
     "PAPER_STRATEGY_TRIGGER_MODE",
+    "PAPER_SIM_FEE_RATE",
 )
 
 
@@ -37,6 +38,8 @@ def test_defaults_are_unchanged_when_nothing_is_set(monkeypatch: pytest.MonkeyPa
     assert cfg.sl_atr_fraction == Decimal("0.25")
     assert cfg.tp_rr == Decimal(2)
     assert cfg.trigger_mode == "breakout"
+    # unset fee falls back to the HTX Prime-0 code default, not the operator's 0.0006
+    assert cfg.fee_rate == Decimal("0.0005")
 
 
 def test_environment_overrides_every_knob(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -46,12 +49,14 @@ def test_environment_overrides_every_knob(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("PAPER_STRATEGY_SL_ATR_FRACTION", "1.5")
     monkeypatch.setenv("PAPER_STRATEGY_TP_RR", "3")
     monkeypatch.setenv("PAPER_STRATEGY_TRIGGER_MODE", "ema_cross")
+    monkeypatch.setenv("PAPER_SIM_FEE_RATE", "0.0006")
     cfg = _strategy_config_from_env()
     assert cfg.cooldown_seconds == 60.0
     assert cfg.min_net_rr == Decimal("0.3")
     assert cfg.sl_atr_fraction == Decimal("1.5")
     assert cfg.tp_rr == Decimal("3")
     assert cfg.trigger_mode == "ema_cross"
+    assert cfg.fee_rate == Decimal("0.0006")
 
 
 def test_trigger_mode_is_case_and_space_insensitive(monkeypatch: pytest.MonkeyPatch) -> None:

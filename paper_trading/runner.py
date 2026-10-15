@@ -70,7 +70,11 @@ from paper_trading.execution import (
     execute_market_order,
 )
 from paper_trading.ledger import build_fill_postings
-from paper_trading.market import PerpetualSnapshot
+from paper_trading.market import (
+    DEFAULT_SLIPPAGE_BPS,
+    DEFAULT_SPREAD_MAX_BPS,
+    PerpetualSnapshot,
+)
 from paper_trading.risk import (
     OrderRequest,
     PositionInfo,
@@ -501,6 +505,15 @@ def _strategy_config_from_env() -> BaselineV1Config:
     cfg.tp_rr = Decimal(
         str(_env_number("PAPER_STRATEGY_TP_RR", float(cfg.tp_rr), positive=True))
     )
+    # Round-trip taker fee the net-RR emit gate assumes. Carried here (not in a
+    # separate sim struct) so the gate and the booked fill read ONE value: the
+    # runner passes this same ``cfg.fee_rate`` into ``execute_market_order`` /
+    # ``execute_close``, which then can never disagree with what the strategy
+    # charged when it decided to emit. Default is the HTX Prime-0 rate; unset
+    # PAPER_SIM_FEE_RATE keeps today's 0.0005 exactly.
+    cfg.fee_rate = Decimal(
+        str(_env_number("PAPER_SIM_FEE_RATE", float(cfg.fee_rate)))
+    )
     # Trigger strictness.  ``breakout`` (default/unset) is the original gate;
     # ``ema_cross`` drops the swing-bar clause and ``trend_side`` drops the cross
     # event too, firing whenever the 1m close is on the trend side of the EMA20.
@@ -519,14 +532,32 @@ def _strategy_config_from_env() -> BaselineV1Config:
     cfg.trigger_mode = trigger_mode
     log.info(
         "strategy config: cooldown_seconds=%s min_net_rr=%s sl_atr_fraction=%s "
-        "tp_rr=%s trigger_mode=%s",
+        "tp_rr=%s trigger_mode=%s fee_rate=%s",
         cfg.cooldown_seconds,
         cfg.min_net_rr,
         cfg.sl_atr_fraction,
         cfg.tp_rr,
         cfg.trigger_mode,
+        cfg.fee_rate,
     )
     return cfg
+
+
+def _sim_settings_from_env() -> tuple[int, Decimal, int]:
+    """Read the fill microstructure knobs the deployment may tune.
+
+    Returns ``(slippage_bps, available_fraction, max_spread_bps)``. The taker fee
+    is deliberately NOT here — it lives on the strategy config (``cfg.fee_rate``)
+    so the net-RR gate and the booked fill can never diverge. Defaults equal the
+    module constants (``DEFAULT_SLIPPAGE_BPS``, 0.1 depth, ``DEFAULT_SPREAD_MAX_BPS``),
+    so an unset contour fills exactly as before.
+    """
+    slippage_bps = int(_env_number("PAPER_SIM_SLIPPAGE_BPS", DEFAULT_SLIPPAGE_BPS))
+    available_fraction = Decimal(
+        str(_env_number("PAPER_MAX_VISIBLE_LIQUIDITY_FRACTION", 0.1, positive=True))
+    )
+    max_spread_bps = int(_env_number("PAPER_ORDER_MAX_SPREAD_BPS", DEFAULT_SPREAD_MAX_BPS))
+    return slippage_bps, available_fraction, max_spread_bps
 
 
 OWNER_TELEGRAM_ID_ENV = "PAPER_TRADING_OWNER_TELEGRAM_ID"
@@ -592,6 +623,8 @@ class PaperTradingRunner:
         heartbeat_interval: float = HEARTBEAT_INTERVAL_SECONDS,
         instance_id: str | None = None,
         run_id: str | None = None,
+        slippage_bps: int = DEFAULT_SLIPPAGE_BPS,
+        available_fraction: Decimal = Decimal("0.1"),
     ) -> None:
         self.strategy = strategy
         self.recovery_store = recovery_store
@@ -603,6 +636,11 @@ class PaperTradingRunner:
         # is absent or stale.  Callers may inject a different setting only
         # for an explicit isolated test/replay.
         self.risk_settings = risk_settings or RiskSettings(require_risk_tier=True)
+        # Fill microstructure knobs (fee lives on strategy.cfg.fee_rate). Defaults
+        # equal the module constants, so an injected/test runner with no env is
+        # byte-for-byte the previous behaviour.
+        self._slippage_bps = slippage_bps
+        self._available_fraction = available_fraction
         self.heartbeat_key = heartbeat_key
         self.poll_interval = poll_interval
         self.heartbeat_interval = heartbeat_interval
@@ -644,10 +682,28 @@ class PaperTradingRunner:
         kwargs.pop("_pg_pool_factory", None)
         kwargs.pop("_redis_factory", None)
 
+        # Fill microstructure from env.  The risk gate keeps its fail-closed
+        # ``require_risk_tier=True`` and only adopts the env spread limit; callers
+        # that inject their own ``risk_settings`` (isolated tests/replays) win.
+        slippage_bps, available_fraction, max_spread_bps = _sim_settings_from_env()
+        kwargs.setdefault(
+            "risk_settings",
+            RiskSettings(require_risk_tier=True, max_spread_bps=max_spread_bps),
+        )
+        log.info(
+            "sim fill config: slippage_bps=%s available_fraction=%s max_spread_bps=%s "
+            "(fee_rate from strategy config)",
+            slippage_bps,
+            available_fraction,
+            max_spread_bps,
+        )
+
         instance = cls(
             strategy=strategy,
             poll_interval=poll,
             heartbeat_interval=hb,
+            slippage_bps=slippage_bps,
+            available_fraction=available_fraction,
             **kwargs,
         )
         # Store factories on instance for _wire_dependencies to use
@@ -1102,6 +1158,8 @@ class PaperTradingRunner:
             snapshot,
             close_quantity=pos.qty,
             exit_reason=exit_reason,
+            slippage_bps=self._slippage_bps,
+            fee_rate=self.strategy.cfg.fee_rate,
         )
         if not close_result.closed:
             log.warning("close failed for position %s: %s", pos.position_id, close_result.exit_reason)
@@ -1764,6 +1822,9 @@ class PaperTradingRunner:
             position_id=str(order_id),
             account_id=str(account_id),
             instrument=INSTRUMENT,
+            slippage_bps=self._slippage_bps,
+            available_fraction=self._available_fraction,
+            fee_rate=self.strategy.cfg.fee_rate,
         )
         if not fill_result.filled:
             log.warning("submit_order: not filled: %s", fill_result.reason)
@@ -2304,6 +2365,9 @@ class PaperTradingRunner:
             position_id=str(order_id),
             account_id=str(account_id),
             instrument=INSTRUMENT,
+            slippage_bps=self._slippage_bps,
+            available_fraction=self._available_fraction,
+            fee_rate=self.strategy.cfg.fee_rate,
         )
 
         if not fill_result.filled:

@@ -238,6 +238,10 @@ class BaselineV1Config:
     sl_atr_fraction: Decimal = field(default_factory=lambda: Decimal("0.25"))
     tp_rr: Decimal = field(default_factory=lambda: Decimal(2))
     min_net_rr: Decimal = field(default_factory=lambda: Decimal("1.2"))
+    # Round-trip taker fee the net-RR emit gate assumes. Defaults to the HTX
+    # USDT-M Prime-0 rate; the runner overrides it from PAPER_SIM_FEE_RATE so the
+    # gate charges the SAME rate the execution engine actually books on the fill.
+    fee_rate: Decimal = field(default_factory=lambda: Decimal("0.0005"))
     cooldown_seconds: float = 600.0         # 10 min
     sl_lookback_bars: int = 5
     no_entry_last_minutes_of_day: int = 5
@@ -542,7 +546,7 @@ class BaselineV1Strategy:
         atr = atr_at_trigger
         frac = cfg.entry_atr_fraction
         sl_frac = cfg.sl_atr_fraction
-        fee_rate = Decimal("0.0005")  # HTX USDT-M Prime 0 taker
+        fee_rate = cfg.fee_rate  # same rate the execution engine books on the fill
 
         lookback = bars_1m[-cfg.sl_lookback_bars:] if len(bars_1m) >= cfg.sl_lookback_bars else bars_1m
         if not lookback:

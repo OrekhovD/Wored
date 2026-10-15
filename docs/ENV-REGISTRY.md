@@ -198,8 +198,7 @@ More restrictive user limits always take precedence.
 | `PAPER_MARKET_MAX_AGE_SECONDS` | int | `5` | optional | collector, webui | no |
 | `PAPER_ORDER_MAX_SPREAD_BPS` | int | `10` | optional | collector, webui | no |
 | `PAPER_SIM_SLIPPAGE_BPS` | int | `2` | optional | collector | no |
-| `PAPER_SIM_LATENCY_MS` | int | `250` | optional | collector | no |
-| `PAPER_SIM_FEE_RATE` | decimal | `0.0006` | optional | collector | no |
+| `PAPER_SIM_FEE_RATE` | decimal | `0.0005` | optional | collector runner (gate + fill) | no |
 | `PAPER_MAX_VISIBLE_LIQUIDITY_FRACTION` | decimal | `0.1` | optional | collector | no |
 | `PAPER_AI_MIN_INTERVAL_SECONDS` | int | `300` | optional | collector | no |
 | `PAPER_AI_PLAN_TTL_SECONDS` | int | `3600` | optional | collector | no |
@@ -291,10 +290,24 @@ One related correction is *not* configuration: `paper_v2_fills.fee_rate` recorde
 `0.0006` on every row while the engine charged `paper_trading/execution.py:FEE_RATE`
 = `0.0005` (measured live: fee 2.04678428 on a 4093.5686 notional). The fill now
 stores the rate carried by its own `FillResult`/`CloseResult`, and the `Fill`
-dataclass default is zero — visibly unset instead of plausibly wrong. Note that
-`PAPER_SIM_FEE_RATE` in the table above has **no code consumer** (no reference
-found in any `*.py`); the fee a fill actually charges is code-owned, and the
-audit rate comes from the same object as the amount.
+dataclass default is zero — visibly unset instead of plausibly wrong.
+
+**Fee wiring (2026-10-15).** `PAPER_SIM_FEE_RATE` previously had **no code
+consumer**; it has one now. It is read once into `BaselineV1Config.fee_rate`
+(`runner._strategy_config_from_env`) and that single value is used by *both* sides
+of the round trip: the net-RR emit gate in `strategy._build_signal` (so the reward
+the strategy accepted already has this fee subtracted) and the booked
+`entry_fee`/`close_fee` in `execution.execute_market_order`/`execute_close` (the
+runner passes `cfg.fee_rate` into the call). There is no second fee to drift. The
+code default is `0.0005` (HTX USDT-M Prime-0) so an unset contour is byte-for-byte
+the old behaviour; the operator's `.env` sets `0.0006`, which now genuinely
+applies, making the gate strictly more conservative. `PAPER_SIM_SLIPPAGE_BPS`,
+`PAPER_ORDER_MAX_SPREAD_BPS` and `PAPER_MAX_VISIBLE_LIQUIDITY_FRACTION` were
+likewise inert and are now read via `runner._sim_settings_from_env` into the fill
+and the risk gate (defaults equal the module constants). The former
+`PAPER_SIM_LATENCY_MS` key has been **removed**: `market.apply_latency` is never
+called, so a latency knob would have been config that lies — re-add it only
+together with a real call site.
 
 Invalid configuration causes explicit readiness failure for the trading subsystem.
 `PAPER_ENGINE_ENABLED=false` keeps the new runner off until cutover; existing

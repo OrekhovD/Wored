@@ -147,6 +147,7 @@ def execute_market_order(
     take_profit: Decimal | None = None,
     slippage_bps: int = DEFAULT_SLIPPAGE_BPS,
     available_fraction: Decimal = Decimal("0.1"),
+    fee_rate: Decimal = FEE_RATE,
     now: datetime | None = None,
 ) -> FillResult:
     """Execute a market order with IOC semantics and partial-fill modeling.
@@ -220,7 +221,7 @@ def execute_market_order(
     # For HTX BTC-USDT: contract_size=0.001 BTC, so notional = qty * 0.001 * price
     contract_size = getattr(snapshot, "contract_size", Decimal("0.001"))
     notional = filled_quantity * contract_size * fill_price
-    entry_fee = notional * FEE_RATE
+    entry_fee = notional * fee_rate
     reserved_margin = notional / Decimal(leverage) if leverage >= 1 else notional
 
     position = Position(
@@ -250,6 +251,7 @@ def execute_market_order(
         reserved_margin=reserved_margin,
         position=position,
         reason="",
+        fee_rate=fee_rate,
     )
 
 
@@ -299,6 +301,7 @@ def execute_stop_market(
     snapshot: PerpetualSnapshot,
     *,
     slippage_bps: int = DEFAULT_SLIPPAGE_BPS,
+    fee_rate: Decimal = FEE_RATE,
     now: datetime | None = None,
 ) -> CloseResult:
     """Execute a stop-loss market order, closing the entire position.
@@ -312,6 +315,7 @@ def execute_stop_market(
         close_quantity=position.quantity,
         exit_reason="stop_loss",
         slippage_bps=slippage_bps,
+        fee_rate=fee_rate,
         now=now,
     )
 
@@ -328,6 +332,7 @@ def execute_close(
     close_quantity: Decimal | None = None,
     exit_reason: str = "manual_close",
     slippage_bps: int = DEFAULT_SLIPPAGE_BPS,
+    fee_rate: Decimal = FEE_RATE,
     now: datetime | None = None,
 ) -> CloseResult:
     """Close a position (fully or partially) with proportional fee allocation.
@@ -394,7 +399,7 @@ def execute_close(
     contract_size = snapshot.contract_size
     base_qty = close_qty * contract_size
     gross_pnl = sign * base_qty * (close_price - position.entry_price)
-    close_fee = base_qty * close_price * FEE_RATE
+    close_fee = base_qty * close_price * fee_rate
 
     # Proportional allocation of entry fee
     if position.quantity > 0:
@@ -450,6 +455,7 @@ def execute_close(
         realized_net=realized_net,
         exit_reason=exit_reason,
         remaining_position=remaining_position,
+        fee_rate=fee_rate,
     )
 
 
@@ -694,6 +700,7 @@ def execute_reverse(
     new_leverage: int | None = None,
     new_stop_price: Decimal | None = None,
     new_take_profit: Decimal | None = None,
+    fee_rate: Decimal = FEE_RATE,
 ) -> ReverseResult:
     """Reverse a position: close the current one and open in the opposite direction.
 
@@ -706,7 +713,9 @@ def execute_reverse(
     snapshot for the new direction.
     """
     # 1. Close current position
-    close_res = execute_close(position, snapshot, close_quantity=position.quantity)
+    close_res = execute_close(
+        position, snapshot, close_quantity=position.quantity, fee_rate=fee_rate
+    )
 
     # 2. Determine new direction
     new_direction = "short" if position.direction == "long" else "long"
@@ -725,6 +734,7 @@ def execute_reverse(
         leverage=int(lev),
         stop_price=new_stop,
         take_profit=new_take_profit,
+        fee_rate=fee_rate,
     )
 
     # 4. Generate new position ID
