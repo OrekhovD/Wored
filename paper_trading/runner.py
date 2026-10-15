@@ -79,7 +79,7 @@ from paper_trading.risk import (
     check_fill_risk,
     check_order_risk,
 )
-from paper_trading.strategy import Bar, BaselineV1Config, BaselineV1Strategy
+from paper_trading.strategy import TRIGGER_MODES, Bar, BaselineV1Config, BaselineV1Strategy
 from paper_trading.strategy import Signal as StrategySignal
 from paper_trading.ticket import apply_day_limits
 
@@ -504,15 +504,17 @@ def _strategy_config_from_env() -> BaselineV1Config:
     # Trigger strictness.  ``breakout`` (default/unset) is the original gate;
     # ``ema_cross`` drops the swing-bar clause and ``trend_side`` drops the cross
     # event too, firing whenever the 1m close is on the trend side of the EMA20.
-    # The 1h regime and 15m confirm stay in all modes.  Anything else is rejected
-    # at startup by name, matching how the other knobs fail fast, because silently
-    # falling back to a default would hide a typo in the one knob that decides
-    # whether the bot trades at all.
+    # ``ema_only`` also drops the higher-timeframe alignment (1h regime and 15m
+    # confirm) — a deliberate stress-test knob.  The valid set is the canonical
+    # ``TRIGGER_MODES`` tuple, so it cannot drift from the strategy's dispatch.
+    # Anything else is rejected at startup by name, matching how the other knobs
+    # fail fast, because silently falling back to a default would hide a typo in
+    # the one knob that decides whether the bot trades at all.
     trigger_mode = (os.getenv("PAPER_STRATEGY_TRIGGER_MODE") or "breakout").strip().lower()
-    if trigger_mode not in ("breakout", "ema_cross", "trend_side"):
+    if trigger_mode not in TRIGGER_MODES:
         raise RuntimeError(
-            "PAPER_STRATEGY_TRIGGER_MODE must be 'breakout', 'ema_cross' or "
-            f"'trend_side', got {trigger_mode!r}"
+            "PAPER_STRATEGY_TRIGGER_MODE must be one of "
+            f"{TRIGGER_MODES}, got {trigger_mode!r}"
         )
     cfg.trigger_mode = trigger_mode
     log.info(

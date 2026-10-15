@@ -66,6 +66,12 @@ def test_trend_side_is_an_accepted_mode(monkeypatch: pytest.MonkeyPatch) -> None
     assert _strategy_config_from_env().trigger_mode == "trend_side"
 
 
+def test_ema_only_is_an_accepted_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clean(monkeypatch)
+    monkeypatch.setenv("PAPER_STRATEGY_TRIGGER_MODE", "ema_only")
+    assert _strategy_config_from_env().trigger_mode == "ema_only"
+
+
 def test_unknown_trigger_mode_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     """A typo here decides whether the bot trades at all — it must not default."""
     _clean(monkeypatch)

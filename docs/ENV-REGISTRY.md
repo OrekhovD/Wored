@@ -214,7 +214,7 @@ More restrictive user limits always take precedence.
 | `PAPER_STRATEGY_MIN_NET_RR` | decimal | `1.2` | optional | collector runner (BaselineV1) | no |
 | `PAPER_STRATEGY_SL_ATR_FRACTION` | decimal | `0.25` | optional | collector runner (BaselineV1) | no |
 | `PAPER_STRATEGY_TP_RR` | decimal | `2` | optional | collector runner (BaselineV1) | no |
-| `PAPER_STRATEGY_TRIGGER_MODE` | `breakout` \| `ema_cross` \| `trend_side` | `breakout` | optional | collector runner (BaselineV1) | no |
+| `PAPER_STRATEGY_TRIGGER_MODE` | `breakout` \| `ema_cross` \| `trend_side` \| `ema_only` | `breakout` | optional | collector runner (BaselineV1) | no |
 
 **Trigger mode (2026-10-15).** `breakout` is the original BaselineV1 gate: a 1m
 close crossing the EMA20 *and* pushing beyond the previous bar's extreme (a real
@@ -225,10 +225,15 @@ clause and keeps the cross, so a choppy tape still trades — but a cross detect
 stays silent in a *sustained* trend that has already moved past the EMA (every
 bar closes on the same side, so no fresh cross prints). `trend_side` drops the
 cross event too and fires whenever the 1m close sits on the trend side of the
-EMA20 (bearish + below → short, bullish + above → long). All three modes keep the
-1h regime and the 15m confirm, so a loosened trigger cannot fight the higher
-timeframe, and cooldown, one-position-per-instrument and the daily loss caps stay
-untouched, so the loosened modes cannot spam. Unset means `breakout` — the running
+EMA20 (bearish + below → short, bullish + above → long). `breakout`, `ema_cross`
+and `trend_side` keep the 1h regime and the 15m confirm, so a loosened trigger
+cannot fight the higher timeframe. `ema_only` is the deliberate stress knob that
+also drops that alignment and trades the 1m EMA20 side in any regime — added
+because `trend_side` correctly goes idle when price rebounds above the EMA inside a
+bearish 1h regime (no short above the EMA, no long against the regime), which is
+right for the strategy but stalls a pipeline test. In `ema_only` that bounce opens a
+long. Cooldown, one-position-per-instrument and the daily loss caps stay untouched in
+every mode, so even `ema_only` cannot spam. Unset means `breakout` — the running
 contour is unchanged byte for byte unless an operator opts in; an unknown value
 raises at startup by name.
 

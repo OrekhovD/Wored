@@ -220,6 +220,13 @@ class Signal:
         return self.entry_zone_low <= price <= self.entry_zone_high
 
 
+# Entry-trigger strictness levels, loosest last.  ``breakout`` is the historical
+# BaselineV1 gate; the deployment can loosen through ``ema_cross`` and
+# ``trend_side`` and, for a deliberate stress test, ``ema_only``.  Kept as one
+# tuple so the runner's validation and the strategy's dispatch cannot drift.
+TRIGGER_MODES = ("breakout", "ema_cross", "trend_side", "ema_only")
+
+
 @dataclass
 class BaselineV1Config:
     """Tunable parameters for BaselineV1Strategy."""
@@ -245,13 +252,17 @@ class BaselineV1Config:
     # extreme (``close > prev.high`` long / ``close < prev.low`` short).  The
     # deployment may loosen to ``ema_cross`` (drop the swing-bar clause, fire on
     # the EMA20 cross alone) or further to ``trend_side`` (drop the cross event
-    # too, fire whenever the 1m close sits on the trend side of the EMA20).  All
-    # three keep the 1h regime and the 15m confirm, so no loosened mode trades
-    # against the higher timeframe.  These exist because a genuine breakout
-    # strategy prints nothing in a flat market, and a cross detector prints
-    # nothing in a sustained trend already past the EMA, while an operator testing
-    # the pipeline needs entries without waiting for a real impulse; both looser
-    # modes are opt-in so the default contour is unchanged byte for byte.
+    # too, fire whenever the 1m close sits on the trend side of the EMA20).  The
+    # stress-test mode ``ema_only`` keeps the trend_side trigger but also drops the
+    # higher-timeframe alignment (1h regime and 15m confirm), trading the 1m EMA20
+    # side regardless of trend.  Every mode except ``ema_only`` keeps the 1h regime
+    # and the 15m confirm, so a loosened trigger does not fight the higher
+    # timeframe unless the operator explicitly asks for that.  These exist because
+    # a genuine breakout strategy prints nothing in a flat market, and a cross
+    # detector prints nothing in a sustained trend already past the EMA, while an
+    # operator testing the pipeline needs entries without waiting for a real
+    # impulse; the looser modes are opt-in so the default contour is unchanged byte
+    # for byte.
     trigger_mode: str = "breakout"
 
 
@@ -430,13 +441,13 @@ class BaselineV1Strategy:
         # *and* that the trigger bar push beyond the previous bar's extreme;
         # ``ema_cross`` keeps the cross but drops the swing clause; ``trend_side``
         # drops the cross event too and fires whenever the 1m close sits on the
-        # trend side of the EMA20 (bearish + below → short, bullish + above →
-        # long).  The 1h regime and the 15m confirm still gate every mode, so a
-        # loosened trigger cannot fight the higher timeframe.  The three branches
-        # share the regime/confirm/emit gates below; only ``long_trigger``/
-        # ``short_trigger`` differ, so the default contour is evaluated exactly as
-        # before.
-        if self.cfg.trigger_mode == "trend_side":
+        # trend side of the EMA20.  ``ema_only`` uses the same positional trigger
+        # but also drops the higher-timeframe alignment (the 1h regime and the 15m
+        # confirm) — see ``higher_tf_ok`` below — so it trades the 1m EMA20 side
+        # regardless of trend, at the cost of letting entries run against the 1h
+        # regime.  Except for that alignment, the branches share the emit gates, so
+        # the default contour is evaluated exactly as before.
+        if self.cfg.trigger_mode in ("trend_side", "ema_only"):
             long_trigger = last_bar.close > ema20_1m
             short_trigger = last_bar.close < ema20_1m
         elif self.cfg.trigger_mode == "ema_cross":
@@ -454,20 +465,30 @@ class BaselineV1Strategy:
                 and last_bar.close < prev_bar.low
             )
 
-        # ── LONG: 1h bullish regime + 15m up-confirm + 1m breakout trigger ──
-        if (self.cfg.enable_long and self.regime_bullish()
-                and (close_15m is None or self.confirm_15m(close_15m))
-                and long_trigger):
+        # Higher-timeframe alignment.  Every mode except ``ema_only`` requires the
+        # 1h regime and the 15m confirm to agree with the entry side; ``ema_only``
+        # is the deliberate stress-test knob that ignores them.
+        if self.cfg.trigger_mode == "ema_only":
+            long_higher_tf_ok = True
+            short_higher_tf_ok = True
+        else:
+            long_higher_tf_ok = self.regime_bullish() and (
+                close_15m is None or self.confirm_15m(close_15m)
+            )
+            short_higher_tf_ok = self.regime_bearish() and (
+                close_15m is None or self.confirm_15m_short(close_15m)
+            )
+
+        # ── LONG: (higher-TF alignment) + 1m trigger ──
+        if self.cfg.enable_long and long_higher_tf_ok and long_trigger:
             return self._maybe_emit(
                 "long", last_bar, ema20_1m, atr_1m, bars_1m,
                 now_epoch, account_id, dedup_context,
             )
 
-        # ── SHORT (block E): 1h bearish regime + 15m down-confirm + 1m
-        #    breakdown trigger — the exact mirror of the long conditions ──
-        if (self.cfg.enable_short and self.regime_bearish()
-                and (close_15m is None or self.confirm_15m_short(close_15m))
-                and short_trigger):
+        # ── SHORT (block E): (higher-TF alignment) + 1m trigger — the mirror of
+        #    the long conditions ──
+        if self.cfg.enable_short and short_higher_tf_ok and short_trigger:
             return self._maybe_emit(
                 "short", last_bar, ema20_1m, atr_1m, bars_1m,
                 now_epoch, account_id, dedup_context,
