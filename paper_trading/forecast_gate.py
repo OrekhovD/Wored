@@ -98,6 +98,17 @@ def _reject(reason: str) -> GateResult:
     return GateResult(accept=False, p_hit=ZERO, ev=ZERO, detail=reason)
 
 
+def _keep(reason: str) -> GateResult:
+    """Fail-open result: *accept=True* means "do not force an exit".
+
+    The exit-side contract is the mirror image of the entry-side.  A forecast
+    glitch must never cost the operator an upside they already earned, so on
+    any error path the exit evaluator returns *accept=True* and lets SL/TP
+    continue to govern the position.
+    """
+    return GateResult(accept=True, p_hit=ZERO, ev=ZERO, detail=reason)
+
+
 def _hit_prob_return_space(theta: float, x: float, L: float) -> float:
     """P(X hits +upper before −lower) for a drifted Brownian motion.
 
@@ -203,6 +214,107 @@ def evaluate(
         f"{signal.side} p_hit={p_hit:.4f} mu={mu:.6f} sigma={sigma:.6f} "
         f"reward={reward:.2f} risk={risk:.2f} fee={fee_cost:.2f} "
         f"ev={ev:.4f} min_ev={cfg.forecast_gate_min_ev} "
+        f"model={model.value} steps={horizon}"
+    )
+    return GateResult(accept=accept, p_hit=p_hit, ev=ev, detail=detail)
+
+
+def evaluate_open_position(
+    bars: Sequence[Bar],
+    side: str,
+    current_price: Decimal,
+    stop_loss: Decimal,
+    take_profit: Decimal,
+    cfg: BaselineV1Config,
+) -> GateResult:
+    """Re-run the Brownian EV filter on an *open* position from *current_price*.
+
+    Semantics.  The entry distances are replaced with the *remaining* distance
+    to each barrier, and the fee term drops out because the round-trip cost is
+    sunk on the entry side and unavoidable on the exit side: closing now pays
+    a close fee, holding to either barrier also pays one.  What is left is the
+    probability-weighted gross delta between "hold" and "close now":
+    ``ev_hold = p_hit · reward_remaining − (1 − p_hit) · risk_remaining``.
+    At zero drift the barrier formula returns the fair ``risk / (reward+risk)``
+    which makes ``ev_hold = 0`` exactly, so ``min_ev = 0`` means "keep only
+    when the forecast still leans our way".
+
+    Fail-open.  Unlike :func:`evaluate` (which returns ``accept=False`` on any
+    error so a bad forecast cannot open a position), this evaluator returns
+    ``accept=True`` on every error path so a bad forecast cannot *close* a
+    position that was opened on a real signal.  ``accept=True`` on a
+    :class:`GateResult` from this function means *do not exit*.
+    """
+    try:
+        model = ModelVersion(cfg.forecast_gate_model)
+    except ValueError:
+        return _keep(f"unknown forecast model {cfg.forecast_gate_model!r}")
+
+    horizon = int(cfg.forecast_gate_horizon_steps)
+    if horizon < 1:
+        return _keep(f"forecast horizon steps must be >= 1, got {horizon}")
+    if len(bars) < 2:
+        return _keep("insufficient bars to run a forecast; keep position")
+
+    if current_price is None or current_price <= 0:
+        return _keep(f"non-positive current_price {current_price}")
+    if stop_loss is None or take_profit is None:
+        return _keep("position missing SL or TP; nothing to compare against")
+
+    if side == "long":
+        reward = take_profit - current_price
+        risk = current_price - stop_loss
+    elif side == "short":
+        reward = current_price - take_profit
+        risk = stop_loss - current_price
+    else:
+        return _keep(f"unknown side {side!r}")
+    if reward <= 0 or risk <= 0:
+        # Barrier already crossed (a live SL/TP should have fired on this same
+        # cycle) or level inversion; do not force a third close path.
+        return _keep(
+            f"non-positive remaining reward/risk (reward={reward}, risk={risk}); "
+            "SL/TP should handle this position"
+        )
+
+    try:
+        ohlcv = _to_ohlcv(bars)
+        candles = predict(ohlcv, model, 1)
+    except Exception as exc:  # noqa: BLE001 — fail-open by contract
+        return _keep(f"forecast failed, keeping position: {exc}")
+    if not candles:
+        return _keep("forecast produced no candles, keeping position")
+
+    step1 = candles[0]
+    if step1.predicted_close <= 0:
+        return _keep("forecast predicted_close is non-positive")
+    mu = step1.predicted_close / current_price - ONE  # per-bar return drift
+    band = step1.predicted_high - step1.predicted_close  # q90 − q50, price units
+    if Z_90 <= 0 or band <= 0:
+        return _keep("forecast band has zero width; no dispersion to gate on")
+    sigma = band / (Z_90 * step1.predicted_close)  # per-bar return vol
+
+    reward_ret = reward / current_price
+    risk_ret = risk / current_price
+
+    favourable_drift = float(mu) if side == "long" else -float(mu)
+    theta_f = (2.0 * favourable_drift) / (float(sigma) ** 2) if float(sigma) > 0 else 0.0
+    p_hit_f = _hit_prob_return_space(theta_f, float(risk_ret), float(reward_ret + risk_ret))
+    p_hit_f = max(0.0, min(1.0, p_hit_f))
+    p_hit = Decimal(str(p_hit_f))
+
+    # Round-trip fee is excluded from the hold-vs-close delta (see docstring):
+    # it is sunk on the entry side and paid either way on the exit side, so it
+    # cancels out of the comparison.  ``min_ev`` therefore measures *gross*
+    # expected remaining edge, and ``min_ev=0`` at fair p_hit is the exact
+    # boundary between "forecast still supports holding" and "forecast has
+    # decayed; exit at market".
+    ev = p_hit * reward - (ONE - p_hit) * risk
+    accept = ev >= cfg.forecast_exit_min_ev
+    detail = (
+        f"{side} [hold] p_hit={p_hit:.4f} mu={mu:.6f} sigma={sigma:.6f} "
+        f"mark={current_price:.2f} reward_rem={reward:.2f} risk_rem={risk:.2f} "
+        f"ev={ev:.4f} min_ev={cfg.forecast_exit_min_ev} "
         f"model={model.value} steps={horizon}"
     )
     return GateResult(accept=accept, p_hit=p_hit, ev=ev, detail=detail)

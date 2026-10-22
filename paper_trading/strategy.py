@@ -283,6 +283,20 @@ class BaselineV1Config:
     forecast_gate_model: str = "B1_QUANTILE"
     forecast_gate_horizon_steps: int = 3
     forecast_gate_min_ev: Decimal = field(default_factory=lambda: Decimal("0"))
+    # ── Forecast-driven exit (⑤) ────────────────────────────────────────────
+    # The same Brownian TP-before-SL EV filter that gates entries also revisits
+    # an *open* position from the live mark price with the *remaining* TP/SL
+    # distances.  When the expected value of holding to either barrier falls
+    # below ``forecast_exit_min_ev`` the runner closes at market before the
+    # price hits either level.  Fail-open discipline: unlike the entry gate
+    # (which rejects on any glitch so a bad forecast cannot open a position),
+    # the exit gate KEEPS the position running when the forecast fails — a
+    # false close costs the whole upside, while a false hold is still bounded
+    # by the SL that was booked at entry.  The minimum-hold knob protects the
+    # first minute of a fresh trade from the entry-bar forecast noise.
+    forecast_exit_enabled: bool = False
+    forecast_exit_min_ev: Decimal = field(default_factory=lambda: Decimal("0"))
+    forecast_exit_min_hold_seconds: float = 60.0
 
 
 # ─── Strategy ──────────────────────────────────────────────────────────

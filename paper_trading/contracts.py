@@ -170,6 +170,13 @@ class ReasonCode(str, enum.Enum):
     # to place the order.  Kept distinct from ``no_trade`` (strategy saw nothing)
     # so the console can say *why* a real signal was let go.
     forecast_gate_rejected = "forecast_gate_rejected"
+    # Forecast-driven exit (⑤): an open position's expected value fell below
+    # ``forecast_exit_min_ev`` when re-evaluated from the live mark price, so
+    # the runner closed it at market before either the SL or the TP triggered.
+    # Distinct from the strategy-side ``stop_loss`` / ``take_profit`` reasons
+    # so the console can show that the position exited on an *edge* verdict,
+    # not on a price barrier.
+    forecast_exit = "forecast_exit"
 
 
 class JournalBucket(str, enum.Enum):

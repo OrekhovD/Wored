@@ -319,6 +319,9 @@ More restrictive user limits always take precedence.
 | `PAPER_STRATEGY_FORECAST_MODEL` | `B0_NAIVE` \| `B1_QUANTILE` | `B1_QUANTILE` | optional | collector runner (forecast gate) | no |
 | `PAPER_STRATEGY_FORECAST_HORIZON_STEPS` | int `1..48` | `3` | optional | collector runner (forecast gate) | no |
 | `PAPER_STRATEGY_FORECAST_MIN_EV` | decimal | `0` | optional | collector runner (forecast gate) | no |
+| `PAPER_STRATEGY_FORECAST_EXIT` | `off` \| `on` | `off` | optional | collector runner (forecast exit) | no |
+| `PAPER_STRATEGY_FORECAST_EXIT_MIN_EV` | decimal | `0` | optional | collector runner (forecast exit) | no |
+| `PAPER_STRATEGY_FORECAST_EXIT_MIN_HOLD_SECONDS` | float `>=0` | `60` | optional | collector runner (forecast exit) | no |
 
 **Trigger mode (2026-10-15).** `breakout` is the original BaselineV1 gate: a 1m
 close crossing the EMA20 *and* pushing beyond the previous bar's extreme (a real
@@ -356,6 +359,26 @@ exception, fewer than two bars, or a degenerate zero-width band (which is what
 `B0_NAIVE` produces) all reject rather than pass. The flag, model and steps are
 validated by name and raise at startup like the other entry knobs; unset means
 `off`, so the contour is byte-for-byte unchanged until an operator opts in.
+
+**Forecast-driven exit (2026-10-22).** `PAPER_STRATEGY_FORECAST_EXIT` reuses the
+same Brownian TP-before-SL formula against the *open* book: every poll cycle,
+when neither SL nor TP fired, `paper_trading.forecast_gate.evaluate_open_position`
+recomputes drift and volatility from the live mark price and the **remaining**
+TP/SL distances (long: `reward = tp − mark`, `risk = mark − sl`; mirrored for
+shorts). The position closes at market with `reason_code=forecast_exit` when
+`p_hit · reward − (1 − p_hit) · risk < PAPER_STRATEGY_FORECAST_EXIT_MIN_EV`.
+Three deliberate asymmetries versus the entry gate: (1) the fee term **drops
+out** of the exit EV — the entry fee is sunk and the closing fee is paid
+whichever way the position ends, so it cannot discriminate hold-vs-close; (2)
+the gate is **fail-open** — an unknown model, a forecast exception, missing
+bars or a crossed barrier all keep the position, because a data glitch must
+never force-sell the upside; (3) `EXIT_MIN_HOLD_SECONDS` (default 60) suppresses
+the check for the first minute after open, so entry-microstructure noise cannot
+instantly flip the trade. Model and horizon are inherited from the entry gate
+keys on purpose: entry and exit must see the same forecast. SL and TP remain
+authoritative — either hit short-circuits the forecast check. The flag validates
+by name and raises at startup; unset means `off`. Deployed as `on` with
+`MIN_EV=0` and `MIN_HOLD_SECONDS=60`.
 
 **Declared risk tier (2026-10-15).** The four `PAPER_RISK_TIER_*` keys are not a
 risk limit — they are a manual substitute for a *market-data* field the venue

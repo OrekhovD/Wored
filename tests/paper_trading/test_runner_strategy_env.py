@@ -26,6 +26,9 @@ STRATEGY_ENVS = (
     "PAPER_STRATEGY_FORECAST_MODEL",
     "PAPER_STRATEGY_FORECAST_HORIZON_STEPS",
     "PAPER_STRATEGY_FORECAST_MIN_EV",
+    "PAPER_STRATEGY_FORECAST_EXIT",
+    "PAPER_STRATEGY_FORECAST_EXIT_MIN_EV",
+    "PAPER_STRATEGY_FORECAST_EXIT_MIN_HOLD_SECONDS",
 )
 
 
@@ -50,6 +53,11 @@ def test_defaults_are_unchanged_when_nothing_is_set(monkeypatch: pytest.MonkeyPa
     assert cfg.forecast_gate_model == "B1_QUANTILE"
     assert cfg.forecast_gate_horizon_steps == 3
     assert cfg.forecast_gate_min_ev == Decimal("0")
+    # the forecast-driven exit (⑤) is OFF unless opted in, and inherits model +
+    # horizon from the entry gate; only the threshold and hold-guard are new
+    assert cfg.forecast_exit_enabled is False
+    assert cfg.forecast_exit_min_ev == Decimal("0")
+    assert cfg.forecast_exit_min_hold_seconds == 60.0
 
 
 def test_environment_overrides_every_knob(monkeypatch: pytest.MonkeyPatch) -> None:

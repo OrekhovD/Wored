@@ -573,10 +573,44 @@ def _strategy_config_from_env() -> BaselineV1Config:
             )
         )
     )
+    # Forecast-driven exit (⑤).  Same Brownian EV formula as the entry gate but
+    # evaluated from the live mark price with the *remaining* TP/SL distances,
+    # and with a fail-open discipline (a forecast glitch keeps the position
+    # running instead of force-closing the upside).  The model and horizon are
+    # inherited from the entry gate on purpose so the two evaluators see the
+    # same forecast; only the threshold and the minimum-hold guard are new.
+    exit_flag = (os.getenv("PAPER_STRATEGY_FORECAST_EXIT") or "off").strip().lower()
+    if exit_flag not in ("off", "on"):
+        raise RuntimeError(
+            "PAPER_STRATEGY_FORECAST_EXIT must be 'off' or 'on', "
+            f"got {exit_flag!r}"
+        )
+    cfg.forecast_exit_enabled = exit_flag == "on"
+    cfg.forecast_exit_min_ev = Decimal(
+        str(
+            _env_number(
+                "PAPER_STRATEGY_FORECAST_EXIT_MIN_EV",
+                float(cfg.forecast_exit_min_ev),
+            )
+        )
+    )
+    exit_hold = float(
+        _env_number(
+            "PAPER_STRATEGY_FORECAST_EXIT_MIN_HOLD_SECONDS",
+            cfg.forecast_exit_min_hold_seconds,
+        )
+    )
+    if exit_hold < 0:
+        raise RuntimeError(
+            "PAPER_STRATEGY_FORECAST_EXIT_MIN_HOLD_SECONDS must be >= 0, "
+            f"got {exit_hold}"
+        )
+    cfg.forecast_exit_min_hold_seconds = exit_hold
     log.info(
         "strategy config: cooldown_seconds=%s min_net_rr=%s sl_atr_fraction=%s "
         "tp_rr=%s trigger_mode=%s fee_rate=%s forecast_gate=%s "
-        "forecast_model=%s forecast_steps=%s forecast_min_ev=%s",
+        "forecast_model=%s forecast_steps=%s forecast_min_ev=%s "
+        "forecast_exit=%s forecast_exit_min_ev=%s forecast_exit_min_hold_s=%s",
         cfg.cooldown_seconds,
         cfg.min_net_rr,
         cfg.sl_atr_fraction,
@@ -587,6 +621,9 @@ def _strategy_config_from_env() -> BaselineV1Config:
         cfg.forecast_gate_model,
         cfg.forecast_gate_horizon_steps,
         cfg.forecast_gate_min_ev,
+        "on" if cfg.forecast_exit_enabled else "off",
+        cfg.forecast_exit_min_ev,
+        cfg.forecast_exit_min_hold_seconds,
     )
     return cfg
 
@@ -1109,6 +1146,17 @@ class PaperTradingRunner:
         DB commit.
 
         This is called every poll cycle and is never blocked by AI tasks.
+
+        Forecast-driven exit (⑤).  When ``forecast_exit_enabled`` and neither
+        the SL nor the TP fired this cycle, the runner re-evaluates the Brownian
+        TP-before-SL EV from the live mark price using the *remaining*
+        distances.  If the remaining edge has decayed below
+        ``forecast_exit_min_ev`` the position closes at market with
+        ``exit_reason="forecast_exit"`` before either barrier is touched.  The
+        evaluator is fail-open: a forecast glitch returns ``accept=True`` so
+        the position keeps running (a false close costs the upside).  A
+        minimum-hold guard (``forecast_exit_min_hold_seconds``) prevents the
+        first-minute forecast noise from immediately closing a fresh trade.
         """
         if not self._positions:
             return
@@ -1122,6 +1170,22 @@ class PaperTradingRunner:
                 decided_at=datetime.now(timezone.utc),
             )
             return
+
+        # Fetch 1m bars once per cycle when the exit gate is on.  Same source
+        # the entry path uses, so the forecast model sees the same price path.
+        exit_cfg = self.strategy.cfg
+        bars_1m: list[Bar] | None = None
+        if exit_cfg.forecast_exit_enabled:
+            try:
+                bars_1m = await self.market_data.fetch_bars(
+                    "1m", exit_cfg.warmup_bars_1m
+                )
+            except Exception as exc:  # noqa: BLE001 — fail-open: keep positions
+                log.warning(
+                    "forecast exit: bars fetch failed (%s), skipping exit checks this cycle",
+                    exc,
+                )
+                bars_1m = None
 
         to_close: list[tuple[UUID, str]] = []  # (position_id, exit_reason)
         for pid, pos in self._positions.items():
@@ -1142,14 +1206,59 @@ class PaperTradingRunner:
 
             # Check take profit
             mark = snapshot.mark
+            tp_hit = False
             if pos.side == PositionSide.long:
                 if mark >= tp:
-                    to_close.append((pid, "take_profit"))
-                    log.info("TP hit: position %s @ %s (TP %s)", pid, mark, tp)
+                    tp_hit = True
             else:  # short
                 if mark <= tp:
-                    to_close.append((pid, "take_profit"))
-                    log.info("TP hit: position %s @ %s (TP %s)", pid, mark, tp)
+                    tp_hit = True
+            if tp_hit:
+                to_close.append((pid, "take_profit"))
+                log.info("TP hit: position %s @ %s (TP %s)", pid, mark, tp)
+                continue
+
+            # Forecast-driven exit (⑤).  Reached only when neither SL nor TP
+            # fired this cycle.  Fail-open: any glitch in the evaluator keeps
+            # the position running; the SL booked at entry is the safety net.
+            if (
+                exit_cfg.forecast_exit_enabled
+                and bars_1m is not None
+                and pos.opened_at is not None
+            ):
+                opened_at = pos.opened_at
+                if opened_at.tzinfo is None:
+                    opened_at = opened_at.replace(tzinfo=timezone.utc)
+                held_seconds = now - opened_at.timestamp()
+                if held_seconds >= exit_cfg.forecast_exit_min_hold_seconds:
+                    side_str = (
+                        "long" if pos.side == PositionSide.long else "short"
+                    )
+                    exit_res = forecast_gate.evaluate_open_position(
+                        bars_1m, side_str, mark, sl, tp, exit_cfg
+                    )
+                    if not exit_res.accept:
+                        to_close.append((pid, "forecast_exit"))
+                        self._last_decision = Decision(
+                            reason_code=ReasonCode.forecast_exit,
+                            reason_detail=(
+                                f"Forecast-driven exit on position {pid} @ {mark}: "
+                                f"{exit_res.detail}"
+                            ),
+                            decided_at=datetime.now(timezone.utc),
+                        )
+                        log.info(
+                            "forecast exit CLOSE (hold rejected): position %s @ %s: %s",
+                            pid,
+                            mark,
+                            exit_res.detail,
+                        )
+                    else:
+                        log.debug(
+                            "forecast exit HOLD: position %s: %s",
+                            pid,
+                            exit_res.detail,
+                        )
 
         # Execute closes with DB persistence
         for pid, exit_reason in to_close:

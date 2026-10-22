@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from paper_trading.forecast_gate import evaluate
+from paper_trading.forecast_gate import evaluate, evaluate_open_position
 from paper_trading.strategy import Bar, BaselineV1Config, Signal
 
 
@@ -50,6 +50,9 @@ def _cfg(**over) -> BaselineV1Config:
         forecast_gate_model="B1_QUANTILE",
         forecast_gate_horizon_steps=3,
         forecast_gate_min_ev=Decimal("0"),
+        forecast_exit_enabled=True,
+        forecast_exit_min_ev=Decimal("0"),
+        forecast_exit_min_hold_seconds=0.0,
     )
     base.update(over)
     return BaselineV1Config(**base)
@@ -127,3 +130,100 @@ def test_non_positive_reward_rejected() -> None:
     res = evaluate(_bars(UPTREND), _signal("long", 110, 105, 108), _cfg())
     assert res.accept is False
     assert "non-positive reward" in res.detail
+
+
+# ── Forecast-driven exit (⑤): evaluate_open_position ────────────────────
+# accept=True on this evaluator means *do not close* — the semantics are the
+# mirror image of the entry gate, which returns accept=False on any error.
+
+
+def test_open_long_in_uptrend_is_kept() -> None:
+    # Rising drift + already part-way toward TP: remaining edge is still
+    # positive, so accept=True means the exit gate keeps the position open.
+    res = evaluate_open_position(
+        _bars(UPTREND), "long", Decimal("110"), Decimal("105"), Decimal("130"), _cfg()
+    )
+    assert res.accept is True
+    assert res.ev > 0
+    assert "[hold]" in res.detail
+
+
+def test_open_long_in_downtrend_closes() -> None:
+    # Rising prices were wrong; drift is now negative, remaining EV of holding
+    # is negative, so the evaluator returns accept=False and the runner
+    # force-closes at market before the booked SL is touched.
+    res = evaluate_open_position(
+        _bars(DOWNTREND), "long", Decimal("100"), Decimal("95"), Decimal("120"), _cfg()
+    )
+    assert res.accept is False
+    assert res.ev < 0
+
+
+def test_open_short_in_downtrend_is_kept() -> None:
+    # Falling market is favourable for a short, so hold.
+    res = evaluate_open_position(
+        _bars(DOWNTREND), "short", Decimal("100"), Decimal("105"), Decimal("80"), _cfg()
+    )
+    assert res.accept is True
+    assert res.ev > 0
+
+
+def test_exit_fail_open_on_unknown_model() -> None:
+    # Unlike the entry gate, an unknown model here returns accept=True so a
+    # typo in the forecast config never force-closes a live position.
+    res = evaluate_open_position(
+        _bars(UPTREND),
+        "long",
+        Decimal("110"),
+        Decimal("105"),
+        Decimal("130"),
+        _cfg(forecast_gate_model="GLM-5.2"),
+    )
+    assert res.accept is True
+    assert "unknown forecast model" in res.detail
+
+
+def test_exit_fail_open_on_b0_zero_band() -> None:
+    # B0 predicts high==low==close, so the band is zero-width. The exit
+    # evaluator keeps the position (fail-open) whereas the entry evaluator
+    # rejects it (fail-closed) — the two evaluators share the formula but not
+    # the error discipline.
+    res = evaluate_open_position(
+        _bars(UPTREND),
+        "long",
+        Decimal("110"),
+        Decimal("105"),
+        Decimal("130"),
+        _cfg(forecast_gate_model="B0_NAIVE"),
+    )
+    assert res.accept is True
+    assert "zero width" in res.detail
+
+
+def test_exit_fail_open_on_barrier_already_crossed() -> None:
+    # Current price past TP for a long → reward <= 0. The TP trigger in the
+    # same cycle will close the position; the forecast evaluator must not
+    # attempt a third close path.
+    res = evaluate_open_position(
+        _bars(UPTREND), "long", Decimal("131"), Decimal("105"), Decimal("130"), _cfg()
+    )
+    assert res.accept is True
+    assert "non-positive remaining" in res.detail
+
+
+def test_high_exit_min_ev_rejects_a_marginal_hold() -> None:
+    # Same uptrend the default 0-threshold accepts, but an absurdly strict
+    # min_ev forces the runner to close the position even in a rising market.
+    keep = evaluate_open_position(
+        _bars(UPTREND), "long", Decimal("110"), Decimal("105"), Decimal("130"), _cfg()
+    )
+    assert keep.accept is True
+    strict = evaluate_open_position(
+        _bars(UPTREND),
+        "long",
+        Decimal("110"),
+        Decimal("105"),
+        Decimal("130"),
+        _cfg(forecast_exit_min_ev=Decimal("10000")),
+    )
+    assert strict.accept is False
