@@ -24,8 +24,61 @@ Each key has: type, default, required/optional, service consumers, and secrecy l
 | `WEBUI_TELEGRAM_BOT_TOKENS` | JSON array | — | required (if auth enabled) | webui | **yes** |
 | `TELEGRAM_ADMIN_IDS` | string (comma-separated) | empty | optional | webui, bots | no |
 | `WEBUI_PUBLIC_BASE_URL` | string (URL origin) | — | required (production) | webui, bots | no |
+| `WEBUI_URL` | string (URL origin, no path) | `http://localhost:8080` | optional | chatbot (handlers/now.py, integrations/webui_client.py) | no |
+| `TG_MINIAPP_URL` | string (URL with path) | `http://localhost:8080/command-deck` | optional | chatbot (main.py Menu Button, handlers/start.py, handlers/pipeline.py) | no |
 | `WEBUI_COOKIE_SECURE` | bool | `true` (HTTPS) | required | webui | no |
 | `WEBUI_PORT` | int | `8080` | optional | compose | no |
+
+**Telegram Mini App HTTPS (2026-10-22).** The Mini App opens in Telegram's
+in-app browser and therefore needs a public HTTPS origin with a valid TLS
+certificate; `localhost` fallbacks in `chatbot/main.py`,
+`chatbot/handlers/start.py` and `chatbot/handlers/pipeline.py` are unreachable
+from a phone. The three env knobs that must agree are:
+
+* `TG_MINIAPP_URL` — the URL Telegram's Menu Button and `web_app` keyboard
+  open. Consumers paste this value verbatim, so the path suffix
+  (`/command-deck`, `/dashboard`, `/daily-session`) is part of the
+  contract, and the same variable serves three different pages today.
+* `WEBUI_URL` — the bare origin, no path. Used by
+  `chatbot/handlers/now.py`'s `_miniapp_button` (which builds
+  `f"{base}/command-deck"`) and by `chatbot/integrations/webui_client.py`.
+* `WEBUI_PUBLIC_BASE_URL` — the bare origin used by `webui/app.py` CSRF
+  checks (`allowed_origin(origin, str(request.url), ...)` at `webui/app.py:2116`)
+  and by `webui_client.py`. A POST with a `Origin:` header that does not
+  match either the current request host or this value is rejected with
+  HTTP 403.
+
+`TELEGRAM_ADMIN_IDS` is the owner allowlist that `webui/principal.py:90` uses
+inside `create_from_telegram`: an empty allowlist returns `None` on every
+`initData`, so Mini App auth fails silently with a redirect to the password
+login (RFC D-04). The value must include the operator's Telegram numeric id
+(the same one `PAPER_TRADING_OWNER_TELEGRAM_ID` derives the runner owner
+scope from).
+
+**Quick-tunnel (default dev setup).** The deployed `.env` uses
+`cloudflare/cloudflared` in a `docker run` container attached to
+`wored_default`, launched with `tunnel --no-autoupdate --url http://webui:8000`.
+The command assigns an ephemeral
+`https://<words>.trycloudflare.com` subdomain on every start and prints it to
+the container log. Recreating the container issues a new subdomain, so BotFather
+and all three HTTPS env keys must be updated together. Because env_file values
+apply only on `docker compose up -d --force-recreate` (not on `restart`), the
+update sequence is: (1) `docker rm -f wored_cloudflared` and rerun the container;
+(2) copy the new subdomain from `docker logs wored_cloudflared`; (3) patch
+`TG_MINIAPP_URL` / `WEBUI_URL` / `WEBUI_PUBLIC_BASE_URL` in both `.env` and
+`.env.wored` (chatbot uses the second file per `docker-compose.yml:70`);
+(4) `docker compose up -d --force-recreate webui chatbot`; (5) re-point the
+BotFather Mini App URL to the new origin; (6) probe with
+`curl -sSI https://<new-origin>/command-deck` — expect HTTP 303 → `/login?next=/command-deck`
+when `WEBUI_AUTH_ENABLED=true`, HTTP 200 when auth is off. The `WEBUI_COOKIE_SECURE=true`
+setting makes the session cookie HTTPS-only, so a mixed HTTP/HTTPS contour
+silently loses login.
+
+**Stable origin (production candidate).** A Cloudflare named tunnel
+(`cloudflared tunnel login` + `tunnel create` + DNS CNAME) or a personal
+domain behind Caddy/nginx with Let's Encrypt removes the ephemeral-subdomain
+renewal loop. That is a deployment choice outside the WORED codebase; every env
+key above keeps the same meaning either way.
 
 Значение `WEBUI_ADMIN_PASSWORD` продублировано в `.env` (строка 88, её читает `webui`) и в
 `.env.wored` (строка 93, её читает `chatbot`) — проверено 2026-10-14 построчно, значения не
