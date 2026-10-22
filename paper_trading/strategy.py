@@ -268,6 +268,21 @@ class BaselineV1Config:
     # impulse; the looser modes are opt-in so the default contour is unchanged byte
     # for byte.
     trigger_mode: str = "breakout"
+    # ── Forecast-gated entry (④b) ──────────────────────────────────────────
+    # These live on the strategy config so the runner reads ONE source, exactly
+    # like ``fee_rate``: the gate that decides whether to trade and the cost it
+    # charges against read the same object.  ``forecast_gate_enabled`` defaults to
+    # ``False`` so an unset contour is byte-for-byte today's behaviour; the
+    # deployment turns it on via ``PAPER_STRATEGY_FORECAST_GATE=on``.  The model
+    # name mirrors ``forecast_engine.contracts.ModelVersion`` and the horizon is
+    # in bar-steps (``3`` on 1m bars ≈ a 3-minute forward look).  ``min_ev`` is the
+    # minimum accepted expected value in quote currency (USDT per unit); ``0``
+    # means “only trades whose probability-weighted profit clears the round-trip
+    # fee may fire”, which is the project's winning-trade-must-beat-commission rule.
+    forecast_gate_enabled: bool = False
+    forecast_gate_model: str = "B1_QUANTILE"
+    forecast_gate_horizon_steps: int = 3
+    forecast_gate_min_ev: Decimal = field(default_factory=lambda: Decimal("0"))
 
 
 # ─── Strategy ──────────────────────────────────────────────────────────

@@ -165,6 +165,11 @@ class ReasonCode(str, enum.Enum):
     expired_plan = "expired_plan"
     insufficient_data = "insufficient_data"
     signal_expired = "signal_expired"
+    # Forecast-gated entry (④b): the mechanical trigger fired but the calibrated
+    # forecast EV did not clear the cost of the round trip, so the runner refused
+    # to place the order.  Kept distinct from ``no_trade`` (strategy saw nothing)
+    # so the console can say *why* a real signal was let go.
+    forecast_gate_rejected = "forecast_gate_rejected"
 
 
 class JournalBucket(str, enum.Enum):

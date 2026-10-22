@@ -85,6 +85,7 @@ from paper_trading.risk import (
 )
 from paper_trading.strategy import TRIGGER_MODES, Bar, BaselineV1Config, BaselineV1Strategy
 from paper_trading.strategy import Signal as StrategySignal
+from paper_trading import forecast_gate
 from paper_trading.ticket import apply_day_limits
 
 if TYPE_CHECKING:
@@ -530,15 +531,62 @@ def _strategy_config_from_env() -> BaselineV1Config:
             f"{TRIGGER_MODES}, got {trigger_mode!r}"
         )
     cfg.trigger_mode = trigger_mode
+    # Forecast-gated entry (④b).  The gate is OFF unless the deployment opts in,
+    # so an unset contour trades exactly as before.  When on, the runner refuses
+    # to execute a strategy signal whose probability-weighted expected value does
+    # not clear ``PAPER_STRATEGY_FORECAST_MIN_EV`` (default 0 = the round-trip fee
+    # must be covered).  Validated and failed-fast by name like ``trigger_mode``:
+    # a typo here decides whether the bot trades, so it must not silently default.
+    gate_flag = (os.getenv("PAPER_STRATEGY_FORECAST_GATE") or "off").strip().lower()
+    if gate_flag not in ("off", "on"):
+        raise RuntimeError(
+            "PAPER_STRATEGY_FORECAST_GATE must be 'off' or 'on', "
+            f"got {gate_flag!r}"
+        )
+    cfg.forecast_gate_enabled = gate_flag == "on"
+    gate_model = (
+        os.getenv("PAPER_STRATEGY_FORECAST_MODEL") or "B1_QUANTILE"
+    ).strip().upper()
+    if gate_model not in ("B0_NAIVE", "B1_QUANTILE"):
+        raise RuntimeError(
+            "PAPER_STRATEGY_FORECAST_MODEL must be B0_NAIVE or B1_QUANTILE, "
+            f"got {gate_model!r}"
+        )
+    cfg.forecast_gate_model = gate_model
+    gate_steps = int(
+        _env_number(
+            "PAPER_STRATEGY_FORECAST_HORIZON_STEPS",
+            cfg.forecast_gate_horizon_steps,
+            positive=True,
+        )
+    )
+    if gate_steps < 1 or gate_steps > 48:
+        raise RuntimeError(
+            "PAPER_STRATEGY_FORECAST_HORIZON_STEPS must be within 1..48, "
+            f"got {gate_steps}"
+        )
+    cfg.forecast_gate_horizon_steps = gate_steps
+    cfg.forecast_gate_min_ev = Decimal(
+        str(
+            _env_number(
+                "PAPER_STRATEGY_FORECAST_MIN_EV", float(cfg.forecast_gate_min_ev)
+            )
+        )
+    )
     log.info(
         "strategy config: cooldown_seconds=%s min_net_rr=%s sl_atr_fraction=%s "
-        "tp_rr=%s trigger_mode=%s fee_rate=%s",
+        "tp_rr=%s trigger_mode=%s fee_rate=%s forecast_gate=%s "
+        "forecast_model=%s forecast_steps=%s forecast_min_ev=%s",
         cfg.cooldown_seconds,
         cfg.min_net_rr,
         cfg.sl_atr_fraction,
         cfg.tp_rr,
         cfg.trigger_mode,
         cfg.fee_rate,
+        "on" if cfg.forecast_gate_enabled else "off",
+        cfg.forecast_gate_model,
+        cfg.forecast_gate_horizon_steps,
+        cfg.forecast_gate_min_ev,
     )
     return cfg
 
@@ -2116,6 +2164,31 @@ class PaperTradingRunner:
             day_end_epoch=None,  # set by caller if day boundary is known
         )
         if signal is not None:
+            # Forecast-gated entry (④b): the mechanical trigger is only a
+            # *candidate*.  Before committing simulated capital, ask the calibrated
+            # forecast whether the round trip still has positive expected value
+            # once the taker fee is charged.  Fail-closed: a rejected candidate is
+            # dropped with a distinct reason and never reaches the order book, so
+            # the console can say exactly why a real signal was let go.  When the
+            # gate is off this block is skipped and the contour behaves as before.
+            if self.strategy.cfg.forecast_gate_enabled:
+                gate = forecast_gate.evaluate(bars_1m, signal, self.strategy.cfg)
+                if not gate.accept:
+                    self._last_decision = Decision(
+                        reason_code=ReasonCode.forecast_gate_rejected,
+                        reason_detail=(
+                            f"Forecast gate rejected {signal.side} @ "
+                            f"{signal.close_price}: {gate.detail}"
+                        ),
+                        decided_at=datetime.now(timezone.utc),
+                    )
+                    log.info(
+                        "forecast gate REJECT (signal dropped, no order): %s",
+                        gate.detail,
+                    )
+                    return
+                log.info("forecast gate ACCEPT: %s", gate.detail)
+
             self._last_signal = signal
             self._last_decision = Decision(
                 reason_code=ReasonCode.waiting_trigger,

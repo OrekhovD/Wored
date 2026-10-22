@@ -106,6 +106,54 @@ interface, which publishes an unauthenticated endpoint to the local network.
 | `TELEGRAM_BOT_TOKEN` | string | — | required | chatbot | **yes** |
 | `TELEGRAM_WORED_TOKEN` | string | — | required | chatbot_wored | **yes** |
 
+## RACHello personal bot (`bot_rachello`, `RACHELLO_*`)
+
+Independent personal-assistant service. Secrets are injected via `${VAR}`
+interpolation from the repo-root `.env` / shell — there is **no** committed
+`.env.rachello` (git-ignored). `LOCAL_LLM_*` and `OLLAMA_CLOUD_*` are reused
+from the root `.env`. Read by `bot_rachello/config.py`.
+
+| Key | Type | Default | Required | Consumers | Secret |
+|-----|------|---------|----------|-----------|--------|
+| `TELEGRAM_RACHELLO_TOKEN` | string | — | required | bot_rachello | **yes** |
+| `RACHELLO_ADMIN_IDS` | string (csv ids) | empty = first-user claim | optional | bot_rachello | no |
+| `RACHELLO_CLOUD_MODEL` | string | `glm-5.3:cloud` | optional | bot_rachello | no |
+| `RACHELLO_CTX_TOKENS` | int | `8192` | optional | bot_rachello | no |
+| `RACHELLO_MAX_OUT_TOKENS` | int | `1024` | optional | bot_rachello | no |
+| `RACHELLO_HISTORY_TURNS` | int | `8` | optional | bot_rachello | no |
+| `RACHELLO_HISTORY_TTL_SEC` | int | `21600` | optional | bot_rachello | no |
+| `RACHELLO_STREAM_EDIT_MS` | int | `1200` | optional | bot_rachello | no |
+| `RACHELLO_BREAKER_FAILS` | int | `5` | optional | bot_rachello | no |
+| `RACHELLO_BREAKER_WINDOW_SEC` | int | `60` | optional | bot_rachello | no |
+| `RACHELLO_BREAKER_OPEN_SEC` | int | `300` | optional | bot_rachello | no |
+| `RACHELLO_MAX_CALLS_PER_DAY` | int | `200` | optional | bot_rachello | no |
+| `RACHELLO_MAX_TOKENS_PER_DAY` | int | `200000` | optional | bot_rachello | no |
+| `RACHELLO_REDIS_URL` | string | `redis://redis:6379/3` | optional | bot_rachello | no |
+| `RACHELLO_METRICS_TTL_DAYS` | int | `45` | optional | bot_rachello | no |
+| `RACHELLO_LOCAL_LLM_THINK` | bool | `false` | optional | bot_rachello | no |
+
+### Self-learning / reflection (`bot_rachello/selflearn/*` — new 2026-10)
+
+Prompt self-evolution: idle-gated background reflector extracts `{rules, facts}`
+from recent history via bonsai (strict JSON), merges into
+`bot_rachello/learning/{rules,facts}.json` (source of truth; Redis db3 is cache
+only) and injects a bounded overlay into the system prompt. Controlled from
+Telegram via `/memory` `/reflect` `/undo` `/learn on|off`.
+
+| Key | Type | Default | Required | Consumers | Secret |
+|-----|------|---------|----------|-----------|--------|
+| `RACHELLO_LEARN_ENABLED` | bool | `true` | optional | bot_rachello | no |
+| `RACHELLO_LEARN_DIR` | string | `learning` | optional | bot_rachello | no |
+| `RACHELLO_REFLECT_INTERVAL_SEC` | int | `600` | optional | bot_rachello | no |
+| `RACHELLO_IDLE_SEC` | int | `120` | optional | bot_rachello | no |
+| `RACHELLO_LEARN_MIN_TURNS` | int | `4` | optional | bot_rachello | no |
+| `RACHELLO_LEARN_MAX_RULES` | int | `12` | optional | bot_rachello | no |
+| `RACHELLO_LEARN_MAX_CHARS` | int | `1200` | optional | bot_rachello | no |
+
+Note: `RACHELLO_LOCAL_LLM_THINK` is rachello-scoped on purpose — the global
+`LOCAL_LLM_THINK=true` in root `.env` is required by chatbot, and bonsai with
+`think=true` leaves `message.content` empty (blank replies).
+
 ## Telegram Proposal Agent (`BOT_PROPOSAL_*` — new in P3d)
 
 Read by `chatbot/services/simulation_proposals.py` and `chatbot/ai/proposal_source.py`.
@@ -214,6 +262,10 @@ More restrictive user limits always take precedence.
 | `PAPER_STRATEGY_SL_ATR_FRACTION` | decimal | `0.25` | optional | collector runner (BaselineV1) | no |
 | `PAPER_STRATEGY_TP_RR` | decimal | `2` | optional | collector runner (BaselineV1) | no |
 | `PAPER_STRATEGY_TRIGGER_MODE` | `breakout` \| `ema_cross` \| `trend_side` \| `ema_only` | `breakout` | optional | collector runner (BaselineV1) | no |
+| `PAPER_STRATEGY_FORECAST_GATE` | `off` \| `on` | `off` | optional | collector runner (forecast gate) | no |
+| `PAPER_STRATEGY_FORECAST_MODEL` | `B0_NAIVE` \| `B1_QUANTILE` | `B1_QUANTILE` | optional | collector runner (forecast gate) | no |
+| `PAPER_STRATEGY_FORECAST_HORIZON_STEPS` | int `1..48` | `3` | optional | collector runner (forecast gate) | no |
+| `PAPER_STRATEGY_FORECAST_MIN_EV` | decimal | `0` | optional | collector runner (forecast gate) | no |
 
 **Trigger mode (2026-10-15).** `breakout` is the original BaselineV1 gate: a 1m
 close crossing the EMA20 *and* pushing beyond the previous bar's extreme (a real
@@ -235,6 +287,22 @@ long. Cooldown, one-position-per-instrument and the daily loss caps stay untouch
 every mode, so even `ema_only` cannot spam. Unset means `breakout` — the running
 contour is unchanged byte for byte unless an operator opts in; an unknown value
 raises at startup by name.
+
+**Forecast-gated entry (2026-10-16).** `PAPER_STRATEGY_FORECAST_GATE` turns the
+mechanical trigger into a *candidate* and asks the calibrated forecast whether the
+round trip still has positive expected value once the taker fee is charged. When
+`on`, `paper_trading.forecast_gate` runs `forecast_engine.models.predict` over the
+same 1m bars, extracts a per-bar return drift and volatility from the step-1
+prediction, and derives a Brownian **TP-before-SL hitting probability** (closed
+form, `θ = 2μ/σ²`; reduces to the fair `risk/(reward+risk)` at zero drift). The
+signal executes only when
+`p_hit · reward − (1 − p_hit) · risk − fee_cost ≥ PAPER_STRATEGY_FORECAST_MIN_EV`.
+With `MIN_EV = 0` this is the project rule *a winning trade must exceed the
+round-trip commission*. The gate is **fail-closed**: an unknown model, a forecast
+exception, fewer than two bars, or a degenerate zero-width band (which is what
+`B0_NAIVE` produces) all reject rather than pass. The flag, model and steps are
+validated by name and raise at startup like the other entry knobs; unset means
+`off`, so the contour is byte-for-byte unchanged until an operator opts in.
 
 **Declared risk tier (2026-10-15).** The four `PAPER_RISK_TIER_*` keys are not a
 risk limit — they are a manual substitute for a *market-data* field the venue

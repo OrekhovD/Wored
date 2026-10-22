@@ -22,6 +22,10 @@ STRATEGY_ENVS = (
     "PAPER_STRATEGY_TP_RR",
     "PAPER_STRATEGY_TRIGGER_MODE",
     "PAPER_SIM_FEE_RATE",
+    "PAPER_STRATEGY_FORECAST_GATE",
+    "PAPER_STRATEGY_FORECAST_MODEL",
+    "PAPER_STRATEGY_FORECAST_HORIZON_STEPS",
+    "PAPER_STRATEGY_FORECAST_MIN_EV",
 )
 
 
@@ -40,6 +44,12 @@ def test_defaults_are_unchanged_when_nothing_is_set(monkeypatch: pytest.MonkeyPa
     assert cfg.trigger_mode == "breakout"
     # unset fee falls back to the HTX Prime-0 code default, not the operator's 0.0006
     assert cfg.fee_rate == Decimal("0.0005")
+    # the forecast gate is OFF unless the deployment opts in, so an unset
+    # contour trades exactly as before item ④b
+    assert cfg.forecast_gate_enabled is False
+    assert cfg.forecast_gate_model == "B1_QUANTILE"
+    assert cfg.forecast_gate_horizon_steps == 3
+    assert cfg.forecast_gate_min_ev == Decimal("0")
 
 
 def test_environment_overrides_every_knob(monkeypatch: pytest.MonkeyPatch) -> None:
