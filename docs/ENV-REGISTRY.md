@@ -332,13 +332,16 @@ the default `sl_atr_fraction=0.25` produced stops around 15-25 USDT. Every
 trigger was cancelled on cost before the risk gate saw it. Widening the stop and
 raising the target is what makes a quiet market tradeable at all.
 
-The deployed value `min_net_rr=0.3` is **below** the `0.5` floor
-`paper_trading/rules.py` sets for self-learn candidates — an operator decision
-for the simulated account, not a production policy, and any future ruleset
-overlay will clamp it back to 0.5. All four keys fail fast at startup on a
-non-numeric, negative (or, for the two shape knobs, zero) value; the effective
-numbers are logged (`strategy config: …`) so the running policy is readable from
-the container log.
+The deployed value `min_net_rr=0.5` **matches** the `0.5` floor
+`paper_trading/rules.py` sets for self-learn candidates — the previous `0.3` was
+an operator choice during the pipeline-verification phase and sat below that
+floor, so any future ruleset overlay would have silently clamped it back up.
+Now that the forecast EV-gate is the primary entry-quality filter, the operator
+raised `min_net_rr` to the rules floor so gate-accepted signals also carry
+enough gross reward per unit risk to remain above the fee cushion. All four
+keys fail fast at startup on a non-numeric, negative (or, for the two shape
+knobs, zero) value; the effective numbers are logged (`strategy config: …`) so
+the running policy is readable from the container log.
 
 **Runner owner scope (2026-10-15).** Recovery binds exactly one auto account, and
 the candidate query asked the database for *every* owner holding a live day. With
@@ -368,8 +371,13 @@ the strategy accepted already has this fee subtracted) and the booked
 `entry_fee`/`close_fee` in `execution.execute_market_order`/`execute_close` (the
 runner passes `cfg.fee_rate` into the call). There is no second fee to drift. The
 code default is `0.0005` (HTX USDT-M Prime-0) so an unset contour is byte-for-byte
-the old behaviour; the operator's `.env` sets `0.0006`, which now genuinely
-applies, making the gate strictly more conservative. `PAPER_SIM_SLIPPAGE_BPS`,
+the old behaviour; the operator's `.env` sets `0.0006` as a **deliberate
+conservative buffer** above the Prime-0 venue rate (0.0005), so the strategy
+gate charges slightly more per round trip than the venue actually takes. That
+buffer is an intentional choice, not a stale literal: the fill now carries the
+same `cfg.fee_rate` the strategy used, and a ruleset overlay that ever wants
+venue-exact modelling has only to drop `PAPER_SIM_FEE_RATE` to `0.0005`.
+`PAPER_SIM_SLIPPAGE_BPS`,
 `PAPER_ORDER_MAX_SPREAD_BPS` and `PAPER_MAX_VISIBLE_LIQUIDITY_FRACTION` were
 likewise inert and are now read via `runner._sim_settings_from_env` into the fill
 and the risk gate (defaults equal the module constants). The former
